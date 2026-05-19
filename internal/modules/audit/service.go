@@ -5,12 +5,11 @@ import (
 	"errors"
 
 	"go-blockchain-api/internal/blockchain"
-	"go-blockchain-api/internal/engine"
+	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 )
 
-// VerificationResult adalah struktur laporan hasil pengecekan integritas log
 type VerificationResult struct {
 	Status       string  `json:"status"`
 	Message      string  `json:"message"`
@@ -23,7 +22,6 @@ type VerificationResult struct {
 	TxID         *string `json:"blockchain_tx_id,omitempty"`
 }
 
-// DataVerificationResult adalah struktur laporan hasil pengecekan integritas data klien
 type DataVerificationResult struct {
 	Status       string      `json:"status"`
 	Message      string      `json:"message"`
@@ -50,10 +48,7 @@ type auditService struct {
 }
 
 func NewService(repo AuditRepository, fabric *blockchain.FabricService) Service {
-	return &auditService{
-		repo:   repo,
-		fabric: fabric,
-	}
+	return &auditService{repo: repo, fabric: fabric}
 }
 
 func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, error) {
@@ -61,25 +56,23 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 }
 
 func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationResult, error) {
-	// 1. Ambil data dari Database
 	auditLog, err := s.repo.GetLogByHash(hash, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
 	}
 
-	// 2. Cek Manipulasi Lokal (Re-Hashing)
-	recalculatedHash := engine.GenerateLogHash(auditLog, auditLog.PreviousHash)
+	// Re-hash untuk cek manipulasi lokal
+	recalculatedHash := hasher.GenerateLogHash(auditLog, auditLog.PreviousHash)
 	if recalculatedHash != auditLog.HashValue {
 		return &VerificationResult{
 			Status:       "failed_local",
-			Message:      "🚨 DATA TERMANIPULASI: Isi data telah diubah di database dan tidak cocok dengan Hash aslinya!",
+			Message:      "🚨 DATA TERMANIPULASI: Isi data telah diubah di database.",
 			IsValid:      false,
 			ExpectedHash: auditLog.HashValue,
 			ActualHash:   recalculatedHash,
 		}, nil
 	}
 
-	// 3. Cek Status Antrean Blockchain
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
 			Status:  "pending",
@@ -88,7 +81,6 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 		}, nil
 	}
 
-	// 4. Tarik dari Ledger Hyperledger Fabric
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	if err != nil {
 		return nil, errors.New("fabric_error")
@@ -101,21 +93,19 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 		return nil, errors.New("parse_error")
 	}
 
-	// 5. Verifikasi Merkle Root DB vs On-Chain
 	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
 		return &VerificationResult{
 			Status:    "failed_onchain",
-			Message:   "🚨 FATAL MISMATCH: Merkle Root di database TIDAK DIAKUI oleh jaringan Blockchain!",
+			Message:   "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
 			IsValid:   false,
 			DBRoot:    auditLog.MerkleRoot,
 			ChainRoot: fabricResponse.MerkleRoot,
 		}, nil
 	}
 
-	// 6. Jika semua lolos, data terbukti 100% Otentik
 	return &VerificationResult{
 		Status:       "success",
-		Message:      "✅ DATA OTENTIK 100%: Data utuh dan Merkle Root terverifikasi dengan Ledger Blockchain.",
+		Message:      "✅ DATA OTENTIK 100%: Data utuh dan Merkle Root terverifikasi.",
 		IsValid:      true,
 		LogID:        auditLog.LogID,
 		ExpectedHash: auditLog.HashValue,
@@ -142,8 +132,6 @@ func (s *auditService) GetFabricRecord(anchorID string) (map[string]interface{},
 	return jsonResponse, nil
 }
 
-// Logika Verifikasi Data Klien berdasarkan Resource dan Data Aktual yang diberikan
-// Logika Verifikasi Data Klien berdasarkan Resource dan Data Aktual yang diberikan
 func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *map[string]interface{}) (*DataVerificationResult, error) {
 	lastLog, err := s.repo.GetLatestLogByResource(resource, clientID)
 	if err != nil {
@@ -151,7 +139,7 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 	}
 
 	var actualHash string
-	var actualData interface{} = nil
+	var actualData interface{}
 	isDataEmpty := rawData == nil || len(*rawData) == 0
 
 	if !isDataEmpty {
@@ -160,56 +148,45 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 		actualData = *rawData
 	}
 
-	// 3. Ekstraksi Metadata Asli dari Log Terakhir
 	var expectedHash string
-	var expectedData interface{} = nil
+	var expectedData interface{}
 
 	if lastLog.Metadata != "" && lastLog.Metadata != "{}" && lastLog.Metadata != "null" {
-		// Unmarshal string metadata dari DB menjadi map terlebih dahulu
 		var parsedMetadata map[string]interface{}
 		if err := json.Unmarshal([]byte(lastLog.Metadata), &parsedMetadata); err == nil {
 			expectedData = parsedMetadata
-
-			// 👇 PERBAIKAN: Re-marshal data dari DB agar formatnya (spasi & urutan abjad)
-			// SAMA PERSIS dengan proses marshal pada actual_data di atas.
 			expectedBytes, _ := json.Marshal(parsedMetadata)
 			expectedHash = crypto.GenerateSHA3_256(string(expectedBytes))
 		} else {
-			// Fallback jika formatnya bukan JSON murni
 			expectedData = lastLog.Metadata
 			expectedHash = crypto.GenerateSHA3_256(lastLog.Metadata)
 		}
 	}
 
-	// 4. Evaluasi Berdasarkan Jenis Aksi (Action) Terakhir
 	isValid := false
 	status := "failed"
 	var msg string
 
-	// Cek apakah aksi terakhir mengandung kata DELETE
 	isLastActionDelete := lastLog.Action == "DELETE"
 
 	if isLastActionDelete {
-		// LOGIKA UNTUK DELETE
 		if isDataEmpty {
 			isValid = true
 			status = "success"
 			msg = "✅ DATA VALID: Log terakhir adalah DELETE, dan data aktual memang kosong."
 		} else {
-			msg = "🔴 DATA TERMANIPULASI (GHOST DATA): Log terakhir menyatakan data telah di-DELETE, tetapi data aktual masih ditemukan!"
+			msg = "🔴 DATA TERMANIPULASI (GHOST DATA): Log DELETE ditemukan tapi data masih ada!"
 		}
 	} else {
-		// LOGIKA UNTUK INSERT / UPDATE
 		if isDataEmpty {
-			msg = "🔴 DATA TERMANIPULASI (ILLEGAL DELETION): Log terakhir tidak mencatat adanya penghapusan, tetapi data aktual HILANG!"
+			msg = "🔴 DATA TERMANIPULASI (ILLEGAL DELETION): Log terakhir bukan DELETE, tapi data HILANG!"
 		} else {
-			// Komparasi TETAP menggunakan HASH agar akurat dan deterministik
 			if actualHash == expectedHash {
 				isValid = true
 				status = "success"
-				msg = "✅ DATA VALID: Kondisi data aktual sama persis dengan jejak terakhir di sistem audit."
+				msg = "✅ DATA VALID: Kondisi data aktual sama persis dengan jejak terakhir."
 			} else {
-				msg = "🔴 DATA TERMANIPULASI (UNAUTHORIZED MODIFICATION): Isi data saat ini BERBEDA dengan jejak sah terakhir."
+				msg = "🔴 DATA TERMANIPULASI (UNAUTHORIZED MODIFICATION): Isi data berbeda dari jejak sah."
 			}
 		}
 	}
@@ -243,9 +220,7 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 	hasPending := false
 	var lastValidResult *VerificationResult
 
-	// Looping sejarah dari data pertama kali di-INSERT sampai status terbarunya
 	for i, log := range logs {
-		// A. Verifikasi Integritas Baris Individual
 		res, err := s.VerifyLogIntegrity(log.HashValue, clientID)
 		if err != nil {
 			return &VerificationResult{
@@ -256,15 +231,14 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 		}
 
 		if !res.IsValid {
-			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + log.Action + "' di masa lalu telah dirusak! (" + res.Message + ")"
-			return res, nil // Langsung vonis gagal jika ada sejarah yang cacat
+			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + log.Action + "' telah dirusak! (" + res.Message + ")"
+			return res, nil
 		}
 
-		// B. Verifikasi Rantai Kriptografi (Chain of Custody)
 		if i > 0 && log.PreviousHash != expectedPrevHash {
 			return &VerificationResult{
 				Status:       "failed_chain",
-				Message:      "🚨 RANTAI TERPUTUS: Previous Hash pada log ini tidak cocok dengan Hash log sebelumnya (indikasi penyisipan/penghapusan log)!",
+				Message:      "🚨 RANTAI TERPUTUS: Previous Hash tidak cocok (indikasi penyisipan/penghapusan log)!",
 				IsValid:      false,
 				ExpectedHash: expectedPrevHash,
 				ActualHash:   log.PreviousHash,
@@ -278,13 +252,12 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 		lastValidResult = res
 	}
 
-	// C. Kesimpulan Rantai
 	if lastValidResult != nil && hasPending {
 		lastValidResult.Status = "pending"
-		lastValidResult.Message = "✅ RIWAYAT LOKAL AMAN: Namun beberapa log sejarah masih dalam antrean Blockchain."
+		lastValidResult.Message = "✅ RIWAYAT LOKAL AMAN: Beberapa log masih dalam antrean Blockchain."
 	} else if lastValidResult != nil {
 		lastValidResult.Status = "success"
-		lastValidResult.Message = "✅ RIWAYAT OTENTIK 100%: Seluruh rantai transaksi dari awal hingga akhir tidak pernah dimanipulasi."
+		lastValidResult.Message = "✅ RIWAYAT OTENTIK 100%: Seluruh rantai transaksi tidak pernah dimanipulasi."
 	}
 
 	return lastValidResult, nil

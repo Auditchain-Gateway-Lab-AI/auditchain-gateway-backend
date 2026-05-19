@@ -9,18 +9,16 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// JWTAuth adalah middleware untuk melindungi endpoint Dashboard
+// JWTAuth melindungi endpoint Dashboard — hanya user login yang boleh masuk
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. Cek apakah ada header Authorization
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Akses ditolak. Token tidak ditemukan."})
-			c.Abort() // Menghentikan request agar tidak lanjut ke Handler
+			c.Abort()
 			return
 		}
 
-		// 2. Format token harus "Bearer <token_string>"
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Format token salah. Gunakan format: Bearer <token>"})
@@ -31,9 +29,7 @@ func JWTAuth() gin.HandlerFunc {
 		tokenString := parts[1]
 		secret := os.Getenv("JWT_SECRET")
 
-		// 3. Validasi keaslian dan masa berlaku token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Pastikan algoritma yang digunakan adalah HMAC (HS256)
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, http.ErrAbortHandler
 			}
@@ -63,10 +59,29 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Simpan identitas client agar bisa dipakai layer handler/service.
 		c.Set("client_id", clientID)
+		c.Next()
+	}
+}
 
-		// Jika token sah, persilakan tamu masuk ke ruangan (Handler)
+// AdminAuth melindungi endpoint admin — hanya internal system yang boleh akses
+// Gunakan ADMIN_SECRET di .env, inject via header X-Admin-Secret
+func AdminAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		secret := os.Getenv("ADMIN_SECRET")
+		if secret == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Konfigurasi admin belum diset."})
+			c.Abort()
+			return
+		}
+
+		provided := c.GetHeader("X-Admin-Secret")
+		if provided == "" || provided != secret {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Akses ditolak. Kredensial admin tidak valid."})
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }

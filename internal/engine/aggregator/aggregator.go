@@ -1,4 +1,4 @@
-package engine
+package aggregator
 
 import (
 	"go-blockchain-api/internal/models"
@@ -8,12 +8,12 @@ import (
 	"gorm.io/gorm"
 )
 
-type AggregatorEngine struct {
+type Engine struct {
 	DB *gorm.DB
 }
 
 // ProcessBatch mengelompokkan log transaksi yang sudah di-hash dan membuat Merkle Root
-func (a *AggregatorEngine) ProcessBatch(batchSize int) error {
+func (a *Engine) ProcessBatch(batchSize int) error {
 	var logs []models.AuditLog
 
 	// 1. Ambil log yang siap diagregasi (maksimal sejumlah batchSize)
