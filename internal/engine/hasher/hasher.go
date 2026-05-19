@@ -1,4 +1,4 @@
-package engine
+package hasher
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type HasherEngine struct {
+type Engine struct {
 	DB *gorm.DB
 }
 
@@ -31,7 +31,7 @@ func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
 }
 
 // ProcessPendingLogs mencari log berstatus RECEIVED dan memprosesnya menjadi HASHED
-func (h *HasherEngine) ProcessPendingLogs() error {
+func (h *Engine) ProcessPendingLogs() error {
 	var pendingLogs []models.AuditLog
 
 	if err := h.DB.Where("status = ?", "RECEIVED").Order("timestamp asc").Find(&pendingLogs).Error; err != nil {
