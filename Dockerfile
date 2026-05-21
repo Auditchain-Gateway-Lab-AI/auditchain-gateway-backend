@@ -8,7 +8,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o gateway-app ./cmd/gateway/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o gateway-app ./main.go
 
 # --- Tahap 2: Run ---
 FROM alpine:latest
