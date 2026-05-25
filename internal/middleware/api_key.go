@@ -11,6 +11,7 @@ import (
 	"go-blockchain-api/internal/models"
 )
 
+// APIKeyAuth melindungi rute Machine-to-Machine (M2M) via API Key
 func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clientKey := c.GetHeader("x-api-key")
@@ -18,8 +19,8 @@ func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 			clientKey = c.GetHeader("api-key")
 		}
 
-		// Panjang minimum: 72 char (ak_live_ 8 + 64 hex)
-		if clientKey == "" || len(clientKey) < 72 {
+		// Panjang minimum: prefix 10 + underscore + minimal 32 char hash hex
+		if clientKey == "" || len(clientKey) < 43 {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"status":  "error",
 				"message": "Akses Ditolak: API Key tidak valid atau tidak ditemukan di Header",
@@ -28,8 +29,7 @@ func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Ambil 16 char pertama sebagai prefix
-		prefix := clientKey[:16]
+		prefix := clientKey[:10]
 		hashBytes := sha256.Sum256([]byte(clientKey))
 		hashedKey := hex.EncodeToString(hashBytes[:])
 
