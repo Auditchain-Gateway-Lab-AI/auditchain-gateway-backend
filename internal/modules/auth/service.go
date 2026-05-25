@@ -25,19 +25,16 @@ func NewService(repo Repository) Service {
 }
 
 func (s *authService) Register(clientID, username, password string) (*models.User, *models.Client, error) {
-	// 1. Validasi: Apakah ClientID tersebut ada di database?
 	client, err := s.repo.CheckClient(clientID)
 	if err != nil {
 		return nil, nil, errors.New("client_not_found")
 	}
 
-	// 2. Hash password menggunakan Bcrypt
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, nil, errors.New("hash_error")
 	}
 
-	// 3. Buat objek User baru
 	newUser := &models.User{
 		ClientID: clientID,
 		Username: username,
@@ -45,7 +42,6 @@ func (s *authService) Register(clientID, username, password string) (*models.Use
 		Role:     "Auditor",
 	}
 
-	// 4. Simpan ke database
 	if err := s.repo.CreateUser(newUser); err != nil {
 		return nil, nil, errors.New("username_used")
 	}

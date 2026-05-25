@@ -30,15 +30,14 @@ func (h *Handler) Register(c *gin.Context) {
 
 	user, client, err := h.Service.Register(req.ClientID, req.Username, req.Password)
 	if err != nil {
-		if err.Error() == "client_not_found" {
+		switch err.Error() {
+		case "client_not_found":
 			c.JSON(http.StatusNotFound, gin.H{"error": "Perusahaan (Client ID) tidak terdaftar di sistem"})
-			return
-		}
-		if err.Error() == "username_used" {
+		case "username_used":
 			c.JSON(http.StatusConflict, gin.H{"error": "Username sudah digunakan"})
-			return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memproses pendaftaran"})
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memproses pendaftaran"})
 		return
 	}
 
@@ -62,11 +61,12 @@ func (h *Handler) Login(c *gin.Context) {
 
 	token, err := h.Service.Login(req.Username, req.Password)
 	if err != nil {
-		if err.Error() == "invalid_credentials" {
+		switch err.Error() {
+		case "invalid_credentials":
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Username atau Password salah!"})
-			return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencetak token keamanan"})
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencetak token keamanan"})
 		return
 	}
 

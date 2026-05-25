@@ -23,7 +23,10 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -32,7 +35,8 @@ import (
 	"go-blockchain-api/internal/api"
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/config"
-	"go-blockchain-api/internal/engine"
+	"go-blockchain-api/internal/engine/aggregator"
+	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
@@ -42,22 +46,37 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// startPipelineWorker adalah mesin yang berjalan di background
-func startPipelineWorker(db *gorm.DB, fabricSvc *blockchain.FabricService, redisClient *redis.Client) {
-	hashEngine := &engine.HasherEngine{DB: db}
-	aggEngine := &engine.AggregatorEngine{DB: db}
-	ctx := context.Background()
+func startPipelineWorker(
+	ctx context.Context,
+	db *gorm.DB,
+	fabricSvc *blockchain.FabricService,
+	redisClient *redis.Client,
+) {
+	hashEngine := &hasher.Engine{DB: db}
+	aggEngine := &aggregator.Engine{DB: db}
 
 	go func() {
 		log.Println("⚙️ Background Pipeline Worker mulai berjalan...")
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			hashEngine.ProcessPendingLogs()
-			aggEngine.ProcessBatch(10)
-			if fabricSvc != nil {
-				fabricSvc.AnchorPendingRoots()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("⚙️ Pipeline Worker berhenti dengan bersih.")
+				return
+			case <-ticker.C:
+				if err := hashEngine.ProcessPendingLogs(); err != nil {
+					log.Printf("❌ [Hasher] Error: %v\n", err)
+				}
+				if err := aggEngine.ProcessBatch(10); err != nil {
+					log.Printf("❌ [Aggregator] Error: %v\n", err)
+				}
+				if fabricSvc != nil {
+					if err := fabricSvc.AnchorPendingRoots(); err != nil {
+						log.Printf("❌ [Anchoring] Error: %v\n", err)
+					}
+				}
 			}
 		}
 	}()
@@ -69,8 +88,20 @@ func startPipelineWorker(db *gorm.DB, fabricSvc *blockchain.FabricService, redis
 	go func() {
 		log.Println("📥 Redis Queue Worker mulai berjalan...")
 		for {
-			result, err := redisClient.BLPop(ctx, 0, "audit_log_queue").Result()
+			result, err := redisClient.BLPop(ctx, 2*time.Second, "audit_log_queue").Result()
 			if err != nil {
+				if err == redis.Nil {
+					select {
+					case <-ctx.Done():
+						log.Println("📥 Redis Queue Worker berhenti dengan bersih.")
+						return
+					default:
+						continue
+					}
+				}
+				if ctx.Err() != nil {
+					return
+				}
 				log.Printf("⚠️ Error membaca dari Redis: %v\n", err)
 				time.Sleep(1 * time.Second)
 				continue
@@ -97,27 +128,30 @@ func startPipelineWorker(db *gorm.DB, fabricSvc *blockchain.FabricService, redis
 
 func main() {
 	// 1. Load environment variables
-	if err := godotenv.Load("../../.env"); err != nil {
-		godotenv.Load()
-	}
+	// main.go ada di root, jadi cukup godotenv.Load() tanpa path relatif
+	godotenv.Load()
 
-	// 2. Koneksi ke Infrastruktur
+	// 2. Context untuk graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	// 3. Koneksi ke Infrastruktur
 	db := config.ConnectDB()
 	redisClient := config.ConnectRedis()
 
-	// 3. Tes Inisialisasi koneksi ke Hyperledger Fabric
+	// 4. Inisialisasi koneksi ke Hyperledger Fabric
 	fabricSvc, err := blockchain.InitFabricGateway(db)
 	if err != nil {
 		log.Println("⚠️ PERINGATAN: Gagal terhubung ke Fabric Gateway!")
 		log.Printf("🔍 DETAIL ERROR: %v\n", err)
+	} else {
+		defer fabricSvc.Close()
 	}
 
-	// 4. Mulai Background Worker
-	startPipelineWorker(db, fabricSvc, redisClient)
+	// 5. Mulai Background Worker
+	startPipelineWorker(ctx, db, fabricSvc, redisClient)
 
-	// =========================================================================
-	// 5. INISIALISASI MODULE CLEAN ARCHITECTURE
-	// =========================================================================
+	// 6. Inisialisasi Module Clean Architecture
 
 	// A. Modul Audit
 	auditRepo := audit.NewAuditRepository(db)
@@ -129,7 +163,7 @@ func main() {
 	authService := auth.NewService(authRepo)
 	authHandler := &auth.Handler{Service: authService}
 
-	// C. Modul Ingestion (Antrean)
+	// C. Modul Ingestion
 	ingestionRepo := ingestion.NewRepository(redisClient)
 	ingestionService := ingestion.NewService(ingestionRepo)
 	ingestionHandler := &ingestion.Handler{
@@ -142,19 +176,37 @@ func main() {
 	clientService := client.NewService(clientRepo)
 	clientHandler := client.NewHandler(clientService)
 
-	// =========================================================================
-
-	// 6. Pasang Router
+	// 7. Pasang Router
 	router := api.SetupRouter(ingestionHandler, auditHandler, authHandler, clientHandler)
 
-	// 7. Jalankan Server API
+	// 8. Jalankan Server dengan Graceful Shutdown
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Printf("🚀 AuditChain Gateway API berjalan di port %s...\n", port)
+	srv := &http.Server{
+		Addr:    "0.0.0.0:" + port,
+		Handler: router,
+	}
 
-	// Gunakan 0.0.0.0 agar API bisa ditembak dari luar Docker (Postman lokal)
-	router.Run("0.0.0.0:" + port)
+	go func() {
+		log.Printf("🚀 AuditChain Gateway API berjalan di port %s...\n", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("❌ Server error: %v\n", err)
+		}
+	}()
+
+	// Tunggu sinyal shutdown (Ctrl+C atau SIGTERM dari Docker)
+	<-ctx.Done()
+	log.Println("🛑 Sinyal shutdown diterima, menghentikan server...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("⚠️ Server shutdown tidak bersih: %v\n", err)
+	}
+
+	log.Println("✅ Server berhenti dengan bersih.")
 }

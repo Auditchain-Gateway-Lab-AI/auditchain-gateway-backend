@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"go-blockchain-api/internal/engine"
+	"go-blockchain-api/internal/engine/normalizer"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -15,7 +15,7 @@ type Handler struct {
 	DB      *gorm.DB
 }
 
-// ReceiveLog menerima kumpulan (array) log mentah dari sistem eksternal secara dinamis.
+// ReceiveLog menerima kumpulan log mentah dari sistem eksternal
 // @Summary Bulk Ingestion Log Audit
 // @Description Menerima raw log audit dalam bentuk Array dan memasukkannya ke antrean Redis secara asinkron.
 // @Tags Ingestion
@@ -26,7 +26,6 @@ type Handler struct {
 // @Success 202 {object} map[string]interface{} "Log diterima"
 // @Router /v1/logs [post]
 func (h *Handler) ReceiveLog(c *gin.Context) {
-	// 1. Ambil Client ID dari Middleware
 	clientIDVal, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Identitas klien tidak ditemukan oleh sistem"})
@@ -34,7 +33,6 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 	}
 	clientID := clientIDVal.(string)
 
-	// 2. Bind Array JSON Payload
 	var dynamicPayloads []map[string]interface{}
 	if err := c.ShouldBindJSON(&dynamicPayloads); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Format JSON tidak valid, harus berupa Array Objek (Bulk)"})
@@ -46,8 +44,7 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		return
 	}
 
-	// 3. KEMBALIKAN QUERY KE ASAL (Hapus source_system_field yang bikin error)
-	var mapping engine.ClientFieldMapping
+	var mapping normalizer.ClientFieldMapping
 	err := h.DB.Table("clients").
 		Select("actor_field, action_field, resource_field").
 		Where("id = ?", clientID).
@@ -58,32 +55,25 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		return
 	}
 
-	// 4. Proses Log melalui Service Layer
-	var successCount int
-	var errorCount int
+	var successCount, errorCount int
 
 	for _, payload := range dynamicPayloads {
-		// Transformasi dinamis (hanya untuk actor, action, resource)
-		input, err := engine.MapDynamicPayload(payload, &mapping)
+		input, err := normalizer.MapDynamicPayload(payload, &mapping)
 		if err != nil {
 			fmt.Printf("❌ [ERROR MAPPING]: %v\n", err)
 			errorCount++
 			continue
 		}
 
-		// 5. INJEKSI MANUAL FIELD WAJIB
 		input.ClientID = clientID
 
-		// Ambil 'source_system' langsung dari body JSON, atau beri nilai default
 		if sourceSys, ok := payload["source_system"].(string); ok && sourceSys != "" {
 			input.SourceSystem = sourceSys
 		} else {
-			input.SourceSystem = "SatuPeta_Agent_Auto" // Fallback jika klien lupa mengirim
+			input.SourceSystem = "SatuPeta_Agent_Auto"
 		}
 
-		// Masukkan ke Service
-		_, err = h.Service.ProcessLog(input)
-		if err != nil {
+		if _, err = h.Service.ProcessLog(input); err != nil {
 			fmt.Printf("❌ [ERROR SERVICE]: %v\n", err)
 			errorCount++
 			continue
@@ -92,7 +82,6 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		successCount++
 	}
 
-	// 6. Kembalikan respons
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":        "Proses bulk ingestion selesai",
 		"total_received": len(dynamicPayloads),

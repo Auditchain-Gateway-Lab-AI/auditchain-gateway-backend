@@ -9,21 +9,21 @@ import (
 // MerkleProofData menyimpan informasi sibling hash untuk validasi
 type MerkleProofData struct {
 	SiblingHash string
+	IsLeft      bool // true = sibling ada di kiri, false = sibling ada di kanan
 	TreeLevel   int
 }
 
 // MerkleResult menyimpan output akhir agregasi
 type MerkleResult struct {
 	Root   string
-	Proofs map[string][]MerkleProofData // Mapping antara Hash Transaksi dengan jalur Proof-nya
+	Proofs map[string][]MerkleProofData
 }
 
-// hashNodes menggabungkan dua hash menjadi parent hash menggunakan SHA3-256
+// hashNodes menggabungkan dua hash menjadi parent menggunakan SHA3-256
 func hashNodes(left, right string) string {
 	leftBytes, _ := hex.DecodeString(left)
 	rightBytes, _ := hex.DecodeString(right)
 	combined := append(leftBytes, rightBytes...)
-
 	hash := sha3.Sum256(combined)
 	return hex.EncodeToString(hash[:])
 }
@@ -34,7 +34,6 @@ func BuildMerkleTree(leafHashes []string) *MerkleResult {
 		return nil
 	}
 
-	// Inisialisasi map untuk menyimpan proof
 	proofs := make(map[string][]MerkleProofData)
 	for _, h := range leafHashes {
 		proofs[h] = []MerkleProofData{}
@@ -43,7 +42,6 @@ func BuildMerkleTree(leafHashes []string) *MerkleResult {
 	currentLevel := leafHashes
 	levelIndex := 0
 
-	// Lakukan perulangan hingga hanya tersisa 1 node (Merkle Root)
 	for len(currentLevel) > 1 {
 		var nextLevel []string
 
@@ -51,18 +49,28 @@ func BuildMerkleTree(leafHashes []string) *MerkleResult {
 			left := currentLevel[i]
 			var right string
 
-			// Jika jumlah node ganjil, node terakhir dipasangkan dengan dirinya sendiri
 			if i+1 == len(currentLevel) {
 				right = left
 			} else {
 				right = currentLevel[i+1]
 			}
 
-			// Simpan bukti sibling level dasar
+			// Simpan posisi sibling secara eksplisit (IsLeft)
+			// agar VerifyMerkleProof bisa merekonstruksi secara deterministik
 			if levelIndex == 0 {
-				proofs[left] = append(proofs[left], MerkleProofData{SiblingHash: right, TreeLevel: levelIndex})
+				// Proof untuk node kiri: sibling-nya ada di kanan (IsLeft=false)
+				proofs[left] = append(proofs[left], MerkleProofData{
+					SiblingHash: right,
+					IsLeft:      false,
+					TreeLevel:   levelIndex,
+				})
+				// Proof untuk node kanan: sibling-nya ada di kiri (IsLeft=true)
 				if left != right {
-					proofs[right] = append(proofs[right], MerkleProofData{SiblingHash: left, TreeLevel: levelIndex})
+					proofs[right] = append(proofs[right], MerkleProofData{
+						SiblingHash: left,
+						IsLeft:      true,
+						TreeLevel:   levelIndex,
+					})
 				}
 			}
 
@@ -79,30 +87,20 @@ func BuildMerkleTree(leafHashes []string) *MerkleResult {
 	}
 }
 
-// VerifyMerkleProof merekonstruksi hash dari leaf ke root untuk memverifikasi integritas
-func VerifyMerkleProof(transactionHash string, proofs []string, expectedRoot string) bool {
+// VerifyMerkleProof merekonstruksi hash dari leaf ke root secara deterministik
+// menggunakan informasi posisi IsLeft yang disimpan saat build.
+func VerifyMerkleProof(transactionHash string, proofs []MerkleProofData, expectedRoot string) bool {
 	currentHash := transactionHash
 
-	// Rekonstruksi pohon dengan menggabungkan hash saat ini dengan sibling-nya
-	for _, siblingHash := range proofs {
-		// Catatan: Dalam skenario ideal, hash diurutkan secara leksikografis (abjad) sebelum digabung
-		// agar deterministik tanpa perlu tahu apakah sibling ada di kiri/kanan.
-		// Untuk POC ini, menggunakan urutan langsung atau dibalik.
-
-		leftRight := hashNodes(currentHash, siblingHash)
-		rightLeft := hashNodes(siblingHash, currentHash)
-
-		// Karena kita tidak menyimpan posisi (Kiri/Kanan) di DB saat ini, kita cek mana yang cocok
-		// Pada level berikutnya, currentHash akan menjadi hasil gabungan tersebut.
-		// Untuk penyederhanaan verifikasi satu arah di POC:
-		currentHash = leftRight
-
-		// Jika ini adalah pengecekan level terakhir dan rightLeft yang benar
-		if rightLeft == expectedRoot {
-			currentHash = rightLeft
+	for _, p := range proofs {
+		if p.IsLeft {
+			// Sibling ada di kiri: hash(sibling, current)
+			currentHash = hashNodes(p.SiblingHash, currentHash)
+		} else {
+			// Sibling ada di kanan: hash(current, sibling)
+			currentHash = hashNodes(currentHash, p.SiblingHash)
 		}
 	}
 
-	// Apakah hash yang direkonstruksi sama dengan Merkle Root yang ada di Blockchain/DB?
 	return currentHash == expectedRoot
 }

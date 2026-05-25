@@ -1,32 +1,30 @@
-# --- Tahap 1: Build (Membuat file executable) ---
+# --- Tahap 1: Build ---
 FROM golang:1.25-alpine AS builder
 
-# Set direktori kerja di dalam container
 WORKDIR /app
 
-# Salin file manajemen dependensi dan unduh
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Salin seluruh source code proyek Anda
 COPY . .
 
-# Build aplikasi Go menjadi file binary bernama "gateway-app"
-RUN CGO_ENABLED=0 GOOS=linux go build -o gateway-app ./cmd/gateway/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o gateway-app ./main.go
 
-# --- Tahap 2: Run (Menjalankan aplikasi di OS yang super ringan) ---
+# --- Tahap 2: Run ---
 FROM alpine:latest
+
+# Tambahkan ca-certificates untuk koneksi TLS ke Fabric
+RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-# Ambil hasil build dari Tahap 1
 COPY --from=builder /app/gateway-app .
-# Salin file konfigurasi .env (dan folder crypto-config jika ada)
-COPY .env .
-# COPY crypto-config/ ./crypto-config/  <-- Buka komentar ini jika sertifikat Fabric ada di folder ini
 
-# Buka port API Anda
-EXPOSE 3000
+# PENTING: Jangan COPY .env ke image!
+# Secret diinjeksikan via --env-file atau Docker secrets saat runtime:
+#   docker run --env-file .env auditchain-api
+# Atau via docker-compose env_file directive (sudah ada di docker-compose.yml)
 
-# Perintah utama saat container dinyalakan
+EXPOSE 8080
+
 CMD ["./gateway-app"]
