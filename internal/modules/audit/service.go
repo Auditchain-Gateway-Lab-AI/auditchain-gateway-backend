@@ -40,6 +40,7 @@ type Service interface {
 	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	VerifyResourceHistory(resource, clientID string) (*VerificationResult, error)
+	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 }
 
 type auditService struct {
@@ -261,4 +262,8 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 	}
 
 	return lastValidResult, nil
+}
+
+func (s *auditService) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
+	return s.repo.GetLogsByResource(resource, clientID)
 }

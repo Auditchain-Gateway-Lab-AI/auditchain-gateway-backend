@@ -227,3 +227,17 @@ func (h *Handler) VerifyResourceHistory(c *gin.Context) {
 		c.JSON(http.StatusConflict, result)
 	}
 }
+
+func (h *Handler) GetLogsByResource(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+	resource := c.Param("resource")
+	logs, err := h.Service.GetLogsByResource(resource, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log resource"})
+		return
+	}
+	c.JSON(http.StatusOK, logs)
+}
