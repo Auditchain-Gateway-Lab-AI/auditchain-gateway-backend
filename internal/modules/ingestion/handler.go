@@ -44,9 +44,15 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		return
 	}
 
+	// Ambil konfigurasi mapping field klien dari database.
+	// Jika klien menggunakan auditchain-agent, field ini berisi:
+	//   actor_field          = "app_user"
+	//   fallback_actor_field = "db_user"
+	//   action_field         = "operasi"
+	//   resource_field       = "tabel"
 	var mapping normalizer.ClientFieldMapping
 	err := h.DB.Table("clients").
-		Select("actor_field, action_field, resource_field").
+		Select("actor_field, fallback_actor_field, action_field, resource_field").
 		Where("id = ?", clientID).
 		Scan(&mapping).Error
 
@@ -67,10 +73,12 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 
 		input.ClientID = clientID
 
+		// source_system diambil dari payload (sudah diisi agent per tabel),
+		// fallback ke identifier generik jika tidak ada
 		if sourceSys, ok := payload["source_system"].(string); ok && sourceSys != "" {
 			input.SourceSystem = sourceSys
 		} else {
-			input.SourceSystem = "SatuPeta_Agent_Auto"
+			input.SourceSystem = "Unknown-Agent"
 		}
 
 		if _, err = h.Service.ProcessLog(input); err != nil {
