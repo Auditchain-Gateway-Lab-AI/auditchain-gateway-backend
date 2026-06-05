@@ -20,18 +20,18 @@ func ConnectDB() *gorm.DB {
 		log.Fatalf("Gagal koneksi ke database: %v", err)
 	}
 
-	// Auto-Migrate: Membuat tabel jika belum ada sesuai skema model
 	err = db.AutoMigrate(
 		&models.Client{},
 		&models.User{},
-		&models.AuditLog{},
+		&models.AuditLog{}, // tambah kolom source_record_id via AutoMigrate
 		&models.MerkleMetadata{},
 		&models.MerkleProof{},
+		&models.AgentConfig{}, // tabel baru untuk Lapis 3
 	)
 	if err != nil {
-		log.Fatalf("Gagal melakukan migrasi database: %v", err)
+		log.Fatalf("Gagal migrasi database: %v", err)
 	}
 
-	log.Println("✅ Database terhubung dan Off-chain Indexing Schema telah di-migrate.")
+	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	return db
 }

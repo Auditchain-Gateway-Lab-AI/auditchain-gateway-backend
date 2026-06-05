@@ -15,15 +15,20 @@ type AuditLog struct {
 	AuthorizationContext string    `gorm:"type:text" json:"authorization_context"`
 	Metadata             string    `gorm:"type:jsonb" json:"metadata"`
 
+	// BARU: ID baris di audit_trail DB klien.
+	// Diisi dari field "audit_trail_id" pada payload Agent.
+	// Kosong jika log dikirim langsung (bukan via Agent).
+	// Digunakan Lapis 3 untuk meminta Agent memverifikasi baris ini.
+	SourceRecordID string `gorm:"type:varchar(100);index" json:"source_record_id"`
+
 	// Elemen Kriptografi & Blockchain
 	HashValue      string  `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
-	PreviousHash   string  `gorm:"type:varchar(64)" json:"previous_hash"`             // Untuk Contextual Hashing chain
-	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`         // Nullable awalnya, diisi oleh Aggregator
-	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`         // Diisi setelah sukses ke Fabric
-	Status         string  `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"` // RECEIVED -> HASHED -> ANCHORED
+	PreviousHash   string  `gorm:"type:varchar(64)" json:"previous_hash"`
+	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`
+	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
+	Status         string  `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
 }
 
-// MerkleMetadata menyimpan informasi setiap batch yang di-hash ke Root
 type MerkleMetadata struct {
 	TreeID         uint      `gorm:"primaryKey"`
 	MerkleRoot     string    `gorm:"type:varchar(64);uniqueIndex"`
@@ -31,7 +36,6 @@ type MerkleMetadata struct {
 	BatchSize      int       `gorm:"type:int"`
 }
 
-// MerkleProof menyimpan jalur sibling untuk memverifikasi transaksi tanpa harus punya semua data tree
 type MerkleProof struct {
 	ID              uint   `gorm:"primaryKey"`
 	TransactionHash string `gorm:"type:varchar(64);index"`
