@@ -2,6 +2,7 @@ package ingestion
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"go-blockchain-api/internal/engine/normalizer"
@@ -15,16 +16,6 @@ type Handler struct {
 	DB      *gorm.DB
 }
 
-// ReceiveLog menerima kumpulan log mentah dari sistem eksternal
-// @Summary Bulk Ingestion Log Audit
-// @Description Menerima raw log audit dalam bentuk Array dan memasukkannya ke antrean Redis secara asinkron.
-// @Tags Ingestion
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param request body array true "Array Payload Raw Log Dinamis dari Klien"
-// @Success 202 {object} map[string]interface{} "Log diterima"
-// @Router /v1/logs [post]
 func (h *Handler) ReceiveLog(c *gin.Context) {
 	clientIDVal, exists := c.Get("client_id")
 	if !exists {
@@ -44,12 +35,6 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		return
 	}
 
-	// Ambil konfigurasi mapping field klien dari database.
-	// Jika klien menggunakan auditchain-agent, field ini berisi:
-	//   actor_field          = "app_user"
-	//   fallback_actor_field = "db_user"
-	//   action_field         = "operasi"
-	//   resource_field       = "tabel"
 	var mapping normalizer.ClientFieldMapping
 	err := h.DB.Table("clients").
 		Select("actor_field, fallback_actor_field, action_field, resource_field").
@@ -66,15 +51,13 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 	for _, payload := range dynamicPayloads {
 		input, err := normalizer.MapDynamicPayload(payload, &mapping)
 		if err != nil {
-			fmt.Printf("❌ [ERROR MAPPING]: %v\n", err)
+			log.Printf("❌ [Ingestion] Gagal mapping payload client=%s: %v", clientID, err)
 			errorCount++
 			continue
 		}
 
 		input.ClientID = clientID
 
-		// source_system diambil dari payload (sudah diisi agent per tabel),
-		// fallback ke identifier generik jika tidak ada
 		if sourceSys, ok := payload["source_system"].(string); ok && sourceSys != "" {
 			input.SourceSystem = sourceSys
 		} else {
@@ -82,13 +65,18 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		}
 
 		if _, err = h.Service.ProcessLog(input); err != nil {
-			fmt.Printf("❌ [ERROR SERVICE]: %v\n", err)
+			log.Printf("❌ [Ingestion] Gagal proses log client=%s resource=%s: %v",
+				clientID, input.Resource, err)
 			errorCount++
 			continue
 		}
 
 		successCount++
 	}
+
+	// Log setiap batch yang masuk agar mudah di-trace di backend
+	log.Printf("📥 [Ingestion] client=%s diterima=%d sukses=%d gagal=%d",
+		clientID, len(dynamicPayloads), successCount, errorCount)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"message":        "Proses bulk ingestion selesai",
@@ -97,3 +85,6 @@ func (h *Handler) ReceiveLog(c *gin.Context) {
 		"total_failed":   errorCount,
 	})
 }
+
+// suppress unused import warning
+var _ = fmt.Sprintf

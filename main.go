@@ -48,13 +48,13 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 	aggEngine := &aggregator.Engine{DB: db}
 
 	go func() {
-		log.Println("⚙️ Background Pipeline Worker mulai berjalan...")
+		log.Println("⚙️  Pipeline Worker mulai berjalan...")
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("⚙️ Pipeline Worker berhenti.")
+				log.Println("⚙️  Pipeline Worker berhenti.")
 				return
 			case <-ticker.C:
 				if err := hashEngine.ProcessPendingLogs(); err != nil {
@@ -84,6 +84,7 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 				if err == redis.Nil {
 					select {
 					case <-ctx.Done():
+						log.Println("📥 Redis Queue Worker berhenti.")
 						return
 					default:
 						continue
@@ -92,20 +93,27 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 				if ctx.Err() != nil {
 					return
 				}
-				log.Printf("⚠️ Error membaca dari Redis: %v\n", err)
+				log.Printf("⚠️  [Redis] Error baca queue: %v\n", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 			if len(result) < 2 {
 				continue
 			}
+
 			var logData models.AuditLog
 			if err := json.Unmarshal([]byte(result[1]), &logData); err != nil {
-				log.Printf("⚠️ Gagal parse log dari Redis: %v\n", err)
+				log.Printf("⚠️  [Redis] Gagal parse log: %v\n", err)
 				continue
 			}
+
 			if err := db.Create(&logData).Error; err != nil {
-				log.Printf("⚠️ Gagal simpan log %s: %v\n", logData.HashValue, err)
+				log.Printf("⚠️  [Redis] Gagal simpan log resource=%s client=%s: %v\n",
+					logData.Resource, logData.ClientID, err)
+			} else {
+				// Log ini yang sebelumnya tidak ada — bukti log berhasil masuk ke DB
+				log.Printf("✅ [Redis] Log tersimpan resource=%-30s actor=%-20s action=%s",
+					logData.Resource, logData.Actor, logData.Action)
 			}
 		}
 	}()
@@ -122,35 +130,30 @@ func main() {
 
 	fabricSvc, err := blockchain.InitFabricGateway(db)
 	if err != nil {
-		log.Printf("⚠️ Gagal terhubung ke Fabric: %v\n", err)
+		log.Printf("⚠️  Gagal terhubung ke Fabric: %v\n", err)
 	} else {
 		defer fabricSvc.Close()
 	}
 
 	startPipelineWorker(ctx, db, fabricSvc, redisClient)
 
-	// === Modul Audit + Lapis 3 ===
 	agentVerifySvc := agentverifier.NewService(db)
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, agentVerifySvc)
 	auditHandler := audit.NewHandler(auditService)
 
-	// === Modul Auth ===
 	authRepo := auth.NewRepository(db)
 	authService := auth.NewService(authRepo)
 	authHandler := &auth.Handler{Service: authService}
 
-	// === Modul Ingestion ===
 	ingestionRepo := ingestion.NewRepository(redisClient)
 	ingestionService := ingestion.NewService(ingestionRepo)
 	ingestionHandler := &ingestion.Handler{Service: ingestionService, DB: db}
 
-	// === Modul Client ===
 	clientRepo := client.NewRepository(db)
 	clientService := client.NewService(clientRepo)
 	clientHandler := client.NewHandler(clientService)
 
-	// === Handler konfigurasi Agent ===
 	agentHandler := agentverifier.NewHandler(db)
 
 	router := api.SetupRouter(ingestionHandler, auditHandler, authHandler, clientHandler, agentHandler)
