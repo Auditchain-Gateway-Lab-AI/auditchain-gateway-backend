@@ -23,10 +23,12 @@ func ConnectDB() *gorm.DB {
 	err = db.AutoMigrate(
 		&models.Client{},
 		&models.User{},
-		&models.AuditLog{}, // tambah kolom source_record_id via AutoMigrate
+		&models.AuditLog{},
 		&models.MerkleMetadata{},
 		&models.MerkleProof{},
-		&models.AgentConfig{}, // tabel baru untuk Lapis 3
+		&models.AgentConfig{},
+		&models.ClientKafkaConfig{},
+		&models.KafkaOffset{},
 	)
 	if err != nil {
 		log.Fatalf("Gagal migrasi database: %v", err)

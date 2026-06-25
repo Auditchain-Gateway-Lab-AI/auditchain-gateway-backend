@@ -78,16 +78,13 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{
 			"status": "failed", "layer": "3_agent_source",
 			"data": gin.H{
-				"is_valid":             result.IsValid,
-				"message":              result.Message,
-				"source_found":         result.SourceFound,
-				"source_discrepancies": result.Discrepancies,
+				"is_valid": result.IsValid,
+				"message":  result.Message,
 			},
 		})
 	case "pending":
 		c.JSON(http.StatusAccepted, gin.H{
 			"status": "pending", "message": result.Message,
-			"agent_used": result.AgentUsed, "source_found": result.SourceFound,
 		})
 	case "failed_onchain":
 		c.JSON(http.StatusConflict, gin.H{
@@ -104,7 +101,6 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 				"log_id": result.LogID, "hash_value": result.ExpectedHash,
 				"merkle_root": result.DBRoot, "blockchain_tx_id": result.TxID,
 				"is_valid": result.IsValid, "message": result.Message,
-				"agent_used": result.AgentUsed, "source_found": result.SourceFound,
 			},
 		})
 	}

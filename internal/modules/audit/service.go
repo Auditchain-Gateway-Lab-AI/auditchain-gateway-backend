@@ -3,12 +3,15 @@ package audit
 import (
 	"encoding/json"
 	"errors"
+	"log"
 
 	"go-blockchain-api/internal/blockchain"
-	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
+	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
+
+	"gorm.io/gorm"
 )
 
 type VerificationResult struct {
@@ -22,10 +25,12 @@ type VerificationResult struct {
 	LogID        string  `json:"log_id"`
 	TxID         *string `json:"blockchain_tx_id,omitempty"`
 
-	// Lapis 3
-	AgentUsed     bool                        `json:"agent_used"`
-	SourceFound   bool                        `json:"source_found"`
-	Discrepancies []agentverifier.Discrepancy `json:"source_discrepancies,omitempty"`
+	// Lapis 3 Kafka
+	KafkaVerified bool   `json:"kafka_verified"`
+	KafkaMessage  string `json:"kafka_message,omitempty"`
+	KafkaHash     string `json:"kafka_hash,omitempty"`
+	KafkaTopic    string `json:"kafka_topic,omitempty"`
+	KafkaOffset   int64  `json:"kafka_offset,omitempty"`
 }
 
 type DataVerificationResult struct {
@@ -50,15 +55,17 @@ type Service interface {
 }
 
 type auditService struct {
-	repo        AuditRepository
-	fabric      *blockchain.FabricService
-	agentVerify *agentverifier.Service // Lapis 3 — nil = dilewati
+	repo          AuditRepository
+	fabric        *blockchain.FabricService
+	kafkaVerifier *kafkaconsumer.KafkaVerifier
 }
 
-// NewService membuat service audit.
-// agentVerify boleh nil; jika nil, Lapis 3 dilewati untuk semua log.
-func NewService(repo AuditRepository, fabric *blockchain.FabricService, agentVerify *agentverifier.Service) Service {
-	return &auditService{repo: repo, fabric: fabric, agentVerify: agentVerify}
+func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {
+	return &auditService{
+		repo:          repo,
+		fabric:        fabric,
+		kafkaVerifier: &kafkaconsumer.KafkaVerifier{DB: db},
+	}
 }
 
 func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, error) {
@@ -66,7 +73,7 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 }
 
 func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationResult, error) {
-	// === LAPIS 1: Cek keberadaan di DB Middleware ===
+	// === LAPIS 1: Cek keberadaan di DB ===
 	auditLog, err := s.repo.GetLogByHash(hash, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
@@ -84,34 +91,32 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 		}, nil
 	}
 
-	// === LAPIS 3: Verifikasi ke Agent klien ===
-	// Hanya aktif jika log punya SourceRecordID (dikirim via auditchain-agent)
-	// dan klien sudah mendaftarkan AgentConfig.
-	var agentUsed, sourceFound bool
-	var discrepancies []agentverifier.Discrepancy
+	// === LAPIS 3: Verifikasi ke Kafka ===
+	var kafkaVerified bool
+	var kafkaMsg, kafkaHash, kafkaTopic string
+	var kafkaOffset int64
 
-	if s.agentVerify != nil {
-		result, err := s.agentVerify.VerifyAgainstAgent(auditLog)
-		if err != nil {
-			return nil, errors.New("agent_error")
-		}
+	kafkaResult, err := s.kafkaVerifier.VerifyAgainstKafka(auditLog)
+	if err != nil {
+		log.Printf("⚠️  [Verify] Kafka verify error: %v", err)
+		kafkaMsg = "Kafka tidak dapat diverifikasi: " + err.Error()
+	} else {
+		kafkaVerified = kafkaResult.IsValid
+		kafkaMsg = kafkaResult.Message
+		kafkaHash = kafkaResult.KafkaHash
+		kafkaTopic = kafkaResult.Topic
+		kafkaOffset = kafkaResult.Offset
 
-		agentUsed = result.AgentUsed
-		sourceFound = result.SourceFound
-		discrepancies = result.Discrepancies
-
-		if !result.IsMatch {
-			msg := "🚨 MISMATCH SUMBER: Data di log berbeda dengan audit_trail di database klien."
-			if !result.SourceFound {
-				msg = "🚨 DATA HILANG DI SUMBER: Baris audit_trail sudah tidak ada di database klien."
-			}
+		if !kafkaResult.IsValid {
 			return &VerificationResult{
-				Status:        "failed_source",
-				Message:       msg,
+				Status:        "failed_kafka",
+				Message:       kafkaResult.Message,
 				IsValid:       false,
-				AgentUsed:     agentUsed,
-				SourceFound:   sourceFound,
-				Discrepancies: discrepancies,
+				KafkaVerified: false,
+				KafkaMessage:  kafkaMsg,
+				KafkaHash:     kafkaHash,
+				KafkaTopic:    kafkaTopic,
+				KafkaOffset:   kafkaOffset,
 			}, nil
 		}
 	}
@@ -119,11 +124,13 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 	// === Pending check ===
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
-			Status:      "pending",
-			Message:     "Log otentik secara lokal dan terverifikasi di sumber. Menunggu antrean Blockchain.",
-			IsValid:     true,
-			AgentUsed:   agentUsed,
-			SourceFound: sourceFound,
+			Status:        "pending",
+			Message:       "Log otentik secara lokal dan terverifikasi di Kafka. Menunggu antrean Blockchain.",
+			IsValid:       true,
+			KafkaVerified: kafkaVerified,
+			KafkaMessage:  kafkaMsg,
+			KafkaTopic:    kafkaTopic,
+			KafkaOffset:   kafkaOffset,
 		}, nil
 	}
 
@@ -142,26 +149,29 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 
 	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
 		return &VerificationResult{
-			Status:      "failed_onchain",
-			Message:     "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
-			IsValid:     false,
-			DBRoot:      auditLog.MerkleRoot,
-			ChainRoot:   fabricResponse.MerkleRoot,
-			AgentUsed:   agentUsed,
-			SourceFound: sourceFound,
+			Status:        "failed_onchain",
+			Message:       "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
+			IsValid:       false,
+			DBRoot:        auditLog.MerkleRoot,
+			ChainRoot:     fabricResponse.MerkleRoot,
+			KafkaVerified: kafkaVerified,
+			KafkaMessage:  kafkaMsg,
 		}, nil
 	}
 
 	return &VerificationResult{
-		Status:       "success",
-		Message:      "✅ DATA OTENTIK 100%: Terverifikasi di sumber klien dan Blockchain.",
-		IsValid:      true,
-		LogID:        auditLog.LogID,
-		ExpectedHash: auditLog.HashValue,
-		DBRoot:       auditLog.MerkleRoot,
-		TxID:         auditLog.BlockchainTxID,
-		AgentUsed:    agentUsed,
-		SourceFound:  sourceFound,
+		Status:        "success",
+		Message:       "✅ DATA OTENTIK: Terverifikasi di Kafka dan Blockchain.",
+		IsValid:       true,
+		LogID:         auditLog.LogID,
+		ExpectedHash:  auditLog.HashValue,
+		DBRoot:        auditLog.MerkleRoot,
+		TxID:          auditLog.BlockchainTxID,
+		KafkaVerified: kafkaVerified,
+		KafkaMessage:  kafkaMsg,
+		KafkaHash:     kafkaHash,
+		KafkaTopic:    kafkaTopic,
+		KafkaOffset:   kafkaOffset,
 	}, nil
 }
 
