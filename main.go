@@ -40,8 +40,9 @@ import (
 	"go-blockchain-api/internal/modules/client"
 	"go-blockchain-api/internal/modules/ingestion"
 
-	"github.com/redis/go-redis/v9"
 	"go-blockchain-api/internal/engine/kafkaconsumer"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, redisClient *redis.Client) {
@@ -158,7 +159,10 @@ func main() {
 
 	clientRepo := client.NewRepository(db)
 	clientService := client.NewService(clientRepo)
-	clientHandler := client.NewHandler(clientService)
+	clientHandler := &client.Handler{
+		Service: clientService,
+		DB:      db,
+	}
 
 	agentHandler := agentverifier.NewHandler(db)
 

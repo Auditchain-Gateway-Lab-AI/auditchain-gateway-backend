@@ -1,13 +1,16 @@
 package client
 
 import (
+	"go-blockchain-api/internal/models"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type Handler struct {
 	Service Service
+	DB      *gorm.DB
 }
 
 func NewHandler(service Service) *Handler {
@@ -23,6 +26,54 @@ type CreateClientRequest struct {
 	FallbackActorField string `json:"fallback_actor_field" example:"db_user"`
 	ActionField        string `json:"action_field" example:"operasi"`
 	ResourceField      string `json:"resource_field" example:"tabel"`
+}
+
+type CreateKafkaConfigRequest struct {
+	ClientID     string `json:"client_id" binding:"required"`
+	TopicPrefix  string `json:"topic_prefix" binding:"required"`
+	KafkaBrokers string `json:"kafka_brokers" binding:"required"`
+	SourceSystem string `json:"source_system" binding:"required"`
+	ActorField   string `json:"actor_field"`
+	PKField      string `json:"pk_field"`
+}
+
+func (h *Handler) CreateKafkaConfig(c *gin.Context) {
+	var req CreateKafkaConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	pkField := req.PKField
+	if pkField == "" {
+		pkField = "ID"
+	}
+	actorField := req.ActorField
+	if actorField == "" {
+		actorField = "__user_name"
+	}
+
+	cfg := &models.ClientKafkaConfig{
+		ClientID:     req.ClientID,
+		TopicPrefix:  req.TopicPrefix,
+		KafkaBrokers: req.KafkaBrokers,
+		SourceSystem: req.SourceSystem,
+		ActorField:   actorField,
+		PKField:      pkField,
+		IsActive:     true,
+	}
+
+	if err := h.DB.Create(cfg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal simpan kafka config"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":       "Kafka config berhasil didaftarkan",
+		"id":            cfg.ID,
+		"topic_prefix":  cfg.TopicPrefix,
+		"kafka_brokers": cfg.KafkaBrokers,
+	})
 }
 
 func (h *Handler) CreateClient(c *gin.Context) {
