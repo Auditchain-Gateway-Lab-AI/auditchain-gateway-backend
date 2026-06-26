@@ -72,6 +72,32 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 	return s.repo.GetDashboardStats(clientID)
 }
 
+// canonicalizeLog memastikan field-field AuditLog dalam format yang identik
+// dengan saat log pertama kali di-hash di kafkaconsumer/consumer.go.
+// Wajib dipanggil sebelum GenerateLogHash saat verifikasi.
+func canonicalizeLog(auditLog *models.AuditLog) {
+	// Metadata: unmarshal + marshal ulang untuk memastikan key ordering konsisten
+	// — sama dengan langkah di consumer.go processMessage
+	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
+		var metaMap interface{}
+		if err := json.Unmarshal([]byte(auditLog.Metadata), &metaMap); err == nil {
+			canonicalBytes, err := json.Marshal(metaMap)
+			if err == nil {
+				auditLog.Metadata = string(canonicalBytes)
+			}
+		}
+	}
+
+	// AuthorizationContext: normalisasi "null"/"<nil>"/"" → ""
+	// — sama dengan generateLogHash di consumer.go
+	// (GenerateLogHash di hasher.go sudah menangani ini,
+	//  tapi kita eksplisitkan di sini agar tidak ada ambiguitas)
+	if auditLog.AuthorizationContext == "null" ||
+		auditLog.AuthorizationContext == "<nil>" {
+		auditLog.AuthorizationContext = ""
+	}
+}
+
 func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationResult, error) {
 	// === LAPIS 1: Cek keberadaan di DB ===
 	auditLog, err := s.repo.GetLogByHash(hash, clientID)
@@ -80,6 +106,8 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 	}
 
 	// === LAPIS 2: Re-Hash Lokal ===
+	// Canonicalize terlebih dahulu agar format identik dengan saat insert
+	canonicalizeLog(auditLog)
 	recalculatedHash := hasher.GenerateLogHash(auditLog, auditLog.PreviousHash)
 	if recalculatedHash != auditLog.HashValue {
 		return &VerificationResult{

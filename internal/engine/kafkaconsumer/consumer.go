@@ -112,7 +112,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 
 	log.Printf("✅ [KafkaConsumer] klien=%s siap consume %d topic", cfg.ClientID, len(topics))
 
-	// ─── KUNCI FIX: re-discovery setiap 60 detik ───
+	// Re-discovery setiap 60 detik untuk mendeteksi topic baru
 	rediscoverTicker := time.NewTicker(60 * time.Second)
 	defer rediscoverTicker.Stop()
 
@@ -122,12 +122,10 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 			return nil
 
 		case <-rediscoverTicker.C:
-			// Cek apakah ada topic baru
 			newTopics := e.discoverTopics(cfg)
 			if len(newTopics) != len(topics) {
 				log.Printf("🔄 [KafkaConsumer] klien=%s topic baru terdeteksi (%d→%d), restart consumer...",
 					cfg.ClientID, len(topics), len(newTopics))
-				// Return nil → startClientConsumer akan loop ulang → discover ulang
 				return nil
 			}
 
@@ -140,7 +138,6 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 				if ctx.Err() != nil {
 					return nil
 				}
-				// Timeout biasa — lanjut loop untuk cek ticker
 				continue
 			}
 
@@ -156,7 +153,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 	}
 }
 
-// discoverTopics — helper untuk cek daftar topic terkini
+// discoverTopics helper untuk cek daftar topic terkini
 func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
 	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
 	if err != nil {
@@ -195,7 +192,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return fmt.Errorf("gagal parse JSON: %w", err)
 	}
 
-	// Ambil metadata dari field yang di-inject oleh unwrap transform
 	op, _ := payload["__op"].(string)
 	if op == "" {
 		op, _ = payload["op"].(string)
@@ -205,10 +201,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 
 	tableName, _ := payload["__table"].(string)
-	if tableName == "" {
-		tableName, _ = payload["__table"].(string)
-	}
-
 	userName, _ := payload["__user_name"].(string)
 	tsMs, _ := payload["__ts_ms"].(float64)
 
@@ -216,10 +208,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
-	// Tentukan action
 	action := opToAction(op)
 
-	// Cari primary key
 	pkField := cfg.PKField
 	if pkField == "" {
 		pkField = "ID"
@@ -227,13 +217,11 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
-	// Actor
 	actor := userName
 	if actor == "" {
 		actor = "simrs-system"
 	}
 
-	// Timestamp
 	var timestamp time.Time
 	if tsMs > 0 {
 		timestamp = time.UnixMilli(int64(tsMs))
@@ -241,22 +229,18 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		timestamp = time.Now()
 	}
 
-	// Metadata — semua field non-sistem
+	// Ekstrak dan canonicalize metadata — satu kali marshal, tidak double
 	metadata := extractMetadata(payload)
 	metaBytes, _ := json.Marshal(metadata)
+	canonicalMeta := string(metaBytes) // ← tidak perlu unmarshal+marshal ulang
 
-	var metaMap interface{}
-	json.Unmarshal(metaBytes, &metaMap)
-	canonicalMetaBytes, _ := json.Marshal(metaMap)
-	canonicalMeta := string(canonicalMetaBytes)
-
-	// Cek duplikasi — skip jika log dengan resource+timestamp sudah ada
+	// Cek duplikasi
 	var existing models.AuditLog
 	if err := e.DB.Where(
 		"resource = ? AND timestamp = ? AND client_id = ?",
 		resource, timestamp, cfg.ClientID,
 	).First(&existing).Error; err == nil {
-		return nil // sudah ada
+		return nil
 	}
 
 	// Hitung previous hash
@@ -270,7 +254,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
 	}
 
-	// Buat AuditLog
 	auditLog := &models.AuditLog{
 		LogID:        generateLogID(),
 		ClientID:     cfg.ClientID,
@@ -280,15 +263,17 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		Timestamp:    timestamp,
 		SourceSystem: cfg.SourceSystem,
 		Metadata:     canonicalMeta,
-		Status:       "RECEIVED",
-		PreviousHash: prevHash,
+		// AuthorizationContext sengaja dibiarkan "" untuk log dari Kafka
+		// — konsisten dengan normalisasi di generateLogHash
+		AuthorizationContext: "",
+		Status:               "RECEIVED",
+		PreviousHash:         prevHash,
 	}
 
-	// Hitung hash
+	// Hash menggunakan fungsi yang sama format-nya dengan hasher.GenerateLogHash
 	auditLog.HashValue = generateLogHash(auditLog, prevHash)
 	auditLog.Status = "HASHED"
 
-	// Simpan ke DB
 	if err := e.DB.Create(auditLog).Error; err != nil {
 		return fmt.Errorf("gagal simpan audit log: %w", err)
 	}
@@ -323,7 +308,6 @@ func opToAction(op string) string {
 	}
 }
 
-// findPrimaryKey — tambah handling untuk Debezium Oracle numeric/bytes type
 func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 	candidates := []string{pkField, "ID", "id", "ogc_fid", "_id", "fid"}
 
@@ -341,22 +325,16 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 	return "unknown"
 }
 
-// extractScalarValue menangani tipe Debezium Oracle:
-// - string/number biasa → langsung
-// - {"scale": N, "value": "<base64>"} → decode base64 → integer
-// - {"value": "<base64>"} → decode base64 → bytes/string
 func extractScalarValue(val interface{}) string {
 	switch v := val.(type) {
 	case string:
 		return v
 	case float64:
-		// Jika bilangan bulat, hapus desimal
 		if v == float64(int64(v)) {
 			return fmt.Sprintf("%d", int64(v))
 		}
 		return fmt.Sprintf("%g", v)
 	case map[string]interface{}:
-		// Format Debezium untuk Oracle NUMBER/DECIMAL/RAW
 		encoded, hasValue := v["value"].(string)
 		if !hasValue || encoded == "" {
 			return fmt.Sprintf("%v", v)
@@ -364,14 +342,11 @@ func extractScalarValue(val interface{}) string {
 
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			// Bukan base64 valid — kembalikan apa adanya
 			return encoded
 		}
 
 		scale, hasScale := v["scale"].(float64)
 		if hasScale && scale == 0 && len(decoded) <= 8 {
-			// Oracle NUMBER dengan scale=0 → integer
-			// Decode big-endian bytes ke int64
 			var result int64
 			for _, b := range decoded {
 				result = result*256 + int64(b)
@@ -379,12 +354,10 @@ func extractScalarValue(val interface{}) string {
 			return fmt.Sprintf("%d", result)
 		}
 
-		// Fallback: coba sebagai string
 		s := strings.TrimRight(string(decoded), "\x00")
 		if s != "" && isPrintable(s) {
 			return s
 		}
-		// Last resort: hex
 		return hex.EncodeToString(decoded)
 
 	default:
@@ -415,21 +388,17 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 		if skip[k] {
 			continue
 		}
-		// Normalisasi semua nilai agar tidak ada map[...] di metadata
 		meta[k] = normalizeFieldValue(v)
 	}
 	return meta
 }
 
-// normalizeFieldValue flatten nilai Debezium Oracle menjadi scalar
 func normalizeFieldValue(val interface{}) interface{} {
 	switch v := val.(type) {
 	case map[string]interface{}:
-		// Debezium wrapped value — ekstrak ke scalar
 		if _, hasValue := v["value"]; hasValue {
 			return extractScalarValue(v)
 		}
-		// Object biasa — rekursi
 		result := make(map[string]interface{})
 		for k, inner := range v {
 			result[k] = normalizeFieldValue(inner)
@@ -450,9 +419,11 @@ func generateLogID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
+// generateLogHash — format string HARUS identik dengan hasher.GenerateLogHash
+// Normalisasi AuthorizationContext: "null"/"<nil>"/"" → selalu ""
 func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 	authCtx := auditLog.AuthorizationContext
-	if authCtx == "null" || authCtx == "<nil>" {
+	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
 		authCtx = ""
 	}
 

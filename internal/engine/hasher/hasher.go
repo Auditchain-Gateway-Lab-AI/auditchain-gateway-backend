@@ -13,8 +13,16 @@ type Engine struct {
 	DB *gorm.DB
 }
 
+// GenerateLogHash menghasilkan hash deterministik dari AuditLog.
+// Normalisasi yang diterapkan harus IDENTIK dengan generateLogHash di kafkaconsumer/consumer.go:
+//   - AuthorizationContext: "null", "<nil>", atau "" → selalu ""
+//   - Metadata: dipakai apa adanya dari DB (sudah canonical saat insert)
 func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
-	// Serialisasi Data Secara Deterministik
+	authCtx := auditLog.AuthorizationContext
+	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
+		authCtx = ""
+	}
+
 	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s",
 		auditLog.LogID,
 		auditLog.Actor,
@@ -22,7 +30,7 @@ func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Resource,
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
-		auditLog.AuthorizationContext,
+		authCtx,
 		prevHash,
 		auditLog.Metadata,
 	)
@@ -30,7 +38,8 @@ func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
 	return crypto.GenerateSHA3_256(contextString)
 }
 
-// ProcessPendingLogs mencari log berstatus RECEIVED dan memprosesnya menjadi HASHED
+// ProcessPendingLogs mencari log berstatus RECEIVED dan memprosesnya menjadi HASHED.
+// Dipakai untuk log yang masuk via ingestion manual (bukan Kafka).
 func (h *Engine) ProcessPendingLogs() error {
 	var pendingLogs []models.AuditLog
 
