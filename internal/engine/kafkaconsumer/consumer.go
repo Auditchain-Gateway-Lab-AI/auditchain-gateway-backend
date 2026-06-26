@@ -245,6 +245,11 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	metadata := extractMetadata(payload)
 	metaBytes, _ := json.Marshal(metadata)
 
+	var metaMap interface{}
+	json.Unmarshal(metaBytes, &metaMap)
+	canonicalMetaBytes, _ := json.Marshal(metaMap)
+	canonicalMeta := string(canonicalMetaBytes)
+
 	// Cek duplikasi — skip jika log dengan resource+timestamp sudah ada
 	var existing models.AuditLog
 	if err := e.DB.Where(
@@ -274,7 +279,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		Resource:     resource,
 		Timestamp:    timestamp,
 		SourceSystem: cfg.SourceSystem,
-		Metadata:     string(metaBytes),
+		Metadata:     canonicalMeta,
 		Status:       "RECEIVED",
 		PreviousHash: prevHash,
 	}
@@ -446,6 +451,11 @@ func generateLogID() string {
 }
 
 func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
+	authCtx := auditLog.AuthorizationContext
+	if authCtx == "null" || authCtx == "<nil>" {
+		authCtx = ""
+	}
+
 	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s",
 		auditLog.LogID,
 		auditLog.Actor,
@@ -453,7 +463,7 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Resource,
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
-		auditLog.AuthorizationContext,
+		authCtx,
 		prevHash,
 		auditLog.Metadata,
 	)
