@@ -2,6 +2,8 @@ package kafkaconsumer
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -270,23 +272,82 @@ func opToAction(op string) string {
 	}
 }
 
+// findPrimaryKey — tambah handling untuk Debezium Oracle numeric/bytes type
 func findPrimaryKey(payload map[string]interface{}, pkField string) string {
-	// Coba field yang dikonfigurasi dulu
-	if val, ok := payload[pkField]; ok && val != nil {
-		return fmt.Sprintf("%v", val)
-	}
-	// Fallback ke kandidat umum
-	candidates := []string{"ID", "id", "ogc_fid", "_id", "fid"}
+	candidates := []string{pkField, "ID", "id", "ogc_fid", "_id", "fid"}
+
 	for _, key := range candidates {
-		if val, ok := payload[key]; ok && val != nil {
-			return fmt.Sprintf("%v", val)
+		val, ok := payload[key]
+		if !ok || val == nil {
+			continue
 		}
+		return extractScalarValue(val)
 	}
-	// Fallback ke row_id
+
 	if rowID, ok := payload["__row_id"].(string); ok && rowID != "" {
 		return rowID
 	}
 	return "unknown"
+}
+
+// extractScalarValue menangani tipe Debezium Oracle:
+// - string/number biasa → langsung
+// - {"scale": N, "value": "<base64>"} → decode base64 → integer
+// - {"value": "<base64>"} → decode base64 → bytes/string
+func extractScalarValue(val interface{}) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case float64:
+		// Jika bilangan bulat, hapus desimal
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprintf("%g", v)
+	case map[string]interface{}:
+		// Format Debezium untuk Oracle NUMBER/DECIMAL/RAW
+		encoded, hasValue := v["value"].(string)
+		if !hasValue || encoded == "" {
+			return fmt.Sprintf("%v", v)
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			// Bukan base64 valid — kembalikan apa adanya
+			return encoded
+		}
+
+		scale, hasScale := v["scale"].(float64)
+		if hasScale && scale == 0 && len(decoded) <= 8 {
+			// Oracle NUMBER dengan scale=0 → integer
+			// Decode big-endian bytes ke int64
+			var result int64
+			for _, b := range decoded {
+				result = result*256 + int64(b)
+			}
+			return fmt.Sprintf("%d", result)
+		}
+
+		// Fallback: coba sebagai string
+		s := strings.TrimRight(string(decoded), "\x00")
+		if s != "" && isPrintable(s) {
+			return s
+		}
+		// Last resort: hex
+		return hex.EncodeToString(decoded)
+
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func isPrintable(s string) bool {
+	for _, r := range s {
+		if r < 32 || r > 126 {
+			return false
+		}
+	}
+	return true
 }
 
 func extractMetadata(payload map[string]interface{}) map[string]interface{} {
@@ -300,11 +361,38 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 
 	meta := make(map[string]interface{})
 	for k, v := range payload {
-		if !skip[k] {
-			meta[k] = v
+		if skip[k] {
+			continue
 		}
+		// Normalisasi semua nilai agar tidak ada map[...] di metadata
+		meta[k] = normalizeFieldValue(v)
 	}
 	return meta
+}
+
+// normalizeFieldValue flatten nilai Debezium Oracle menjadi scalar
+func normalizeFieldValue(val interface{}) interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		// Debezium wrapped value — ekstrak ke scalar
+		if _, hasValue := v["value"]; hasValue {
+			return extractScalarValue(v)
+		}
+		// Object biasa — rekursi
+		result := make(map[string]interface{})
+		for k, inner := range v {
+			result[k] = normalizeFieldValue(inner)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = normalizeFieldValue(item)
+		}
+		return result
+	default:
+		return val
+	}
 }
 
 func generateLogID() string {
