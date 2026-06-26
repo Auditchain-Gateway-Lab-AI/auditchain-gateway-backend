@@ -1,0 +1,10 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/api/dashboard/verify-resource/:resource'
+order: 12000
+headers:
+  - key: Authorization
+    value: 'Bearer {{bearerToken}}'
+pathVariables:
+  - key: resource
+    value: 'transactions/INV-001'

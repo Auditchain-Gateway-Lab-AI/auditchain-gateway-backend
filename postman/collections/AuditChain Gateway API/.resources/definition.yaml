@@ -1,0 +1,11 @@
+$kind: collection
+name: 'AuditChain Gateway API'
+variables:
+  - key: baseUrl
+    value: 'http://localhost:8080'
+  - key: bearerToken
+    value: ''
+  - key: apiKey
+    value: ''
+  - key: clientId
+    value: ''

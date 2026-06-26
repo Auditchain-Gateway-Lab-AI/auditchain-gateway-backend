@@ -1,0 +1,23 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/api/v1/logs/'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: api-key
+    value: '{{apiKey}}'
+body:
+  type: json
+  content: |-
+    [
+      {
+        "app_user": "auditor.senior",
+        "db_user": "postgres",
+        "operasi": "UPDATE",
+        "tabel": "transactions/INV-001",
+        "source_system": "ERP-Agent",
+        "amount": 150000,
+        "status": "approved"
+      }
+    ]

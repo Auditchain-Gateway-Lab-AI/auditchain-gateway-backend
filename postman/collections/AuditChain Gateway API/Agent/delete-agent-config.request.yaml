@@ -1,0 +1,7 @@
+$kind: http-request
+method: DELETE
+url: '{{baseUrl}}/api/dashboard/agent/config'
+order: 15000
+headers:
+  - key: Authorization
+    value: 'Bearer {{bearerToken}}'

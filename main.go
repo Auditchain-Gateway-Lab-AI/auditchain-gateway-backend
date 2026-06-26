@@ -41,11 +41,13 @@ import (
 	"go-blockchain-api/internal/modules/ingestion"
 
 	"github.com/redis/go-redis/v9"
+	"go-blockchain-api/internal/engine/kafkaconsumer"
 )
 
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, redisClient *redis.Client) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db}
+	kafkaEngine := &kafkaconsumer.Engine{DB: db}
 
 	go func() {
 		log.Println("⚙️  Pipeline Worker mulai berjalan...")
@@ -117,6 +119,11 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 			}
 		}
 	}()
+	go func() {
+		if err := kafkaEngine.StartConsumers(ctx); err != nil {
+			log.Printf("⚠️  [KafkaConsumer] Error start: %v\n", err)
+		}
+	}()
 }
 
 func main() {
@@ -137,9 +144,8 @@ func main() {
 
 	startPipelineWorker(ctx, db, fabricSvc, redisClient)
 
-	agentVerifySvc := agentverifier.NewService(db)
 	auditRepo := audit.NewAuditRepository(db)
-	auditService := audit.NewService(auditRepo, fabricSvc, agentVerifySvc)
+	auditService := audit.NewService(auditRepo, fabricSvc, db) // db ditambahkan
 	auditHandler := audit.NewHandler(auditService)
 
 	authRepo := auth.NewRepository(db)

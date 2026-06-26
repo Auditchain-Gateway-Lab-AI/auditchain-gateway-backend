@@ -1,0 +1,10 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/api/dashboard/verify/:hash'
+order: 8000
+headers:
+  - key: Authorization
+    value: 'Bearer {{bearerToken}}'
+pathVariables:
+  - key: hash
+    value: 'sample-hash-value'
