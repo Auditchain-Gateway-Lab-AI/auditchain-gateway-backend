@@ -5,7 +5,6 @@ import (
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
-	"go-blockchain-api/internal/modules/ingestion"
 
 	_ "go-blockchain-api/docs"
 
@@ -16,7 +15,6 @@ import (
 )
 
 func SetupRouter(
-	ingestionHandler *ingestion.Handler,
 	auditHandler *audit.Handler,
 	authHandler *auth.Handler,
 	clientHandler *client.Handler,
@@ -27,7 +25,7 @@ func SetupRouter(
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowAllOrigins = true
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "api-key"}
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	router.Use(cors.New(corsConfig))
 
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -37,12 +35,7 @@ func SetupRouter(
 	client.RegisterRoutes(apiGroup, clientHandler)
 	audit.RegisterRoutes(apiGroup, auditHandler)
 
-	// Endpoint manajemen Agent: POST/GET/DELETE /api/dashboard/agent/config
-	//                           GET              /api/dashboard/agent/ping
 	agentverifier.RegisterRoutes(apiGroup.Group("/dashboard"), agentHandler)
-
-	apiV1 := apiGroup.Group("/v1")
-	ingestion.RegisterRoutes(apiV1, ingestionHandler)
 
 	return router
 }

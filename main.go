@@ -8,16 +8,12 @@
 // @in header
 // @name Authorization
 // @description Masukkan token dengan format: Bearer {token}
-// @securityDefinitions.apikey ApiKeyAuth
-// @in header
-// @name api-key
 // @host localhost:8080
 // @BasePath /api
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -34,22 +30,18 @@ import (
 	"go-blockchain-api/internal/config"
 	"go-blockchain-api/internal/engine/aggregator"
 	"go-blockchain-api/internal/engine/hasher"
-	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
-	"go-blockchain-api/internal/modules/ingestion"
-
-	"go-blockchain-api/internal/engine/kafkaconsumer"
-
-	"github.com/redis/go-redis/v9"
 )
 
-func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, redisClient *redis.Client) {
+func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db}
 	kafkaEngine := &kafkaconsumer.Engine{DB: db}
 
+	// Ticker pipeline: hasher + aggregator (batch=10) + anchoring setiap 10 detik
 	go func() {
 		log.Println("⚙️  Pipeline Worker mulai berjalan...")
 		ticker := time.NewTicker(10 * time.Second)
@@ -75,51 +67,7 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 		}
 	}()
 
-	if redisClient == nil {
-		return
-	}
-
-	go func() {
-		log.Println("📥 Redis Queue Worker mulai berjalan...")
-		for {
-			result, err := redisClient.BLPop(ctx, 2*time.Second, "audit_log_queue").Result()
-			if err != nil {
-				if err == redis.Nil {
-					select {
-					case <-ctx.Done():
-						log.Println("📥 Redis Queue Worker berhenti.")
-						return
-					default:
-						continue
-					}
-				}
-				if ctx.Err() != nil {
-					return
-				}
-				log.Printf("⚠️  [Redis] Error baca queue: %v\n", err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			if len(result) < 2 {
-				continue
-			}
-
-			var logData models.AuditLog
-			if err := json.Unmarshal([]byte(result[1]), &logData); err != nil {
-				log.Printf("⚠️  [Redis] Gagal parse log: %v\n", err)
-				continue
-			}
-
-			if err := db.Create(&logData).Error; err != nil {
-				log.Printf("⚠️  [Redis] Gagal simpan log resource=%s client=%s: %v\n",
-					logData.Resource, logData.ClientID, err)
-			} else {
-				// Log ini yang sebelumnya tidak ada — bukti log berhasil masuk ke DB
-				log.Printf("✅ [Redis] Log tersimpan resource=%-30s actor=%-20s action=%s",
-					logData.Resource, logData.Actor, logData.Action)
-			}
-		}
-	}()
+	// Kafka consumer: satu goroutine per klien aktif
 	go func() {
 		if err := kafkaEngine.StartConsumers(ctx); err != nil {
 			log.Printf("⚠️  [KafkaConsumer] Error start: %v\n", err)
@@ -134,7 +82,6 @@ func main() {
 	defer cancel()
 
 	db := config.ConnectDB()
-	redisClient := config.ConnectRedis()
 
 	fabricSvc, err := blockchain.InitFabricGateway(db)
 	if err != nil {
@@ -143,19 +90,15 @@ func main() {
 		defer fabricSvc.Close()
 	}
 
-	startPipelineWorker(ctx, db, fabricSvc, redisClient)
+	startPipelineWorker(ctx, db, fabricSvc)
 
 	auditRepo := audit.NewAuditRepository(db)
-	auditService := audit.NewService(auditRepo, fabricSvc, db) // db ditambahkan
+	auditService := audit.NewService(auditRepo, fabricSvc, db)
 	auditHandler := audit.NewHandler(auditService)
 
 	authRepo := auth.NewRepository(db)
 	authService := auth.NewService(authRepo)
 	authHandler := &auth.Handler{Service: authService}
-
-	ingestionRepo := ingestion.NewRepository(redisClient)
-	ingestionService := ingestion.NewService(ingestionRepo)
-	ingestionHandler := &ingestion.Handler{Service: ingestionService, DB: db}
 
 	clientRepo := client.NewRepository(db)
 	clientService := client.NewService(clientRepo)
@@ -166,7 +109,7 @@ func main() {
 
 	agentHandler := agentverifier.NewHandler(db)
 
-	router := api.SetupRouter(ingestionHandler, auditHandler, authHandler, clientHandler, agentHandler)
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
