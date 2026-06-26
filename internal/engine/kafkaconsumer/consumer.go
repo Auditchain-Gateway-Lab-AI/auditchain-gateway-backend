@@ -71,7 +71,6 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 	if err != nil {
 		return fmt.Errorf("gagal konek Kafka: %w", err)
 	}
-
 	partitions, err := conn.ReadPartitions()
 	conn.Close()
 	if err != nil {
@@ -98,7 +97,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		topics = append(topics, t)
 	}
 
-	log.Printf("📋 [KafkaConsumer] klien=%s ditemukan %d topic", cfg.ClientID, len(topics))
+	log.Printf("📋 [KafkaConsumer] klien=%s ditemukan %d topic: %v", cfg.ClientID, len(topics), topics)
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        []string{cfg.KafkaBrokers},
@@ -111,19 +110,38 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 	})
 	defer reader.Close()
 
-	log.Printf("✅ [KafkaConsumer] klien=%s siap consume", cfg.ClientID)
+	log.Printf("✅ [KafkaConsumer] klien=%s siap consume %d topic", cfg.ClientID, len(topics))
+
+	// ─── KUNCI FIX: re-discovery setiap 60 detik ───
+	rediscoverTicker := time.NewTicker(60 * time.Second)
+	defer rediscoverTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+
+		case <-rediscoverTicker.C:
+			// Cek apakah ada topic baru
+			newTopics := e.discoverTopics(cfg)
+			if len(newTopics) != len(topics) {
+				log.Printf("🔄 [KafkaConsumer] klien=%s topic baru terdeteksi (%d→%d), restart consumer...",
+					cfg.ClientID, len(topics), len(newTopics))
+				// Return nil → startClientConsumer akan loop ulang → discover ulang
+				return nil
+			}
+
 		default:
-			msg, err := reader.FetchMessage(ctx)
+			fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			msg, err := reader.FetchMessage(fetchCtx)
+			cancel()
+
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
-				return fmt.Errorf("fetch error: %w", err)
+				// Timeout biasa — lanjut loop untuk cek ticker
+				continue
 			}
 
 			if err := e.processMessage(msg, cfg); err != nil {
@@ -136,6 +154,34 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 			}
 		}
 	}
+}
+
+// discoverTopics — helper untuk cek daftar topic terkini
+func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
+	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
+	if err != nil {
+		return nil
+	}
+	partitions, err := conn.ReadPartitions()
+	conn.Close()
+	if err != nil {
+		return nil
+	}
+
+	topicSet := make(map[string]struct{})
+	for _, p := range partitions {
+		if strings.HasPrefix(p.Topic, cfg.TopicPrefix) &&
+			!strings.Contains(p.Topic, "schema_history") &&
+			!strings.Contains(p.Topic, "heartbeat") {
+			topicSet[p.Topic] = struct{}{}
+		}
+	}
+
+	topics := make([]string, 0, len(topicSet))
+	for t := range topicSet {
+		topics = append(topics, t)
+	}
+	return topics
 }
 
 // processMessage memproses satu message Kafka menjadi AuditLog
