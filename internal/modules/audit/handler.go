@@ -2,6 +2,7 @@ package audit
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -238,6 +239,22 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 	c.JSON(http.StatusOK, logs)
 }
 
+func parseTimeRobust(timeStr string) (time.Time, error) {
+	// 1. Otomatis ganti spasi pertama menjadi 'T' jika klien lupa
+	timeStr = strings.Replace(timeStr, " ", "T", 1)
+
+	// 2. Coba parse menggunakan standar ketat RFC3339 (contoh: +07:00)
+	t, err := time.Parse(time.RFC3339, timeStr)
+	if err == nil {
+		return t, nil
+	}
+
+	// 3. Jika gagal, coba gunakan layout custom yang mentolerir zona waktu tanpa menit
+	// Layout ini mendukung fraksi detik (.999) dan offset zona waktu sederhana (Z07) seperti +07
+	customLayout := "2006-01-02T15:04:05.999999999Z07"
+	return time.Parse(customLayout, timeStr)
+}
+
 func (h *Handler) VerifyLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -252,15 +269,16 @@ func (h *Handler) VerifyLogRange(c *gin.Context) {
 		return
 	}
 
-	from, err := time.Parse(time.RFC3339, fromStr)
+	// Gunakan helper function yang sudah dimodifikasi
+	from, err := parseTimeRobust(fromStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid, gunakan RFC3339 (contoh: 2026-06-26T10:00:00Z)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan format seperti: 2026-06-26T10:00:00Z atau 2026-06-29 10:26:32.54+07"})
 		return
 	}
 
-	to, err := time.Parse(time.RFC3339, toStr)
+	to, err := parseTimeRobust(toStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid, gunakan RFC3339 (contoh: 2026-06-26T10:05:00Z)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid. Gunakan format seperti: 2026-06-26T10:05:00Z atau 2026-06-29 10:26:32.54+07"})
 		return
 	}
 
