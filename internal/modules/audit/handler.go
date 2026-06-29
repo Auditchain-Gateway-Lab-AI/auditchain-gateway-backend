@@ -240,17 +240,25 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 }
 
 func parseTimeRobust(timeStr string) (time.Time, error) {
-	// 1. Otomatis ganti spasi pertama menjadi 'T' jika klien lupa
-	timeStr = strings.Replace(timeStr, " ", "T", 1)
+	// 1. Pastikan string cukup panjang
+	if len(timeStr) > 10 {
+		// Jika karakter ke-11 adalah spasi (pemisah tanggal & jam), ganti jadi 'T'
+		if timeStr[10] == ' ' {
+			timeStr = timeStr[:10] + "T" + timeStr[11:]
+		}
+	}
 
-	// 2. Coba parse menggunakan standar ketat RFC3339 (contoh: +07:00)
+	// 2. Jebakan HTTP: URL mengubah '+' menjadi spasi.
+	// Jika masih ada spasi yang tersisa di belakang (misal " 07"), kita kembalikan jadi '+'
+	timeStr = strings.ReplaceAll(timeStr, " ", "+")
+
+	// 3. Coba parse dengan standar ketat RFC3339
 	t, err := time.Parse(time.RFC3339, timeStr)
 	if err == nil {
 		return t, nil
 	}
 
-	// 3. Jika gagal, coba gunakan layout custom yang mentolerir zona waktu tanpa menit
-	// Layout ini mendukung fraksi detik (.999) dan offset zona waktu sederhana (Z07) seperti +07
+	// 4. Jika gagal, gunakan custom layout untuk toleransi zona waktu +07 (tanpa menit)
 	customLayout := "2006-01-02T15:04:05.999999999Z07"
 	return time.Parse(customLayout, timeStr)
 }
