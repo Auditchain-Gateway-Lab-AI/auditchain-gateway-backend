@@ -115,7 +115,7 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			Timestamp: log.Timestamp.UTC().Format(time.RFC3339),
 		}
 
-		verifyResult, err := s.VerifyLogIntegrity(log.HashValue, clientID)
+		verifyResult, err := s.VerifyLogIntegrity(log.LogID, clientID)
 		if err != nil {
 			item.Status = "error"
 			item.Message = err.Error()
