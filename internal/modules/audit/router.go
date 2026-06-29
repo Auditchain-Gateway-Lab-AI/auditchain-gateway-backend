@@ -18,5 +18,6 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashAPI.POST("/verify-data", h.VerifyData)
 		dashAPI.GET("/inventory", h.GetResourceInventory)
 		dashAPI.GET("/verify-resource/:resource", h.VerifyResourceHistory)
+		dashAPI.GET("/verify-range", h.VerifyLogRange)
 	}
 }

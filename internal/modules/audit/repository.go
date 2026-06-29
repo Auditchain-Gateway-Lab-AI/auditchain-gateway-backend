@@ -3,6 +3,8 @@ package audit
 import (
 	"go-blockchain-api/internal/models"
 
+	"time"
+
 	"gorm.io/gorm"
 )
 
@@ -16,6 +18,7 @@ type AuditRepository interface {
 	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
 }
 
 type auditRepoImpl struct {
@@ -103,6 +106,14 @@ func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog
 func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
+		Order("timestamp asc").Find(&logs).Error
+	return logs, err
+}
+
+// add
+func (r *auditRepoImpl) GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error) {
+	var logs []models.AuditLog
+	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ?", clientID, from, to).
 		Order("timestamp asc").Find(&logs).Error
 	return logs, err
 }

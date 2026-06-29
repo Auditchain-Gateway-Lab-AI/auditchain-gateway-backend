@@ -2,6 +2,7 @@ package audit
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -235,4 +236,44 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, logs)
+}
+
+func (h *Handler) VerifyLogRange(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+
+	if fromStr == "" || toStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Parameter 'from' dan 'to' wajib diisi (format: RFC3339)"})
+		return
+	}
+
+	from, err := time.Parse(time.RFC3339, fromStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid, gunakan RFC3339 (contoh: 2026-06-26T10:00:00Z)"})
+		return
+	}
+
+	to, err := time.Parse(time.RFC3339, toStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid, gunakan RFC3339 (contoh: 2026-06-26T10:05:00Z)"})
+		return
+	}
+
+	if to.Before(from) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "'to' tidak boleh lebih awal dari 'from'"})
+		return
+	}
+
+	result, err := h.Service.VerifyLogRange(from, to, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memverifikasi range log"})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"time"
 
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/engine/hasher"
@@ -52,12 +53,94 @@ type Service interface {
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	VerifyResourceHistory(resource, clientID string) (*VerificationResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
 }
 
 type auditService struct {
 	repo          AuditRepository
 	fabric        *blockchain.FabricService
 	kafkaVerifier *kafkaconsumer.KafkaVerifier
+}
+
+// Struct baru
+type RangeVerificationResult struct {
+	Range   RangeInfo         `json:"range"`
+	Summary RangeSummary      `json:"summary"`
+	Results []RangeItemResult `json:"results"`
+}
+
+type RangeInfo struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type RangeSummary struct {
+	Total   int `json:"total"`
+	Valid   int `json:"valid"`
+	Invalid int `json:"invalid"`
+	Pending int `json:"pending"`
+}
+
+type RangeItemResult struct {
+	LogID        string `json:"log_id"`
+	Resource     string `json:"resource"`
+	Action       string `json:"action"`
+	Timestamp    string `json:"timestamp"`
+	Status       string `json:"status"`
+	Message      string `json:"message"`
+	ExpectedHash string `json:"expected_hash,omitempty"`
+	ActualHash   string `json:"actual_hash,omitempty"`
+}
+
+// Implementasi
+func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error) {
+	logs, err := s.repo.GetLogsByTimeRange(from, to, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RangeVerificationResult{
+		Range: RangeInfo{
+			From: from.UTC().Format(time.RFC3339),
+			To:   to.UTC().Format(time.RFC3339),
+		},
+		Results: []RangeItemResult{},
+	}
+
+	for _, log := range logs {
+		item := RangeItemResult{
+			LogID:     log.LogID,
+			Resource:  log.Resource,
+			Action:    log.Action,
+			Timestamp: log.Timestamp.UTC().Format(time.RFC3339),
+		}
+
+		verifyResult, err := s.VerifyLogIntegrity(log.HashValue, clientID)
+		if err != nil {
+			item.Status = "error"
+			item.Message = err.Error()
+		} else {
+			item.Status = verifyResult.Status
+			item.Message = verifyResult.Message
+			if verifyResult.Status == "failed_local" {
+				item.ExpectedHash = verifyResult.ExpectedHash
+				item.ActualHash = verifyResult.ActualHash
+			}
+		}
+
+		switch item.Status {
+		case "success":
+			result.Summary.Valid++
+		case "pending":
+			result.Summary.Pending++
+		default:
+			result.Summary.Invalid++
+		}
+		result.Summary.Total++
+		result.Results = append(result.Results, item)
+	}
+
+	return result, nil
 }
 
 func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {
