@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -80,16 +81,34 @@ type RangeSummary struct {
 	Invalid int `json:"invalid"`
 	Pending int `json:"pending"`
 }
-
+type FabricAnchorData struct {
+	AnchorID      string `json:"anchor_id"`
+	MerkleRoot    string `json:"merkle_root"`
+	Timestamp     string `json:"timestamp"`
+	BatchSize     string `json:"batch_size"`
+	SourceGateway string `json:"source_gateway"`
+	SignatureNode string `json:"signature_node"`
+}
 type RangeItemResult struct {
-	LogID        string `json:"log_id"`
-	Resource     string `json:"resource"`
-	Action       string `json:"action"`
-	Timestamp    string `json:"timestamp"`
+	LogID       string  `json:"log_id"`
+	Resource    string  `json:"resource"`
+	Action      string  `json:"action"`
+	Timestamp   string  `json:"timestamp"`
+	DBTimestamp *string `json:"db_timestamp,omitempty"`
+
+	HashValue  string `json:"hash_value"`
+	RecalcHash string `json:"recalc_hash"`
+	HashMatch  bool   `json:"hash_match"`
+
 	Status       string `json:"status"`
+	VerifyStatus string `json:"verify_status"`
 	Message      string `json:"message"`
 	ExpectedHash string `json:"expected_hash,omitempty"`
 	ActualHash   string `json:"actual_hash,omitempty"`
+
+	BlockchainTxID *string           `json:"blockchain_tx_id,omitempty"`
+	MerkleRoot     string            `json:"merkle_root,omitempty"`
+	Fabric         *FabricAnchorData `json:"fabric,omitempty"`
 }
 
 // Implementasi
@@ -107,28 +126,57 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 		Results: []RangeItemResult{},
 	}
 
-	for _, log := range logs {
+	for _, auditLog := range logs {
+		// Field dasar
 		item := RangeItemResult{
-			LogID:     log.LogID,
-			Resource:  log.Resource,
-			Action:    log.Action,
-			Timestamp: log.Timestamp.UTC().Format(time.RFC3339),
+			LogID:          auditLog.LogID,
+			Resource:       auditLog.Resource,
+			Action:         auditLog.Action,
+			Timestamp:      auditLog.Timestamp.UTC().Format(time.RFC3339),
+			HashValue:      auditLog.HashValue,
+			Status:         auditLog.Status,
+			BlockchainTxID: auditLog.BlockchainTxID,
+			MerkleRoot:     auditLog.MerkleRoot,
 		}
 
-		verifyResult, err := s.VerifyLogIntegrity(log.LogID, clientID)
+		// DBTimestamp
+		if auditLog.DBTimestamp != nil {
+			s := auditLog.DBTimestamp.UTC().Format(time.RFC3339Nano)
+			item.DBTimestamp = &s
+		}
+
+		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
+		logCopy := auditLog
+		canonicalizeLog(&logCopy)
+		recalcHash := hasher.GenerateLogHash(&logCopy, logCopy.PreviousHash)
+		item.RecalcHash = recalcHash
+		item.HashMatch = (recalcHash == auditLog.HashValue)
+
+		// Verifikasi lengkap (termasuk Kafka + Blockchain)
+		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)
 		if err != nil {
-			item.Status = "error"
+			item.VerifyStatus = "error"
 			item.Message = err.Error()
 		} else {
-			item.Status = verifyResult.Status
+			item.VerifyStatus = verifyResult.Status
 			item.Message = verifyResult.Message
-			if verifyResult.Status == "failed_local" {
-				item.ExpectedHash = verifyResult.ExpectedHash
-				item.ActualHash = verifyResult.ActualHash
+		}
+
+		// Fetch data Fabric jika sudah ANCHORED
+		if auditLog.BlockchainTxID != nil &&
+			*auditLog.BlockchainTxID != "" &&
+			*auditLog.BlockchainTxID != "PENDING_OR_FAILED" &&
+			s.fabric != nil {
+			fabricData, ferr := s.fetchFabricAnchor(*auditLog.BlockchainTxID)
+			if ferr != nil {
+				log.Printf("⚠️  [VerifyRange] Gagal fetch Fabric TxID=%s: %v", *auditLog.BlockchainTxID, ferr)
+			} else {
+				item.Fabric = fabricData
 			}
 		}
 
-		switch item.Status {
+		// Summary
+		switch item.VerifyStatus {
 		case "success":
 			result.Summary.Valid++
 		case "pending":
@@ -141,6 +189,41 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	}
 
 	return result, nil
+}
+
+// fetchFabricAnchor mengambil dan memetakan data anchor dari Hyperledger Fabric
+func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error) {
+	raw, err := s.fabric.GetAnchorFromLedger(txID)
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, fmt.Errorf("gagal parse fabric response: %w", err)
+	}
+
+	anchor := &FabricAnchorData{}
+	if v, ok := parsed["anchor_id"].(string); ok {
+		anchor.AnchorID = v
+	}
+	if v, ok := parsed["merkle_root"].(string); ok {
+		anchor.MerkleRoot = v
+	}
+	if v, ok := parsed["timestamp"].(string); ok {
+		anchor.Timestamp = v
+	}
+	if v, ok := parsed["batch_size"].(string); ok {
+		anchor.BatchSize = v
+	}
+	if v, ok := parsed["source_gateway"].(string); ok {
+		anchor.SourceGateway = v
+	}
+	if v, ok := parsed["signature_node"].(string); ok {
+		anchor.SignatureNode = v
+	}
+
+	return anchor, nil
 }
 
 func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {

@@ -7,13 +7,14 @@ type AuditLog struct {
 	LogID    string `gorm:"primaryKey;type:varchar(100)" json:"log_id"`
 	ClientID string `gorm:"type:varchar(36);not null;index" json:"client_id"`
 
-	Actor                string    `gorm:"type:varchar(100);index" json:"actor"`
-	Action               string    `gorm:"type:varchar(100)" json:"action"`
-	Resource             string    `gorm:"type:varchar(255)" json:"resource"`
-	Timestamp            time.Time `gorm:"index" json:"timestamp"`
-	SourceSystem         string    `gorm:"type:varchar(100);index" json:"source_system"`
-	AuthorizationContext string    `gorm:"type:text" json:"authorization_context"`
-	Metadata             string    `gorm:"type:jsonb" json:"metadata"`
+	Actor                string     `gorm:"type:varchar(100);index" json:"actor"`
+	Action               string     `gorm:"type:varchar(100)" json:"action"`
+	Resource             string     `gorm:"type:varchar(255)" json:"resource"`
+	Timestamp            time.Time  `gorm:"index" json:"timestamp"`
+	DBTimestamp          *time.Time `gorm:"column:db_timestamp;autoCreateTime" json:"db_timestamp"`
+	SourceSystem         string     `gorm:"type:varchar(100);index" json:"source_system"`
+	AuthorizationContext string     `gorm:"type:text" json:"authorization_context"`
+	Metadata             string     `gorm:"type:jsonb" json:"metadata"`
 
 	// BARU: ID baris di audit_trail DB klien.
 	// Diisi dari field "audit_trail_id" pada payload Agent.
