@@ -45,7 +45,7 @@ type DataVerificationResult struct {
 
 type Service interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
-	VerifyLogIntegrity(hash, clientID string) (*VerificationResult, error)
+	VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error)
 	GetFabricRecord(anchorID string) (map[string]interface{}, error)
 	VerifyDataIntegrity(resource, clientID string, rawData *map[string]interface{}) (*DataVerificationResult, error)
 	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
@@ -77,7 +77,6 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 // Wajib dipanggil sebelum GenerateLogHash saat verifikasi.
 func canonicalizeLog(auditLog *models.AuditLog) {
 	// Metadata: unmarshal + marshal ulang untuk memastikan key ordering konsisten
-	// — sama dengan langkah di consumer.go processMessage
 	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
 		var metaMap interface{}
 		if err := json.Unmarshal([]byte(auditLog.Metadata), &metaMap); err == nil {
@@ -89,18 +88,17 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 	}
 
 	// AuthorizationContext: normalisasi "null"/"<nil>"/"" → ""
-	// — sama dengan generateLogHash di consumer.go
-	// (GenerateLogHash di hasher.go sudah menangani ini,
-	//  tapi kita eksplisitkan di sini agar tidak ada ambiguitas)
 	if auditLog.AuthorizationContext == "null" ||
 		auditLog.AuthorizationContext == "<nil>" {
 		auditLog.AuthorizationContext = ""
 	}
 }
 
-func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationResult, error) {
-	// === LAPIS 1: Cek keberadaan di DB ===
-	auditLog, err := s.repo.GetLogByHash(hash, clientID)
+// VerifyLogIntegrity menerima log_id (bukan hash) sebagai identifier.
+// Hash value diambil dari DB setelah log ditemukan, lalu dipakai untuk re-hashing.
+func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
+	// === LAPIS 1: Cek keberadaan di DB by log_id ===
+	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
 	}
@@ -114,6 +112,7 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 			Status:       "failed_local",
 			Message:      "🚨 DATA TERMANIPULASI: Isi data telah diubah di database middleware.",
 			IsValid:      false,
+			LogID:        auditLog.LogID,
 			ExpectedHash: auditLog.HashValue,
 			ActualHash:   recalculatedHash,
 		}, nil
@@ -140,6 +139,7 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 				Status:        "failed_kafka",
 				Message:       kafkaResult.Message,
 				IsValid:       false,
+				LogID:         auditLog.LogID,
 				KafkaVerified: false,
 				KafkaMessage:  kafkaMsg,
 				KafkaHash:     kafkaHash,
@@ -155,6 +155,7 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 			Status:        "pending",
 			Message:       "Log otentik secara lokal dan terverifikasi di Kafka. Menunggu antrean Blockchain.",
 			IsValid:       true,
+			LogID:         auditLog.LogID,
 			KafkaVerified: kafkaVerified,
 			KafkaMessage:  kafkaMsg,
 			KafkaTopic:    kafkaTopic,
@@ -180,6 +181,7 @@ func (s *auditService) VerifyLogIntegrity(hash, clientID string) (*VerificationR
 			Status:        "failed_onchain",
 			Message:       "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
 			IsValid:       false,
+			LogID:         auditLog.LogID,
 			DBRoot:        auditLog.MerkleRoot,
 			ChainRoot:     fabricResponse.MerkleRoot,
 			KafkaVerified: kafkaVerified,
@@ -302,7 +304,8 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 	var lastValidResult *VerificationResult
 
 	for i, log := range logs {
-		res, err := s.VerifyLogIntegrity(log.HashValue, clientID)
+		// VerifyLogIntegrity sekarang pakai log_id
+		res, err := s.VerifyLogIntegrity(log.LogID, clientID)
 		if err != nil {
 			return &VerificationResult{
 				Status:  "failed_system",

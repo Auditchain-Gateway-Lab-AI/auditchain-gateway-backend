@@ -47,7 +47,10 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		return
 	}
 
-	result, err := h.Service.VerifyLogIntegrity(c.Param("hash"), clientID)
+	// Parameter sekarang adalah log_id, bukan hash
+	logID := c.Param("log_id")
+
+	result, err := h.Service.VerifyLogIntegrity(logID, clientID)
 	if err != nil {
 		switch err.Error() {
 		case "log_not_found":
@@ -71,6 +74,7 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 			"status": "failed", "layer": "2_local_hash",
 			"data": gin.H{
 				"is_valid": result.IsValid, "message": result.Message,
+				"log_id":        result.LogID,
 				"expected_hash": result.ExpectedHash, "actual_hash": result.ActualHash,
 			},
 		})
@@ -79,18 +83,34 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 			"status": "failed", "layer": "3_agent_source",
 			"data": gin.H{
 				"is_valid": result.IsValid,
+				"log_id":   result.LogID,
 				"message":  result.Message,
+			},
+		})
+	case "failed_kafka":
+		c.JSON(http.StatusConflict, gin.H{
+			"status": "failed", "layer": "3_kafka",
+			"data": gin.H{
+				"is_valid":     result.IsValid,
+				"log_id":       result.LogID,
+				"message":      result.Message,
+				"kafka_hash":   result.KafkaHash,
+				"kafka_topic":  result.KafkaTopic,
+				"kafka_offset": result.KafkaOffset,
 			},
 		})
 	case "pending":
 		c.JSON(http.StatusAccepted, gin.H{
-			"status": "pending", "message": result.Message,
+			"status":  "pending",
+			"log_id":  result.LogID,
+			"message": result.Message,
 		})
 	case "failed_onchain":
 		c.JSON(http.StatusConflict, gin.H{
 			"status": "failed", "layer": "4_blockchain",
 			"data": gin.H{
 				"is_valid": result.IsValid, "message": result.Message,
+				"log_id":  result.LogID,
 				"db_root": result.DBRoot, "chain_root": result.ChainRoot,
 			},
 		})
@@ -98,9 +118,12 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
 			"data": gin.H{
-				"log_id": result.LogID, "hash_value": result.ExpectedHash,
-				"merkle_root": result.DBRoot, "blockchain_tx_id": result.TxID,
-				"is_valid": result.IsValid, "message": result.Message,
+				"log_id":           result.LogID,
+				"hash_value":       result.ExpectedHash,
+				"merkle_root":      result.DBRoot,
+				"blockchain_tx_id": result.TxID,
+				"is_valid":         result.IsValid,
+				"message":          result.Message,
 			},
 		})
 	}

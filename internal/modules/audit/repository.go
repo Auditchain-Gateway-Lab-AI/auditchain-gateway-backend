@@ -9,6 +9,7 @@ import (
 type AuditRepository interface {
 	CreateLog(log *models.AuditLog) error
 	GetLogByHash(hash, clientID string) (*models.AuditLog, error)
+	GetLogByID(logID, clientID string) (*models.AuditLog, error)
 	GetProofsByHash(hash string) ([]models.MerkleProof, error)
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
@@ -32,6 +33,12 @@ func (r *auditRepoImpl) CreateLog(log *models.AuditLog) error {
 func (r *auditRepoImpl) GetLogByHash(hash, clientID string) (*models.AuditLog, error) {
 	var log models.AuditLog
 	err := r.db.Where("hash_value = ? AND client_id = ?", hash, clientID).First(&log).Error
+	return &log, err
+}
+
+func (r *auditRepoImpl) GetLogByID(logID, clientID string) (*models.AuditLog, error) {
+	var log models.AuditLog
+	err := r.db.Where("log_id = ? AND client_id = ?", logID, clientID).First(&log).Error
 	return &log, err
 }
 
