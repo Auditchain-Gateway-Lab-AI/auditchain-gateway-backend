@@ -100,6 +100,19 @@ func formatPgTimestamp(t time.Time) string {
 	return t.Local().Format(pgTimestampLayout)
 }
 
+// formatFabricTimestamp mem-parse timestamp RFC3339 dari Fabric lalu
+// memformat ulang ke gaya PostgreSQL. Jika gagal parse, kembalikan apa adanya.
+func formatFabricTimestamp(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return raw
+	}
+	return formatPgTimestamp(t)
+}
+
 type RangeItemResult struct {
 	LogID       string `json:"log_id"`
 	Resource    string `json:"resource"`
