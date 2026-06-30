@@ -91,22 +91,35 @@ type FabricAnchorData struct {
 	SignatureNode string `json:"signature_node"`
 }
 
-// pgTimestampLayout mencocokkan format default tampilan PostgreSQL,
-// contoh: 2026-06-30 09:06:52.766+07
-const pgTimestampLayout = "2006-01-02 15:04:05.000-07"
+// pgTimestampLayout mencocokkan format default tampilan PostgreSQL dengan
+// presisi microsecond (6 digit), contoh: 2026-06-30 09:06:52.766123+07
+//
+// CATATAN PRESISI:
+//   - PostgreSQL timestamptz native presisinya microsecond (6 digit).
+//   - Layout ini sengaja dibuat 6 digit (".000000") supaya tidak memotong
+//     presisi asli dari kolom timestamp/db_timestamp di DB.
+const pgTimestampLayout = "2006-01-02 15:04:05.000000-07"
 
 // formatPgTimestamp memformat time.Time ke string ala PostgreSQL (waktu lokal, bukan UTC)
 func formatPgTimestamp(t time.Time) string {
 	return t.Local().Format(pgTimestampLayout)
 }
 
-// formatFabricTimestamp mem-parse timestamp RFC3339 dari Fabric lalu
-// memformat ulang ke gaya PostgreSQL. Jika gagal parse, kembalikan apa adanya.
+// formatFabricTimestamp mem-parse timestamp dari Fabric lalu memformat ulang
+// ke gaya PostgreSQL. Jika gagal parse, kembalikan apa adanya.
+//
+// FIX PRESISI: gunakan time.RFC3339Nano (bukan time.RFC3339) saat parsing.
+// RFC3339 di Go bersifat strict dan GAGAL mem-parse string yang punya
+// pecahan detik (mis. "...01.123456789Z"), sehingga sebelumnya timestamp
+// presisi tinggi dari Fabric tidak pernah terbaca dengan benar.
+// RFC3339Nano kompatibel untuk mem-parse string RFC3339 dengan ATAU tanpa
+// pecahan detik, sehingga aman juga untuk anchor lama yang masih berformat
+// RFC3339 polos (presisi detik).
 func formatFabricTimestamp(raw string) string {
 	if raw == "" {
 		return raw
 	}
-	t, err := time.Parse(time.RFC3339, raw)
+	t, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil {
 		return raw
 	}
@@ -163,11 +176,10 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			MerkleRoot:     auditLog.MerkleRoot,
 		}
 
-		// FIX: db_timestamp harus berasal dari kolom DBTimestamp (waktu insert ke DB),
-		// bukan dari Timestamp (waktu kejadian/log dibuat). Sebelumnya kode salah
-		// memformat auditLog.Timestamp dua kali sehingga timestamp & db_timestamp
-		// selalu identik. DBTimestamp adalah pointer (nullable) untuk log lama
-		// sebelum kolom ini ditambahkan, jadi perlu nil-check.
+		// db_timestamp berasal dari kolom DBTimestamp (waktu insert ke DB),
+		// bukan dari Timestamp (waktu kejadian/log dibuat). DBTimestamp
+		// adalah pointer (nullable) untuk log lama sebelum kolom ini
+		// ditambahkan, jadi perlu nil-check.
 		if auditLog.DBTimestamp != nil {
 			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
@@ -242,7 +254,7 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 		anchor.MerkleRoot = v
 	}
 	if v, ok := parsed["timestamp"].(string); ok {
-		// FIX: format ulang timestamp Fabric (RFC3339, biasanya UTC) ke gaya
+		// Format ulang timestamp Fabric (RFC3339Nano, presisi tinggi) ke gaya
 		// PostgreSQL agar konsisten dengan field timestamp/db_timestamp lainnya.
 		anchor.Timestamp = formatFabricTimestamp(v)
 	}

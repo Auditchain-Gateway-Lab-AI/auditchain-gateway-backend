@@ -124,7 +124,12 @@ func (f *FabricService) AnchorPendingRoots() error {
 		}
 
 		anchorID := uuid.New().String()
-		timestamp := time.Now().Format(time.RFC3339)
+		// FIX: gunakan RFC3339Nano (bukan RFC3339) agar presisi sub-detik
+		// (microsecond/nanosecond) ikut tersimpan di ledger Fabric — bukan
+		// hanya presisi detik. Chaincode StoreMerkleRoot menerima timestamp
+		// sebagai string biasa, jadi perubahan format ini TIDAK memerlukan
+		// redeploy/upgrade chaincode.
+		timestamp := time.Now().Format(time.RFC3339Nano)
 		sourceGateway := "AuditChain_Gateway_Node1"
 		batchSizeStr := fmt.Sprintf("%d", meta.BatchSize)
 
