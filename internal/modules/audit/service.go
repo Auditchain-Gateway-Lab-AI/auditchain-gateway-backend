@@ -170,18 +170,11 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			Resource:       auditLog.Resource,
 			Action:         auditLog.Action,
 			Timestamp:      formatPgTimestamp(auditLog.Timestamp),
+			DBTimestamp:    formatPgTimestamp(*auditLog.DBTimestamp),
 			HashValue:      auditLog.HashValue,
 			Status:         auditLog.Status,
 			BlockchainTxID: auditLog.BlockchainTxID,
 			MerkleRoot:     auditLog.MerkleRoot,
-		}
-
-		// db_timestamp berasal dari kolom DBTimestamp (waktu insert ke DB),
-		// bukan dari Timestamp (waktu kejadian/log dibuat). DBTimestamp
-		// adalah pointer (nullable) untuk log lama sebelum kolom ini
-		// ditambahkan, jadi perlu nil-check.
-		if auditLog.DBTimestamp != nil {
-			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
 
 		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
