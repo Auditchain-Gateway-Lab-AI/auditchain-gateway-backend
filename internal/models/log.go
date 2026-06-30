@@ -11,7 +11,7 @@ type AuditLog struct {
 	Action               string     `gorm:"type:varchar(100)" json:"action"`
 	Resource             string     `gorm:"type:varchar(255)" json:"resource"`
 	Timestamp            time.Time  `gorm:"index" json:"timestamp"`
-	DBTimestamp          *time.Time `gorm:"column:db_timestamp;autoCreateTime" json:"db_timestamp"`
+	DBTimestamp          *time.Time `gorm:"index" json:"db_timestamp"`
 	SourceSystem         string     `gorm:"type:varchar(100);index" json:"source_system"`
 	AuthorizationContext string     `gorm:"type:text" json:"authorization_context"`
 	Metadata             string     `gorm:"type:jsonb" json:"metadata"`
