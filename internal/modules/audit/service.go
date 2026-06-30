@@ -81,6 +81,7 @@ type RangeSummary struct {
 	Invalid int `json:"invalid"`
 	Pending int `json:"pending"`
 }
+
 type FabricAnchorData struct {
 	AnchorID      string `json:"anchor_id"`
 	MerkleRoot    string `json:"merkle_root"`
@@ -89,12 +90,22 @@ type FabricAnchorData struct {
 	SourceGateway string `json:"source_gateway"`
 	SignatureNode string `json:"signature_node"`
 }
+
+// pgTimestampLayout mencocokkan format default tampilan PostgreSQL,
+// contoh: 2026-06-30 09:06:52.766+07
+const pgTimestampLayout = "2006-01-02 15:04:05.000-07"
+
+// formatPgTimestamp memformat time.Time ke string ala PostgreSQL (waktu lokal, bukan UTC)
+func formatPgTimestamp(t time.Time) string {
+	return t.Local().Format(pgTimestampLayout)
+}
+
 type RangeItemResult struct {
-	LogID       string  `json:"log_id"`
-	Resource    string  `json:"resource"`
-	Action      string  `json:"action"`
-	Timestamp   string  `json:"timestamp"`
-	DBTimestamp *string `json:"db_timestamp,omitempty"`
+	LogID       string `json:"log_id"`
+	Resource    string `json:"resource"`
+	Action      string `json:"action"`
+	Timestamp   string `json:"timestamp"`
+	DBTimestamp string `json:"db_timestamp,omitempty"`
 
 	HashValue  string `json:"hash_value"`
 	RecalcHash string `json:"recalc_hash"`
@@ -120,8 +131,8 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 
 	result := &RangeVerificationResult{
 		Range: RangeInfo{
-			From: from.UTC().Format(time.RFC3339),
-			To:   to.UTC().Format(time.RFC3339),
+			From: formatPgTimestamp(from),
+			To:   formatPgTimestamp(to),
 		},
 		Results: []RangeItemResult{},
 	}
@@ -132,17 +143,12 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			LogID:          auditLog.LogID,
 			Resource:       auditLog.Resource,
 			Action:         auditLog.Action,
-			Timestamp:      auditLog.Timestamp.UTC().Format(time.RFC3339),
+			Timestamp:      formatPgTimestamp(auditLog.Timestamp),
+			DBTimestamp:    formatPgTimestamp(auditLog.Timestamp),
 			HashValue:      auditLog.HashValue,
 			Status:         auditLog.Status,
 			BlockchainTxID: auditLog.BlockchainTxID,
 			MerkleRoot:     auditLog.MerkleRoot,
-		}
-
-		// DBTimestamp
-		if auditLog.DBTimestamp != nil {
-			s := auditLog.DBTimestamp.UTC().Format(time.RFC3339Nano)
-			item.DBTimestamp = &s
 		}
 
 		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
@@ -160,6 +166,10 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 		} else {
 			item.VerifyStatus = verifyResult.Status
 			item.Message = verifyResult.Message
+			if verifyResult.Status == "failed_local" {
+				item.ExpectedHash = verifyResult.ExpectedHash
+				item.ActualHash = verifyResult.ActualHash
+			}
 		}
 
 		// Fetch data Fabric jika sudah ANCHORED
