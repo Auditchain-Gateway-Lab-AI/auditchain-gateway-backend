@@ -157,11 +157,19 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			Resource:       auditLog.Resource,
 			Action:         auditLog.Action,
 			Timestamp:      formatPgTimestamp(auditLog.Timestamp),
-			DBTimestamp:    formatPgTimestamp(auditLog.Timestamp),
 			HashValue:      auditLog.HashValue,
 			Status:         auditLog.Status,
 			BlockchainTxID: auditLog.BlockchainTxID,
 			MerkleRoot:     auditLog.MerkleRoot,
+		}
+
+		// FIX: db_timestamp harus berasal dari kolom DBTimestamp (waktu insert ke DB),
+		// bukan dari Timestamp (waktu kejadian/log dibuat). Sebelumnya kode salah
+		// memformat auditLog.Timestamp dua kali sehingga timestamp & db_timestamp
+		// selalu identik. DBTimestamp adalah pointer (nullable) untuk log lama
+		// sebelum kolom ini ditambahkan, jadi perlu nil-check.
+		if auditLog.DBTimestamp != nil {
+			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
 
 		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
@@ -234,7 +242,9 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 		anchor.MerkleRoot = v
 	}
 	if v, ok := parsed["timestamp"].(string); ok {
-		anchor.Timestamp = v
+		// FIX: format ulang timestamp Fabric (RFC3339, biasanya UTC) ke gaya
+		// PostgreSQL agar konsisten dengan field timestamp/db_timestamp lainnya.
+		anchor.Timestamp = formatFabricTimestamp(v)
 	}
 	if v, ok := parsed["batch_size"].(string); ok {
 		anchor.BatchSize = v
