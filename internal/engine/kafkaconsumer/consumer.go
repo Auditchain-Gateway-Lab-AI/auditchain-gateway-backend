@@ -187,9 +187,19 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
-	var payload DebeziumOracleMessage
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(msg.Value, &rawMap); err != nil {
 		return fmt.Errorf("gagal parse JSON: %w", err)
+	}
+
+	var payload DebeziumOracleMessage
+	if innerPayload, exists := rawMap["payload"]; exists {
+		if innerMap, ok := innerPayload.(map[string]interface{}); ok {
+			payload = innerMap
+		}
+	}
+	if payload == nil {
+		payload = rawMap
 	}
 
 	op, _ := payload["__op"].(string)

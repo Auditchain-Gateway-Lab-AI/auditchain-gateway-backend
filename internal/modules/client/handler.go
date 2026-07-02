@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"go-blockchain-api/internal/models"
 	"net/http"
 
@@ -75,6 +76,41 @@ func (h *Handler) CreateKafkaConfig(c *gin.Context) {
 		"kafka_brokers": cfg.KafkaBrokers,
 	})
 }
+
+func (h *Handler) ToggleKafkaConfig(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID konfigurasi tidak boleh kosong"})
+		return
+	}
+
+	var cfg models.ClientKafkaConfig
+	if err := h.DB.First(&cfg, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Konfigurasi Kafka tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencari konfigurasi Kafka"})
+		}
+		return
+	}
+
+	// Toggle status
+	cfg.IsActive = !cfg.IsActive
+
+	if err := h.DB.Save(&cfg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memperbarui status konfigurasi Kafka"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Status konfigurasi Kafka berhasil diperbarui",
+		"id":            cfg.ID,
+		"client_id":     cfg.ClientID,
+		"kafka_brokers": cfg.KafkaBrokers,
+		"is_active":     cfg.IsActive,
+	})
+}
+
 
 func (h *Handler) CreateClient(c *gin.Context) {
 	var req CreateClientRequest
