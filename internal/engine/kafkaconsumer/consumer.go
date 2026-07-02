@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -68,7 +68,8 @@ func (e *Engine) startClientConsumer(ctx context.Context, cfg models.ClientKafka
 
 // discoverAndConsume discover topic lalu consume
 func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaConfig) error {
-	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
+	dialer := getDialer(cfg)
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.KafkaBrokers)
 	if err != nil {
 		return fmt.Errorf("gagal konek Kafka: %w", err)
 	}
@@ -106,8 +107,9 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		GroupTopics:    topics,
 		MinBytes:       1,
 		MaxBytes:       10e6,
-		CommitInterval: 0, // Matikan background auto-commit
-		StartOffset:    kafka.FirstOffset, // Mulai dari awal jika offset tidak ditemukan/kosong
+		CommitInterval: time.Second,
+		StartOffset:    kafka.LastOffset,
+		Dialer:         dialer,
 	})
 	defer reader.Close()
 
@@ -139,17 +141,16 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 				if ctx.Err() != nil {
 					return nil
 				}
+				if err != context.DeadlineExceeded && err != context.Canceled {
+					log.Printf("⚠️  [KafkaConsumer] Gagal fetch message klien=%s: %v", cfg.ClientID, err)
+					time.Sleep(1 * time.Second)
+				}
 				continue
 			}
 
 			if err := e.processMessage(msg, cfg); err != nil {
 				log.Printf("⚠️  [KafkaConsumer] Gagal proses message topic=%s offset=%d: %v",
 					msg.Topic, msg.Offset, err)
-				if isTransientError(err) {
-					// Jika error transient (misal DB error), hentikan loop consumer agar re-discover & retry dari offset terakhir
-					return fmt.Errorf("transient error saat memproses message: %w", err)
-				}
-				// Jika error permanent (misal parsing error), abaikan dan commit offset agar tidak stuck
 			}
 
 			if err := reader.CommitMessages(ctx, msg); err != nil {
@@ -161,7 +162,8 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 
 // discoverTopics helper untuk cek daftar topic terkini
 func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
-	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
+	dialer := getDialer(cfg)
+	conn, err := dialer.Dial("tcp", cfg.KafkaBrokers)
 	if err != nil {
 		return nil
 	}
@@ -257,8 +259,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		resource, timestamp, cfg.ClientID,
 	).First(&existing).Error; err == nil {
 		return nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("gagal cek duplikasi log: %w", err)
 	}
 
 	// Hitung previous hash
@@ -268,8 +268,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		cfg.ClientID, []string{"HASHED", "ANCHORED"},
 	).Order("timestamp desc").First(&lastLog).Error; err == nil {
 		prevHash = lastLog.HashValue
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("gagal query previous hash: %w", err)
 	} else {
 		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
 	}
@@ -461,19 +459,33 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 	return crypto.GenerateSHA3_256(contextString)
 }
 
-func isTransientError(err error) bool {
-	if err == nil {
-		return false
+type mapResolver struct {
+	overrides map[string]string
+}
+
+func (r *mapResolver) LookupHost(ctx context.Context, host string) ([]string, error) {
+	if ip, ok := r.overrides[host]; ok {
+		return []string{ip}, nil
 	}
-	errStr := err.Error()
-	// Jika error disebabkan oleh DB, itu transient (sementara)
-	if strings.Contains(errStr, "gagal simpan audit") ||
-		strings.Contains(errStr, "gagal cek duplikasi") ||
-		strings.Contains(errStr, "gagal query previous hash") ||
-		strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "database") ||
-		strings.Contains(errStr, "sql") {
-		return true
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
+func getDialer(cfg models.ClientKafkaConfig) *kafka.Dialer {
+	overrides := make(map[string]string)
+	brokers := strings.Split(cfg.KafkaBrokers, ",")
+	for _, broker := range brokers {
+		host, _, err := net.SplitHostPort(broker)
+		if err == nil && host != "" {
+			overrides["localhost"] = host
+			overrides["127.0.0.1"] = host
+		}
 	}
-	return false
+
+	return &kafka.Dialer{
+		Timeout:   10 * time.Second,
+		DualStack: true,
+		Resolver: &mapResolver{
+			overrides: overrides,
+		},
+	}
 }
