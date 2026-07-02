@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -105,8 +106,8 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		GroupTopics:    topics,
 		MinBytes:       1,
 		MaxBytes:       10e6,
-		CommitInterval: time.Second,
-		StartOffset:    kafka.LastOffset,
+		CommitInterval: 0, // Matikan background auto-commit
+		StartOffset:    kafka.FirstOffset, // Mulai dari awal jika offset tidak ditemukan/kosong
 	})
 	defer reader.Close()
 
@@ -144,6 +145,11 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 			if err := e.processMessage(msg, cfg); err != nil {
 				log.Printf("⚠️  [KafkaConsumer] Gagal proses message topic=%s offset=%d: %v",
 					msg.Topic, msg.Offset, err)
+				if isTransientError(err) {
+					// Jika error transient (misal DB error), hentikan loop consumer agar re-discover & retry dari offset terakhir
+					return fmt.Errorf("transient error saat memproses message: %w", err)
+				}
+				// Jika error permanent (misal parsing error), abaikan dan commit offset agar tidak stuck
 			}
 
 			if err := reader.CommitMessages(ctx, msg); err != nil {
@@ -251,6 +257,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		resource, timestamp, cfg.ClientID,
 	).First(&existing).Error; err == nil {
 		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("gagal cek duplikasi log: %w", err)
 	}
 
 	// Hitung previous hash
@@ -260,6 +268,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		cfg.ClientID, []string{"HASHED", "ANCHORED"},
 	).Order("timestamp desc").First(&lastLog).Error; err == nil {
 		prevHash = lastLog.HashValue
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("gagal query previous hash: %w", err)
 	} else {
 		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
 	}
@@ -449,4 +459,21 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Metadata,
 	)
 	return crypto.GenerateSHA3_256(contextString)
+}
+
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Jika error disebabkan oleh DB, itu transient (sementara)
+	if strings.Contains(errStr, "gagal simpan audit") ||
+		strings.Contains(errStr, "gagal cek duplikasi") ||
+		strings.Contains(errStr, "gagal query previous hash") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "database") ||
+		strings.Contains(errStr, "sql") {
+		return true
+	}
+	return false
 }
