@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 
@@ -24,8 +23,7 @@ import (
 type DebeziumOracleMessage map[string]interface{}
 
 type Engine struct {
-	DB     *gorm.DB
-	Fabric *blockchain.FabricService
+	DB *gorm.DB
 }
 
 // StartConsumers memulai consumer untuk semua klien yang punya ClientKafkaConfig aktif
@@ -47,9 +45,38 @@ func (e *Engine) StartConsumers(ctx context.Context) error {
 	return nil
 }
 
+// resolveSourceSystem mengambil nama sumber sistem untuk klien.
+// Prioritas: Client.CompanyName (tabel clients) — supaya source_system
+// selalu mencerminkan identitas resmi tenant, bukan string bebas yang
+// diisi manual saat registrasi ClientKafkaConfig.
+// Fallback ke cfg.SourceSystem jika Client tidak ditemukan (mis. sudah
+// dihapus) atau CompanyName kosong.
+func (e *Engine) resolveSourceSystem(cfg models.ClientKafkaConfig) string {
+	var clientData models.Client
+	if err := e.DB.Select("company_name").
+		Where("id = ?", cfg.ClientID).
+		First(&clientData).Error; err != nil {
+		log.Printf("⚠️  [KafkaConsumer] Gagal ambil company_name klien=%s, fallback ke cfg.SourceSystem: %v",
+			cfg.ClientID, err)
+		return cfg.SourceSystem
+	}
+
+	if clientData.CompanyName == "" {
+		return cfg.SourceSystem
+	}
+
+	return clientData.CompanyName
+}
+
 // startClientConsumer consume topic untuk satu klien
 func (e *Engine) startClientConsumer(ctx context.Context, cfg models.ClientKafkaConfig) {
 	log.Printf("🎧 [KafkaConsumer] Memulai consumer klien=%s prefix=%s", cfg.ClientID, cfg.TopicPrefix)
+
+	// Resolve sekali di awal siklus hidup consumer — dipakai untuk semua
+	// message klien ini selama consumer berjalan. Kalau company_name
+	// berubah di tengah jalan, akan ter-refresh saat consumer restart
+	// (misal karena discoverAndConsume return nil untuk rediscovery topic).
+	sourceSystemName := e.resolveSourceSystem(cfg)
 
 	for {
 		select {
@@ -57,7 +84,7 @@ func (e *Engine) startClientConsumer(ctx context.Context, cfg models.ClientKafka
 			log.Printf("🛑 [KafkaConsumer] Consumer klien=%s berhenti", cfg.ClientID)
 			return
 		default:
-			if err := e.discoverAndConsume(ctx, cfg); err != nil {
+			if err := e.discoverAndConsume(ctx, cfg, sourceSystemName); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
@@ -69,7 +96,7 @@ func (e *Engine) startClientConsumer(ctx context.Context, cfg models.ClientKafka
 }
 
 // discoverAndConsume discover topic lalu consume
-func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaConfig) error {
+func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaConfig, sourceSystemName string) error {
 	dialer := getDialer(cfg)
 	conn, err := dialer.DialContext(ctx, "tcp", cfg.KafkaBrokers)
 	if err != nil {
@@ -150,7 +177,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 				continue
 			}
 
-			if err := e.processMessage(msg, cfg); err != nil {
+			if err := e.processMessage(msg, cfg, sourceSystemName); err != nil {
 				log.Printf("⚠️  [KafkaConsumer] Gagal proses message topic=%s offset=%d: %v",
 					msg.Topic, msg.Offset, err)
 			}
@@ -192,7 +219,7 @@ func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
 }
 
 // processMessage memproses satu message Kafka menjadi AuditLog
-func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig) error {
+func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig, sourceSystemName string) error {
 	if len(msg.Value) == 0 {
 		return nil
 	}
@@ -237,6 +264,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
+	// Actor tetap dinamis dari __user_name (identitas DB user Oracle yang
+	// melakukan perubahan). Tidak diubah — sudah sesuai perilaku semula.
 	actor := userName
 	if actor == "" {
 		actor = "simrs-system"
@@ -275,13 +304,15 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 
 	auditLog := &models.AuditLog{
-		LogID:        generateLogID(),
-		ClientID:     cfg.ClientID,
-		Actor:        actor,
-		Action:       action,
-		Resource:     resource,
-		Timestamp:    timestamp,
-		SourceSystem: cfg.SourceSystem,
+		LogID:     generateLogID(),
+		ClientID:  cfg.ClientID,
+		Actor:     actor,
+		Action:    action,
+		Resource:  resource,
+		Timestamp: timestamp,
+		// SourceSystem sekarang diambil dari Client.CompanyName (di-resolve
+		// sekali di startClientConsumer), bukan lagi dari cfg.SourceSystem.
+		SourceSystem: sourceSystemName,
 		Metadata:     canonicalMeta,
 		// AuthorizationContext sengaja dibiarkan "" untuk log dari Kafka
 		// — konsisten dengan normalisasi di generateLogHash
@@ -298,12 +329,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return fmt.Errorf("gagal simpan audit log: %w", err)
 	}
 
-	if e.Fabric != nil {
-		if err := e.Fabric.AnchorSingleHash(auditLog); err != nil {
-			log.Printf("⚠️  [KafkaConsumer] Gagal anchor langsung log %s: %v", auditLog.LogID, err)
-		}
-	}
-
 	// Simpan Kafka offset untuk verifikasi Lapis 3
 	kafkaOffset := &models.KafkaOffset{
 		LogID:     auditLog.LogID,
@@ -315,8 +340,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
 	}
 
-	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s",
-		action, resource, cfg.ClientID)
+	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
+		action, resource, cfg.ClientID, sourceSystemName)
 
 	return nil
 }

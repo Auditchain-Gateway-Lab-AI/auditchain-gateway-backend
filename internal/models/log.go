@@ -27,7 +27,15 @@ type AuditLog struct {
 	PreviousHash   string  `gorm:"type:varchar(64)" json:"previous_hash"`
 	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`
 	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
-	Status         string  `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
+
+	// BlockchainTimestamp menyimpan waktu saat log ini (atau batch Merkle
+	// Root yang memuatnya) di-anchor ke Hyperledger Fabric — nilai yang
+	// sama dengan parameter timestamp yang dikirim ke chaincode
+	// StoreMerkleRoot. Tetap nil selama status belum ANCHORED.
+	// Dipakai untuk mengukur selisih waktu terhadap DBTimestamp/Timestamp.
+	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp"`
+
+	Status string `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
 }
 
 type MerkleMetadata struct {

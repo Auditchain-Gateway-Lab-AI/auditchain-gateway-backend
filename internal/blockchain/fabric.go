@@ -124,12 +124,19 @@ func (f *FabricService) AnchorPendingRoots() error {
 		}
 
 		anchorID := uuid.New().String()
+
+		// anchorTime dipakai untuk DUA hal: (1) parameter timestamp yang
+		// dikirim ke chaincode, dan (2) nilai kolom blockchain_timestamp
+		// di DB. Sengaja satu variabel yang sama agar keduanya identik
+		// persis (bukan dua time.Now() terpisah yang bisa beda beberapa ms).
+		anchorTime := time.Now()
+
 		// FIX: gunakan RFC3339Nano (bukan RFC3339) agar presisi sub-detik
 		// (microsecond/nanosecond) ikut tersimpan di ledger Fabric — bukan
 		// hanya presisi detik. Chaincode StoreMerkleRoot menerima timestamp
 		// sebagai string biasa, jadi perubahan format ini TIDAK memerlukan
 		// redeploy/upgrade chaincode.
-		timestamp := time.Now().Format(time.RFC3339Nano)
+		timestamp := anchorTime.Format(time.RFC3339Nano)
 		sourceGateway := "AuditChain_Gateway_Node1"
 		batchSizeStr := fmt.Sprintf("%d", meta.BatchSize)
 
@@ -146,12 +153,14 @@ func (f *FabricService) AnchorPendingRoots() error {
 		// Karena SDK Gateway v1.x mengabstraksi TxID, kita gunakan anchorID sebagai representasi transaksi (atau modifikasi chaincode untuk me-return TxID asli)
 		blockchainTxID := anchorID
 
-		// Update database: Tandai log sebagai ANCHORED dan simpan TxID
+		// Update database: Tandai log sebagai ANCHORED, simpan TxID, dan
+		// catat blockchain_timestamp (waktu anchoring on-chain).
 		err = f.DB.Model(&models.AuditLog{}).
 			Where("merkle_root = ?", root).
 			Updates(map[string]interface{}{
-				"status":           "ANCHORED",
-				"blockchain_tx_id": blockchainTxID,
+				"status":               "ANCHORED",
+				"blockchain_tx_id":     blockchainTxID,
+				"blockchain_timestamp": anchorTime,
 			}).Error
 
 		if err == nil {
@@ -160,33 +169,6 @@ func (f *FabricService) AnchorPendingRoots() error {
 	}
 
 	return nil
-}
-
-// AnchorSingleHash mem-anchor satu log secara langsung (event-driven),
-// dipanggil sesaat setelah log tersimpan sebagai HASHED.
-func (f *FabricService) AnchorSingleHash(logItem *models.AuditLog) error {
-	anchorID := uuid.New().String()
-	timestamp := time.Now().Format(time.RFC3339Nano)
-	sourceGateway := "AuditChain_Gateway_Node1"
-
-	_, err := f.Contract.SubmitTransaction("StoreMerkleRoot", anchorID, logItem.HashValue, timestamp, sourceGateway, "1", "System_Signature")
-	if err != nil {
-		log.Printf("[Anchoring-Direct] ❌ Gagal anchor log %s: %v\n", logItem.LogID, err)
-		return err
-	}
-
-	err = f.DB.Model(&models.AuditLog{}).
-		Where("log_id = ?", logItem.LogID).
-		Updates(map[string]interface{}{
-			"status":           "ANCHORED",
-			"blockchain_tx_id": anchorID,
-			"merkle_root":      logItem.HashValue,
-		}).Error
-
-	if err == nil {
-		log.Printf("[Anchoring-Direct] ✅ Sukses! log=%s Hash=%s TxID=%s", logItem.LogID, logItem.HashValue, anchorID)
-	}
-	return err
 }
 
 // GetAnchorFromLedger menarik data Merkle Root asli yang tersimpan di dalam jaringan Fabric
