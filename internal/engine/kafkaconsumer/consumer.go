@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -67,7 +68,8 @@ func (e *Engine) startClientConsumer(ctx context.Context, cfg models.ClientKafka
 
 // discoverAndConsume discover topic lalu consume
 func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaConfig) error {
-	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
+	dialer := getDialer(cfg)
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.KafkaBrokers)
 	if err != nil {
 		return fmt.Errorf("gagal konek Kafka: %w", err)
 	}
@@ -107,6 +109,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		MaxBytes:       10e6,
 		CommitInterval: time.Second,
 		StartOffset:    kafka.LastOffset,
+		Dialer:         dialer,
 	})
 	defer reader.Close()
 
@@ -138,6 +141,10 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 				if ctx.Err() != nil {
 					return nil
 				}
+				if err != context.DeadlineExceeded && err != context.Canceled {
+					log.Printf("⚠️  [KafkaConsumer] Gagal fetch message klien=%s: %v", cfg.ClientID, err)
+					time.Sleep(1 * time.Second)
+				}
 				continue
 			}
 
@@ -155,7 +162,8 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 
 // discoverTopics helper untuk cek daftar topic terkini
 func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
-	conn, err := kafka.Dial("tcp", cfg.KafkaBrokers)
+	dialer := getDialer(cfg)
+	conn, err := dialer.Dial("tcp", cfg.KafkaBrokers)
 	if err != nil {
 		return nil
 	}
@@ -187,9 +195,19 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
-	var payload DebeziumOracleMessage
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(msg.Value, &rawMap); err != nil {
 		return fmt.Errorf("gagal parse JSON: %w", err)
+	}
+
+	var payload DebeziumOracleMessage
+	if innerPayload, exists := rawMap["payload"]; exists {
+		if innerMap, ok := innerPayload.(map[string]interface{}); ok {
+			payload = innerMap
+		}
+	}
+	if payload == nil {
+		payload = rawMap
 	}
 
 	op, _ := payload["__op"].(string)
@@ -439,4 +457,35 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Metadata,
 	)
 	return crypto.GenerateSHA3_256(contextString)
+}
+
+type mapResolver struct {
+	overrides map[string]string
+}
+
+func (r *mapResolver) LookupHost(ctx context.Context, host string) ([]string, error) {
+	if ip, ok := r.overrides[host]; ok {
+		return []string{ip}, nil
+	}
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
+func getDialer(cfg models.ClientKafkaConfig) *kafka.Dialer {
+	overrides := make(map[string]string)
+	brokers := strings.Split(cfg.KafkaBrokers, ",")
+	for _, broker := range brokers {
+		host, _, err := net.SplitHostPort(broker)
+		if err == nil && host != "" {
+			overrides["localhost"] = host
+			overrides["127.0.0.1"] = host
+		}
+	}
+
+	return &kafka.Dialer{
+		Timeout:   10 * time.Second,
+		DualStack: true,
+		Resolver: &mapResolver{
+			overrides: overrides,
+		},
+	}
 }

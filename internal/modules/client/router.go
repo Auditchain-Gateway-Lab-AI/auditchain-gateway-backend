@@ -7,5 +7,6 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	{
 		adminRoutes.POST("/clients", h.CreateClient)
 		adminRoutes.POST("/kafka-config", h.CreateKafkaConfig)
+		adminRoutes.PATCH("/kafka-config/:id/toggle", h.ToggleKafkaConfig)
 	}
 }

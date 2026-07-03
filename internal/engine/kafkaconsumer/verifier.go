@@ -74,9 +74,19 @@ func (v *KafkaVerifier) VerifyAgainstKafka(auditLog *models.AuditLog) (*KafkaVer
 	}
 
 	// Parse message
-	var payload DebeziumOracleMessage
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(msg.Value, &rawMap); err != nil {
 		return nil, fmt.Errorf("gagal parse message Kafka: %w", err)
+	}
+
+	var payload DebeziumOracleMessage
+	if innerPayload, exists := rawMap["payload"]; exists {
+		if innerMap, ok := innerPayload.(map[string]interface{}); ok {
+			payload = innerMap
+		}
+	}
+	if payload == nil {
+		payload = rawMap
 	}
 
 	// Normalisasi ulang — sama persis dengan saat pertama diproses
