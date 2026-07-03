@@ -29,60 +29,47 @@ import (
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/config"
+	"go-blockchain-api/internal/engine/aggregator"
+	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
 )
 
-// TESTING (branch: no-merkle-direct-anchor):
-// Merkle Tree batching + ticker dinonaktifkan sementara untuk mengukur
-// selisih waktu murni antara db_timestamp (gateway) dan timestamp on-chain
-// per log individual. Anchoring sekarang bersifat event-driven — dipicu
-// langsung di kafkaconsumer.Engine.processMessage() setiap kali log baru
-// masuk, bukan menunggu siklus ticker/batch.
-//
-// Semula (jangan dihapus, tinggal uncomment untuk revert ke mode Merkle Tree):
-//
-//   func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService) {
-//       hashEngine := &hasher.Engine{DB: db}
-//       aggEngine := &aggregator.Engine{DB: db}
-//       kafkaEngine := &kafkaconsumer.Engine{DB: db}
-//
-//       go func() {
-//           ticker := time.NewTicker(10 * time.Second)
-//           defer ticker.Stop()
-//           for {
-//               select {
-//               case <-ctx.Done():
-//                   return
-//               case <-ticker.C:
-//                   hashEngine.ProcessPendingLogs()
-//                   aggEngine.ProcessBatch(10)
-//                   if fabricSvc != nil {
-//                       fabricSvc.AnchorPendingRoots()
-//                   }
-//               }
-//           }
-//       }()
-//
-//       go func() {
-//           kafkaEngine.StartConsumers(ctx)
-//       }()
-//   }
-
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService) {
-	// Fabric di-inject ke kafkaconsumer.Engine agar setiap log yang berhasil
-	// disimpan (HASHED) langsung di-anchor saat itu juga (event-driven),
-	// bukan menunggu ticker. Lihat AnchorSingleHash di internal/blockchain/fabric.go
-	// dan pemanggilannya di internal/engine/kafkaconsumer/consumer.go.
-	kafkaEngine := &kafkaconsumer.Engine{
-		DB:     db,
-		Fabric: fabricSvc,
-	}
+	hashEngine := &hasher.Engine{DB: db}
+	aggEngine := &aggregator.Engine{DB: db}
+	kafkaEngine := &kafkaconsumer.Engine{DB: db}
 
+	// Ticker pipeline: hasher + aggregator (batch=10) + anchoring setiap 10 detik
 	go func() {
-		log.Println("⚙️  [KafkaConsumer] Worker mulai berjalan (mode: direct-anchor, tanpa ticker/batch)...")
+		log.Println("⚙️  Pipeline Worker mulai berjalan...")
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("⚙️  Pipeline Worker berhenti.")
+				return
+			case <-ticker.C:
+				if err := hashEngine.ProcessPendingLogs(); err != nil {
+					log.Printf("❌ [Hasher] Error: %v\n", err)
+				}
+				if err := aggEngine.ProcessBatch(10); err != nil {
+					log.Printf("❌ [Aggregator] Error: %v\n", err)
+				}
+				if fabricSvc != nil {
+					if err := fabricSvc.AnchorPendingRoots(); err != nil {
+						log.Printf("❌ [Anchoring] Error: %v\n", err)
+					}
+				}
+			}
+		}
+	}()
+
+	// Kafka consumer: satu goroutine per klien aktif
+	go func() {
 		if err := kafkaEngine.StartConsumers(ctx); err != nil {
 			log.Printf("⚠️  [KafkaConsumer] Error start: %v\n", err)
 		}
