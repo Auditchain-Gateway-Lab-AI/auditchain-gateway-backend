@@ -12,8 +12,65 @@ type Handler struct {
 	Service Service
 }
 
+type RecentLogResponse struct {
+	LogID          string  `json:"log_id"`
+	ClientID       string  `json:"client_id"`
+	Actor          string  `json:"actor"`
+	Action         string  `json:"action"`
+	SourceTable    string  `json:"source_table"`
+	SourceSystem   string  `json:"source_system"`
+	Timestamp      string  `json:"timestamp"`
+	HashValue      string  `json:"hash_value"`
+	PreviousHash   string  `json:"previous_hash"`
+	MerkleRoot     string  `json:"merkle_root"`
+	BlockchainTxID *string `json:"blockchain_tx_id"`
+	Status         string  `json:"status"`
+	Metadata       string  `json:"metadata"`
+}
+
 func NewHandler(service Service) *Handler {
 	return &Handler{Service: service}
+}
+
+// parseSourceTable mengambil nama tabel saja dari resource "tabel:id".
+// Tidak mengubah data di DB — resource tetap tersimpan format aslinya.
+func parseSourceTable(resource string) string {
+	if idx := strings.Index(resource, ":"); idx != -1 {
+		return resource[:idx]
+	}
+	return resource
+}
+
+func (h *Handler) GetRecentLogs(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+	logs, err := h.Service.GetRecentLogs(500, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log terbaru"})
+		return
+	}
+
+	response := make([]RecentLogResponse, 0, len(logs))
+	for _, l := range logs {
+		response = append(response, RecentLogResponse{
+			LogID:          l.LogID,
+			ClientID:       l.ClientID,
+			Actor:          l.Actor,
+			Action:         l.Action,
+			SourceTable:    parseSourceTable(l.Resource),
+			SourceSystem:   l.SourceSystem,
+			Timestamp:      formatPgTimestamp(l.Timestamp), // full precision, sudah ada di service.go
+			HashValue:      l.HashValue,
+			PreviousHash:   l.PreviousHash,
+			MerkleRoot:     l.MerkleRoot,
+			BlockchainTxID: l.BlockchainTxID,
+			Status:         l.Status,
+			Metadata:       l.Metadata,
+		})
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) getClientID(c *gin.Context) (string, bool) {
@@ -177,19 +234,6 @@ func (h *Handler) VerifyData(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusConflict, result)
 	}
-}
-
-func (h *Handler) GetRecentLogs(c *gin.Context) {
-	clientID, ok := h.getClientID(c)
-	if !ok {
-		return
-	}
-	logs, err := h.Service.GetRecentLogs(500, clientID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log terbaru"})
-		return
-	}
-	c.JSON(http.StatusOK, logs)
 }
 
 func (h *Handler) GetResourceInventory(c *gin.Context) {

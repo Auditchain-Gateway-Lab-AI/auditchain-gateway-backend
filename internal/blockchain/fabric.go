@@ -162,6 +162,33 @@ func (f *FabricService) AnchorPendingRoots() error {
 	return nil
 }
 
+// AnchorSingleHash mem-anchor satu log secara langsung (event-driven),
+// dipanggil sesaat setelah log tersimpan sebagai HASHED.
+func (f *FabricService) AnchorSingleHash(logItem *models.AuditLog) error {
+	anchorID := uuid.New().String()
+	timestamp := time.Now().Format(time.RFC3339Nano)
+	sourceGateway := "AuditChain_Gateway_Node1"
+
+	_, err := f.Contract.SubmitTransaction("StoreMerkleRoot", anchorID, logItem.HashValue, timestamp, sourceGateway, "1", "System_Signature")
+	if err != nil {
+		log.Printf("[Anchoring-Direct] ❌ Gagal anchor log %s: %v\n", logItem.LogID, err)
+		return err
+	}
+
+	err = f.DB.Model(&models.AuditLog{}).
+		Where("log_id = ?", logItem.LogID).
+		Updates(map[string]interface{}{
+			"status":           "ANCHORED",
+			"blockchain_tx_id": anchorID,
+			"merkle_root":      logItem.HashValue,
+		}).Error
+
+	if err == nil {
+		log.Printf("[Anchoring-Direct] ✅ Sukses! log=%s Hash=%s TxID=%s", logItem.LogID, logItem.HashValue, anchorID)
+	}
+	return err
+}
+
 // GetAnchorFromLedger menarik data Merkle Root asli yang tersimpan di dalam jaringan Fabric
 func (f *FabricService) GetAnchorFromLedger(anchorID string) (string, error) {
 	// Catatan: Kita menggunakan EvaluateTransaction, bukan SubmitTransaction

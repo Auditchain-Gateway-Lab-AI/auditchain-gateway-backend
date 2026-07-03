@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 
@@ -23,7 +24,8 @@ import (
 type DebeziumOracleMessage map[string]interface{}
 
 type Engine struct {
-	DB *gorm.DB
+	DB     *gorm.DB
+	Fabric *blockchain.FabricService
 }
 
 // StartConsumers memulai consumer untuk semua klien yang punya ClientKafkaConfig aktif
@@ -294,6 +296,12 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	if err := e.DB.Create(auditLog).Error; err != nil {
 		return fmt.Errorf("gagal simpan audit log: %w", err)
+	}
+
+	if e.Fabric != nil {
+		if err := e.Fabric.AnchorSingleHash(auditLog); err != nil {
+			log.Printf("⚠️  [KafkaConsumer] Gagal anchor langsung log %s: %v", auditLog.LogID, err)
+		}
 	}
 
 	// Simpan Kafka offset untuk verifikasi Lapis 3
