@@ -224,10 +224,17 @@ func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
 
 // processMessage memproses satu message Kafka menjadi AuditLog.
 //
-// TESTING: mekanisme local chain (query previous hash + field GENESIS)
-// DIHAPUS TOTAL — tidak lagi relevan setelah Merkle Tree dihilangkan.
-// Alur sekarang: parse → hash (tanpa prevHash) → save (HASHED) → anchor
-// langsung ke Fabric, semua dalam satu pemanggilan sinkron.
+// TESTING: consume→hash→INSERT bersifat SINKRON dan SEKUENSIAL (loop tidak
+// lanjut ke message berikutnya sebelum INSERT selesai) — ini menjaga
+// db_timestamp selalu mencerminkan waktu insert yang sesegera mungkin
+// setelah message diambil dari Kafka.
+//
+// ANCHORING ke Fabric DIPISAH menjadi goroutine terpisah (fire-and-forget)
+// setelah INSERT sukses — supaya durasi SubmitTransaction (~2-3 detik)
+// TIDAK memblokir consumer mengambil message berikutnya. Ini membuat dua
+// pengukuran independen:
+//   - timestamp → db_timestamp   : murni latency consume+insert (instan)
+//   - db_timestamp → blockchain_timestamp : murni latency anchoring Fabric
 func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig, sourceSystemName string) error {
 	if len(msg.Value) == 0 {
 		return nil
@@ -273,7 +280,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
-	// Actor tetap dinamis dari __user_name — tidak diubah.
 	actor := userName
 	if actor == "" {
 		actor = "simrs-system"
@@ -290,8 +296,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	metaBytes, _ := json.Marshal(metadata)
 	canonicalMeta := string(metaBytes)
 
-	// Cek duplikasi (tidak terkait local chain — tetap dipertahankan
-	// untuk mencegah double-insert kalau Kafka redeliver message).
+	// Cek duplikasi
 	var existing models.AuditLog
 	if err := e.DB.Where(
 		"resource = ? AND timestamp = ? AND client_id = ?",
@@ -301,23 +306,25 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	}
 
 	auditLog := &models.AuditLog{
-		LogID:        generateLogID(),
-		ClientID:     cfg.ClientID,
-		Actor:        actor,
-		Action:       action,
-		Resource:     resource,
-		Timestamp:    timestamp,
-		SourceSystem: sourceSystemName,
-		Metadata:     canonicalMeta,
-		// AuthorizationContext sengaja dibiarkan "" untuk log dari Kafka
+		LogID:                generateLogID(),
+		ClientID:             cfg.ClientID,
+		Actor:                actor,
+		Action:               action,
+		Resource:             resource,
+		Timestamp:            timestamp,
+		SourceSystem:         sourceSystemName,
+		Metadata:             canonicalMeta,
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
 	}
 
-	// Hash tanpa prevHash — setiap log berdiri sendiri
 	auditLog.HashValue = generateLogHash(auditLog)
 	auditLog.Status = "HASHED"
 
+	// INSERT sinkron — db_timestamp tercatat DI SINI, sesegera mungkin
+	// setelah message diambil dari Kafka. Loop consumer akan lanjut fetch
+	// message berikutnya SEGERA setelah baris ini selesai, tanpa menunggu
+	// anchoring.
 	if err := e.DB.Create(auditLog).Error; err != nil {
 		return fmt.Errorf("gagal simpan audit log: %w", err)
 	}
@@ -335,11 +342,21 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
 		action, resource, cfg.ClientID, sourceSystemName)
 
-	// Anchor langsung ke Fabric — sinkron, blocking, strict serial by design.
+	// ANCHORING DILEMPAR KE GOROUTINE TERPISAH (fire-and-forget).
+	// processMessage return SEGERA setelah baris ini, sehingga
+	// discoverAndConsume bisa langsung FetchMessage berikutnya tanpa
+	// menunggu SubmitTransaction ke Fabric selesai (~2-3 detik).
+	//
+	// CATATAN: auditLog di-pass by value copy ke closure agar aman dari
+	// race condition — auditLog (pointer asli) tidak dipakai lagi setelah
+	// titik ini di goroutine utama.
 	if e.Fabric != nil {
-		if err := e.Fabric.AnchorSingleHash(auditLog); err != nil {
-			log.Printf("⚠️  [KafkaConsumer] Gagal anchor langsung log %s: %v", auditLog.LogID, err)
-		}
+		logForAnchor := *auditLog // copy struct, aman untuk goroutine terpisah
+		go func(logCopy models.AuditLog) {
+			if err := e.Fabric.AnchorSingleHash(&logCopy); err != nil {
+				log.Printf("⚠️  [Anchoring-Async] Gagal anchor log %s: %v", logCopy.LogID, err)
+			}
+		}(logForAnchor)
 	}
 
 	return nil
