@@ -113,7 +113,7 @@ func (v *KafkaVerifier) VerifyAgainstKafka(auditLog *models.AuditLog) (*KafkaVer
 	metadata := extractMetadata(payload)
 	metaBytes, _ := json.Marshal(metadata)
 
-	// Rekonstruksi AuditLog untuk hashing
+	// Rekonstruksi AuditLog untuk hashing — tanpa PreviousHash
 	reconstructed := &models.AuditLog{
 		LogID:                auditLog.LogID,
 		Actor:                actor,
@@ -125,7 +125,7 @@ func (v *KafkaVerifier) VerifyAgainstKafka(auditLog *models.AuditLog) (*KafkaVer
 		Metadata:             string(metaBytes),
 	}
 
-	kafkaHash := generateLogHash(reconstructed, auditLog.PreviousHash)
+	kafkaHash := generateLogHash(reconstructed)
 
 	if kafkaHash != auditLog.HashValue {
 		return &KafkaVerifyResult{

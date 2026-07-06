@@ -63,7 +63,6 @@ type auditService struct {
 	kafkaVerifier *kafkaconsumer.KafkaVerifier
 }
 
-// Struct baru
 type RangeVerificationResult struct {
 	Range   RangeInfo         `json:"range"`
 	Summary RangeSummary      `json:"summary"`
@@ -91,30 +90,12 @@ type FabricAnchorData struct {
 	SignatureNode string `json:"signature_node"`
 }
 
-// pgTimestampLayout mencocokkan format default tampilan PostgreSQL dengan
-// presisi microsecond (6 digit), contoh: 2026-06-30 09:06:52.766123+07
-//
-// CATATAN PRESISI:
-//   - PostgreSQL timestamptz native presisinya microsecond (6 digit).
-//   - Layout ini sengaja dibuat 6 digit (".000000") supaya tidak memotong
-//     presisi asli dari kolom timestamp/db_timestamp di DB.
 const pgTimestampLayout = "2006-01-02 15:04:05.000000-07"
 
-// formatPgTimestamp memformat time.Time ke string ala PostgreSQL (waktu lokal, bukan UTC)
 func formatPgTimestamp(t time.Time) string {
 	return t.Local().Format(pgTimestampLayout)
 }
 
-// formatFabricTimestamp mem-parse timestamp dari Fabric lalu memformat ulang
-// ke gaya PostgreSQL. Jika gagal parse, kembalikan apa adanya.
-//
-// FIX PRESISI: gunakan time.RFC3339Nano (bukan time.RFC3339) saat parsing.
-// RFC3339 di Go bersifat strict dan GAGAL mem-parse string yang punya
-// pecahan detik (mis. "...01.123456789Z"), sehingga sebelumnya timestamp
-// presisi tinggi dari Fabric tidak pernah terbaca dengan benar.
-// RFC3339Nano kompatibel untuk mem-parse string RFC3339 dengan ATAU tanpa
-// pecahan detik, sehingga aman juga untuk anchor lama yang masih berformat
-// RFC3339 polos (presisi detik).
 func formatFabricTimestamp(raw string) string {
 	if raw == "" {
 		return raw
@@ -148,7 +129,6 @@ type RangeItemResult struct {
 	Fabric         *FabricAnchorData `json:"fabric,omitempty"`
 }
 
-// Implementasi
 func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error) {
 	logs, err := s.repo.GetLogsByTimeRange(from, to, clientID)
 	if err != nil {
@@ -164,7 +144,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	}
 
 	for _, auditLog := range logs {
-		// Field dasar
 		item := RangeItemResult{
 			LogID:          auditLog.LogID,
 			Resource:       auditLog.Resource,
@@ -176,22 +155,17 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			MerkleRoot:     auditLog.MerkleRoot,
 		}
 
-		// db_timestamp berasal dari kolom DBTimestamp (waktu insert ke DB),
-		// bukan dari Timestamp (waktu kejadian/log dibuat). DBTimestamp
-		// adalah pointer (nullable) untuk log lama sebelum kolom ini
-		// ditambahkan, jadi perlu nil-check.
 		if auditLog.DBTimestamp != nil {
 			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
 
-		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
+		// Re-hash lokal (Lapis 2) — TESTING: tanpa prevHash
 		logCopy := auditLog
 		canonicalizeLog(&logCopy)
-		recalcHash := hasher.GenerateLogHash(&logCopy, logCopy.PreviousHash)
+		recalcHash := hasher.GenerateLogHash(&logCopy)
 		item.RecalcHash = recalcHash
 		item.HashMatch = (recalcHash == auditLog.HashValue)
 
-		// Verifikasi lengkap (termasuk Kafka + Blockchain)
 		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)
 		if err != nil {
 			item.VerifyStatus = "error"
@@ -205,7 +179,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			}
 		}
 
-		// Fetch data Fabric jika sudah ANCHORED
 		if auditLog.BlockchainTxID != nil &&
 			*auditLog.BlockchainTxID != "" &&
 			*auditLog.BlockchainTxID != "PENDING_OR_FAILED" &&
@@ -218,7 +191,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			}
 		}
 
-		// Summary
 		switch item.VerifyStatus {
 		case "success":
 			result.Summary.Valid++
@@ -234,7 +206,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	return result, nil
 }
 
-// fetchFabricAnchor mengambil dan memetakan data anchor dari Hyperledger Fabric
 func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error) {
 	raw, err := s.fabric.GetAnchorFromLedger(txID)
 	if err != nil {
@@ -254,8 +225,6 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 		anchor.MerkleRoot = v
 	}
 	if v, ok := parsed["timestamp"].(string); ok {
-		// Format ulang timestamp Fabric (RFC3339Nano, presisi tinggi) ke gaya
-		// PostgreSQL agar konsisten dengan field timestamp/db_timestamp lainnya.
 		anchor.Timestamp = formatFabricTimestamp(v)
 	}
 	if v, ok := parsed["batch_size"].(string); ok {
@@ -285,9 +254,7 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 
 // canonicalizeLog memastikan field-field AuditLog dalam format yang identik
 // dengan saat log pertama kali di-hash di kafkaconsumer/consumer.go.
-// Wajib dipanggil sebelum GenerateLogHash saat verifikasi.
 func canonicalizeLog(auditLog *models.AuditLog) {
-	// Metadata: unmarshal + marshal ulang untuk memastikan key ordering konsisten
 	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
 		var metaMap interface{}
 		if err := json.Unmarshal([]byte(auditLog.Metadata), &metaMap); err == nil {
@@ -298,7 +265,6 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 		}
 	}
 
-	// AuthorizationContext: normalisasi "null"/"<nil>"/"" → ""
 	if auditLog.AuthorizationContext == "null" ||
 		auditLog.AuthorizationContext == "<nil>" {
 		auditLog.AuthorizationContext = ""
@@ -306,7 +272,6 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 }
 
 // VerifyLogIntegrity menerima log_id (bukan hash) sebagai identifier.
-// Hash value diambil dari DB setelah log ditemukan, lalu dipakai untuk re-hashing.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
 	// === LAPIS 1: Cek keberadaan di DB by log_id ===
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
@@ -314,10 +279,9 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		return nil, errors.New("log_not_found")
 	}
 
-	// === LAPIS 2: Re-Hash Lokal ===
-	// Canonicalize terlebih dahulu agar format identik dengan saat insert
+	// === LAPIS 2: Re-Hash Lokal (TESTING: tanpa prevHash) ===
 	canonicalizeLog(auditLog)
-	recalculatedHash := hasher.GenerateLogHash(auditLog, auditLog.PreviousHash)
+	recalculatedHash := hasher.GenerateLogHash(auditLog)
 	if recalculatedHash != auditLog.HashValue {
 		return &VerificationResult{
 			Status:       "failed_local",
@@ -504,18 +468,21 @@ func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog,
 	return s.repo.GetResourceInventory(clientID)
 }
 
+// VerifyResourceHistory memverifikasi seluruh riwayat satu resource.
+//
+// TESTING: validasi local chain ("Previous Hash tidak cocok") DIHAPUS —
+// tidak relevan lagi karena setiap log kini berdiri sendiri, tidak lagi
+// terikat pada hash log sebelumnya (previousHash tidak ada di model).
 func (s *auditService) VerifyResourceHistory(resource, clientID string) (*VerificationResult, error) {
 	logs, err := s.repo.GetLogsByResource(resource, clientID)
 	if err != nil || len(logs) == 0 {
 		return nil, errors.New("log_not_found")
 	}
 
-	var expectedPrevHash string
 	hasPending := false
 	var lastValidResult *VerificationResult
 
-	for i, log := range logs {
-		// VerifyLogIntegrity sekarang pakai log_id
+	for _, log := range logs {
 		res, err := s.VerifyLogIntegrity(log.LogID, clientID)
 		if err != nil {
 			return &VerificationResult{
@@ -529,17 +496,6 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + log.Action + "' telah dirusak! (" + res.Message + ")"
 			return res, nil
 		}
-
-		if i > 0 && log.PreviousHash != expectedPrevHash {
-			return &VerificationResult{
-				Status:       "failed_chain",
-				Message:      "🚨 RANTAI TERPUTUS: Previous Hash tidak cocok.",
-				IsValid:      false,
-				ExpectedHash: expectedPrevHash,
-				ActualHash:   log.PreviousHash,
-			}, nil
-		}
-		expectedPrevHash = log.HashValue
 
 		if res.Status == "pending" {
 			hasPending = true

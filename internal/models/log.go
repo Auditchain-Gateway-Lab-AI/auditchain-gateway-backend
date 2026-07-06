@@ -20,21 +20,23 @@ type AuditLog struct {
 	SourceRecordID string `gorm:"type:varchar(100);index" json:"source_record_id"`
 
 	// Elemen Kriptografi & Blockchain
-	HashValue    string `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
-	PreviousHash string `gorm:"type:varchar(64)" json:"previous_hash"`
+	//
+	// TESTING: PreviousHash (local chain) DIHAPUS dari model — skema ini
+	// tidak lagi memakai Merkle Tree, sehingga local chaining antar-log
+	// juga tidak relevan lagi. Setiap log kini berdiri sendiri; integritas
+	// cukup dijamin oleh re-hash lokal (Lapis 2) + anchoring individual
+	// ke Fabric (Lapis 4). Kolom previous_hash di DB fisik tetap ada
+	// (AutoMigrate tidak drop kolom), tapi tidak lagi dibaca/ditulis.
+	HashValue string `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
 
-	// TESTING: MerkleRoot tetap dipertahankan sebagai kolom (supaya alur
-	// verifikasi VerifyLogIntegrity yang membandingkan db_root vs chain_root
-	// tidak perlu diubah), tapi nilainya sekarang diisi dengan HashValue
-	// individual — BUKAN root dari agregasi banyak log. Merkle Tree tidak
-	// lagi dibangun/dipakai di eksperimen ini.
+	// MerkleRoot dipertahankan sebagai kolom (supaya alur verifikasi Lapis 4
+	// yang membandingkan db_root vs chain_root tidak perlu diubah), tapi
+	// nilainya diisi dengan HashValue individual — Merkle Tree tidak lagi
+	// dibangun/dipakai.
 	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`
 	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
 
-	// BlockchainTimestamp menyimpan waktu saat log ini di-anchor ke Fabric
-	// (nilai sama dengan parameter timestamp yang dikirim ke chaincode).
-	// Nil selama status belum ANCHORED. Dipakai untuk mengukur selisih
-	// waktu terhadap DBTimestamp/Timestamp.
+	// BlockchainTimestamp menyimpan waktu saat log ini di-anchor ke Fabric.
 	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp"`
 
 	Status string `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`

@@ -63,7 +63,6 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 			SourceSystem:   l.SourceSystem,
 			Timestamp:      formatPgTimestamp(l.Timestamp), // full precision, sudah ada di service.go
 			HashValue:      l.HashValue,
-			PreviousHash:   l.PreviousHash,
 			MerkleRoot:     l.MerkleRoot,
 			BlockchainTxID: l.BlockchainTxID,
 			Status:         l.Status,
