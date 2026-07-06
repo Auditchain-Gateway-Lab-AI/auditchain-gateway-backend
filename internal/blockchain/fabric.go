@@ -31,7 +31,6 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 	mspID := os.Getenv("FABRIC_MSP_ID")
 	peerEndpoint := os.Getenv("FABRIC_PEER_ENDPOINT")
 
-	// 1. Load TLS Certificate untuk keamanan jalur gRPC
 	tlsCertPath := os.Getenv("FABRIC_TLS_CERT_PATH")
 	certPool := x509.NewCertPool()
 	tlsCert, err := os.ReadFile(filepath.Clean(tlsCertPath))
@@ -46,7 +45,6 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 		return nil, fmt.Errorf("gagal membuat koneksi gRPC: %v", err)
 	}
 
-	// 2. Load Public Certificate (Identitas Node/Admin)
 	certPath := os.Getenv("FABRIC_CERT_PATH")
 	certBytes, err := os.ReadFile(filepath.Clean(certPath))
 	if err != nil {
@@ -62,7 +60,6 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 		return nil, err
 	}
 
-	// 3. Load Private Key untuk Digital Signature (Tanda Tangan)
 	keyPath := os.Getenv("FABRIC_KEY_PATH")
 	keyBytes, err := os.ReadFile(filepath.Clean(keyPath))
 	if err != nil {
@@ -81,7 +78,6 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 		return nil, err
 	}
 
-	// 4. Buat Koneksi Gateway
 	gw, err := client.Connect(
 		id,
 		client.WithSign(sign),
@@ -106,79 +102,60 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 	}, nil
 }
 
-// AnchorPendingRoots mencari Merkle Root yang belum di-anchor dan mengirimnya ke Blockchain
-func (f *FabricService) AnchorPendingRoots() error {
-	// Cari Merkle Root yang unik dari log berstatus AGGREGATED
-	var distinctRoots []string
-	f.DB.Model(&models.AuditLog{}).Where("status = ?", "AGGREGATED").Distinct("merkle_root").Pluck("merkle_root", &distinctRoots)
+// AnchorSingleHash mem-anchor SATU log secara langsung menggunakan
+// HashValue individual (BUKAN Merkle Root batch). Dipanggil event-driven
+// dari kafkaconsumer.Engine tepat setelah log berhasil disimpan sebagai
+// HASHED — bukan menunggu ticker atau agregasi Merkle Tree.
+//
+// TESTING PURPOSE: memungkinkan pengukuran selisih waktu murni antara
+// db_timestamp (gateway) dan blockchain_timestamp (on-chain) per log
+// individual, tanpa distorsi dari batching.
+func (f *FabricService) AnchorSingleHash(logItem *models.AuditLog) error {
+	anchorID := uuid.New().String()
 
-	if len(distinctRoots) == 0 {
-		return nil
+	// anchorTime dipakai untuk DUA hal: (1) parameter timestamp yang
+	// dikirim ke chaincode, dan (2) nilai kolom blockchain_timestamp di DB.
+	// Sengaja satu variabel yang sama agar keduanya identik persis.
+	anchorTime := time.Now()
+	timestamp := anchorTime.Format(time.RFC3339Nano)
+	sourceGateway := "AuditChain_Gateway_Node1"
+
+	// batchSize selalu "1" karena setiap log di-anchor sendiri-sendiri
+	_, err := f.Contract.SubmitTransaction("StoreMerkleRoot", anchorID, logItem.HashValue, timestamp, sourceGateway, "1", "System_Signature")
+	if err != nil {
+		log.Printf("[Anchoring-Direct] ❌ Gagal mengirim ke Fabric untuk log %s: %v\n", logItem.LogID, err)
+		return err
 	}
 
-	for _, root := range distinctRoots {
-		// Ambil metadata batch untuk Merkle Root ini
-		var meta models.MerkleMetadata
-		if err := f.DB.Where("merkle_root = ?", root).First(&meta).Error; err != nil {
-			continue
-		}
+	blockchainTxID := anchorID
 
-		anchorID := uuid.New().String()
+	err = f.DB.Model(&models.AuditLog{}).
+		Where("log_id = ?", logItem.LogID).
+		Updates(map[string]interface{}{
+			"status":               "ANCHORED",
+			"blockchain_tx_id":     blockchainTxID,
+			"blockchain_timestamp": anchorTime,
+			// merkle_root diisi HashValue individual — bukan hasil agregasi.
+			// Ini menjaga kompatibilitas VerifyLogIntegrity (Lapis 4) yang
+			// membandingkan auditLog.MerkleRoot vs fabricResponse.MerkleRoot.
+			"merkle_root": logItem.HashValue,
+		}).Error
 
-		// anchorTime dipakai untuk DUA hal: (1) parameter timestamp yang
-		// dikirim ke chaincode, dan (2) nilai kolom blockchain_timestamp
-		// di DB. Sengaja satu variabel yang sama agar keduanya identik
-		// persis (bukan dua time.Now() terpisah yang bisa beda beberapa ms).
-		anchorTime := time.Now()
-
-		// FIX: gunakan RFC3339Nano (bukan RFC3339) agar presisi sub-detik
-		// (microsecond/nanosecond) ikut tersimpan di ledger Fabric — bukan
-		// hanya presisi detik. Chaincode StoreMerkleRoot menerima timestamp
-		// sebagai string biasa, jadi perubahan format ini TIDAK memerlukan
-		// redeploy/upgrade chaincode.
-		timestamp := anchorTime.Format(time.RFC3339Nano)
-		sourceGateway := "AuditChain_Gateway_Node1"
-		batchSizeStr := fmt.Sprintf("%d", meta.BatchSize)
-
-		log.Printf("[Anchoring] Mengirim Merkle Root %s ke Fabric...", root)
-
-		// Submit Transaksi ke Chaincode (Smart Contract)
-		_, err := f.Contract.SubmitTransaction("StoreMerkleRoot", anchorID, root, timestamp, sourceGateway, batchSizeStr, "System_Signature")
-
-		if err != nil {
-			log.Printf("[Anchoring] ❌ Gagal mengirim ke Fabric untuk Root %s: %v\n", root, err)
-			continue // Mekanisme retry sederhana: lewati dan coba lagi di siklus berikutnya
-		}
-
-		// Karena SDK Gateway v1.x mengabstraksi TxID, kita gunakan anchorID sebagai representasi transaksi (atau modifikasi chaincode untuk me-return TxID asli)
-		blockchainTxID := anchorID
-
-		// Update database: Tandai log sebagai ANCHORED, simpan TxID, dan
-		// catat blockchain_timestamp (waktu anchoring on-chain).
-		err = f.DB.Model(&models.AuditLog{}).
-			Where("merkle_root = ?", root).
-			Updates(map[string]interface{}{
-				"status":               "ANCHORED",
-				"blockchain_tx_id":     blockchainTxID,
-				"blockchain_timestamp": anchorTime,
-			}).Error
-
-		if err == nil {
-			log.Printf("[Anchoring] ✅ Sukses Anchoring! Root: %s | TxID: %s", root, blockchainTxID)
-		}
+	if err != nil {
+		log.Printf("[Anchoring-Direct] ⚠️  Gagal update DB untuk log %s: %v\n", logItem.LogID, err)
+		return err
 	}
 
+	log.Printf("[Anchoring-Direct] ✅ Sukses! log=%s Hash=%s TxID=%s", logItem.LogID, logItem.HashValue, blockchainTxID)
 	return nil
 }
 
-// GetAnchorFromLedger menarik data Merkle Root asli yang tersimpan di dalam jaringan Fabric
+// GetAnchorFromLedger menarik data yang tersimpan di dalam jaringan Fabric
 func (f *FabricService) GetAnchorFromLedger(anchorID string) (string, error) {
-	// Catatan: Kita menggunakan EvaluateTransaction, bukan SubmitTransaction
 	resultBytes, err := f.Contract.EvaluateTransaction("QueryMerkleRoot", anchorID)
 	if err != nil {
 		return "", err
 	}
-
 	return string(resultBytes), nil
 }
 

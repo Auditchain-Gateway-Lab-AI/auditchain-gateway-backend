@@ -16,23 +16,25 @@ type AuditLog struct {
 	AuthorizationContext string     `gorm:"type:text" json:"authorization_context"`
 	Metadata             string     `gorm:"type:jsonb" json:"metadata"`
 
-	// BARU: ID baris di audit_trail DB klien.
-	// Diisi dari field "audit_trail_id" pada payload Agent.
-	// Kosong jika log dikirim langsung (bukan via Agent).
-	// Digunakan Lapis 3 untuk meminta Agent memverifikasi baris ini.
+	// ID baris di audit_trail DB klien (diisi dari payload Agent, jika ada)
 	SourceRecordID string `gorm:"type:varchar(100);index" json:"source_record_id"`
 
 	// Elemen Kriptografi & Blockchain
-	HashValue      string  `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
-	PreviousHash   string  `gorm:"type:varchar(64)" json:"previous_hash"`
+	HashValue    string `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
+	PreviousHash string `gorm:"type:varchar(64)" json:"previous_hash"`
+
+	// TESTING: MerkleRoot tetap dipertahankan sebagai kolom (supaya alur
+	// verifikasi VerifyLogIntegrity yang membandingkan db_root vs chain_root
+	// tidak perlu diubah), tapi nilainya sekarang diisi dengan HashValue
+	// individual — BUKAN root dari agregasi banyak log. Merkle Tree tidak
+	// lagi dibangun/dipakai di eksperimen ini.
 	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`
 	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
 
-	// BlockchainTimestamp menyimpan waktu saat log ini (atau batch Merkle
-	// Root yang memuatnya) di-anchor ke Hyperledger Fabric — nilai yang
-	// sama dengan parameter timestamp yang dikirim ke chaincode
-	// StoreMerkleRoot. Tetap nil selama status belum ANCHORED.
-	// Dipakai untuk mengukur selisih waktu terhadap DBTimestamp/Timestamp.
+	// BlockchainTimestamp menyimpan waktu saat log ini di-anchor ke Fabric
+	// (nilai sama dengan parameter timestamp yang dikirim ke chaincode).
+	// Nil selama status belum ANCHORED. Dipakai untuk mengukur selisih
+	// waktu terhadap DBTimestamp/Timestamp.
 	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp"`
 
 	Status string `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
