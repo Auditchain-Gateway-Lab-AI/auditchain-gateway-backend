@@ -2,6 +2,7 @@ package audit
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,64 +13,8 @@ type Handler struct {
 	Service Service
 }
 
-type RecentLogResponse struct {
-	LogID          string  `json:"log_id"`
-	ClientID       string  `json:"client_id"`
-	Actor          string  `json:"actor"`
-	Action         string  `json:"action"`
-	SourceTable    string  `json:"source_table"`
-	SourceSystem   string  `json:"source_system"`
-	Timestamp      string  `json:"timestamp"`
-	HashValue      string  `json:"hash_value"`
-	PreviousHash   string  `json:"previous_hash"`
-	MerkleRoot     string  `json:"merkle_root"`
-	BlockchainTxID *string `json:"blockchain_tx_id"`
-	Status         string  `json:"status"`
-	Metadata       string  `json:"metadata"`
-}
-
 func NewHandler(service Service) *Handler {
 	return &Handler{Service: service}
-}
-
-// parseSourceTable mengambil nama tabel saja dari resource "tabel:id".
-// Tidak mengubah data di DB — resource tetap tersimpan format aslinya.
-func parseSourceTable(resource string) string {
-	if idx := strings.Index(resource, ":"); idx != -1 {
-		return resource[:idx]
-	}
-	return resource
-}
-
-func (h *Handler) GetRecentLogs(c *gin.Context) {
-	clientID, ok := h.getClientID(c)
-	if !ok {
-		return
-	}
-	logs, err := h.Service.GetRecentLogs(500, clientID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log terbaru"})
-		return
-	}
-
-	response := make([]RecentLogResponse, 0, len(logs))
-	for _, l := range logs {
-		response = append(response, RecentLogResponse{
-			LogID:          l.LogID,
-			ClientID:       l.ClientID,
-			Actor:          l.Actor,
-			Action:         l.Action,
-			SourceTable:    parseSourceTable(l.Resource),
-			SourceSystem:   l.SourceSystem,
-			Timestamp:      formatPgTimestamp(l.Timestamp), // full precision, sudah ada di service.go
-			HashValue:      l.HashValue,
-			MerkleRoot:     l.MerkleRoot,
-			BlockchainTxID: l.BlockchainTxID,
-			Status:         l.Status,
-			Metadata:       l.Metadata,
-		})
-	}
-	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) getClientID(c *gin.Context) (string, bool) {
@@ -105,7 +50,6 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		return
 	}
 
-	// Parameter sekarang adalah log_id, bukan hash
 	logID := c.Param("log_id")
 
 	result, err := h.Service.VerifyLogIntegrity(logID, clientID)
@@ -235,6 +179,109 @@ func (h *Handler) VerifyData(c *gin.Context) {
 	}
 }
 
+// RecentLogResponse adalah bentuk response untuk GET /dashboard/logs.
+// Field IntegrityStatus adalah HASIL VERIFIKASI PARSIAL (Layer 2 + Layer 4
+// saja — TIDAK termasuk Kafka/Layer 3). Untuk verifikasi lengkap 4-layer,
+// gunakan endpoint GET /dashboard/verify/:log_id.
+type RecentLogResponse struct {
+	LogID               string  `json:"log_id"`
+	ClientID            string  `json:"client_id"`
+	Actor               string  `json:"actor"`
+	Action              string  `json:"action"`
+	SourceTable         string  `json:"source_table"`
+	SourceSystem        string  `json:"source_system"`
+	Timestamp           string  `json:"timestamp"`
+	HashValue           string  `json:"hash_value"`
+	MerkleRoot          string  `json:"merkle_root"`
+	BlockchainTxID      *string `json:"blockchain_tx_id"`
+	BlockchainTimestamp string  `json:"blockchain_timestamp,omitempty"`
+	Status              string  `json:"status"`
+	Metadata            string  `json:"metadata"`
+	// IntegrityStatus: "pending" | "valid" | "tampered" | "unreachable"
+	// Lihat komentar tipe di atas untuk cakupan verifikasinya.
+	IntegrityStatus string `json:"integrity_status"`
+}
+
+// parseSourceTable mengambil nama tabel saja dari resource "tabel:id".
+// Tidak mengubah data di DB — resource tetap tersimpan format aslinya.
+func parseSourceTable(resource string) string {
+	if idx := strings.Index(resource, ":"); idx != -1 {
+		return resource[:idx]
+	}
+	return resource
+}
+
+// GetRecentLogs mengembalikan satu halaman log terbaru (server-side
+// pagination via query param page & page_size) beserta status integritas
+// (Layer 2 + Layer 4) untuk masing-masing baris di halaman itu saja —
+// bukan seluruh data — supaya endpoint ini tetap ringan berapapun total
+// log yang ada.
+//
+// Query params:
+//
+//	page      (default 1)
+//	page_size (default 10, maksimum 200)
+func (h *Handler) GetRecentLogs(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	if err != nil || pageSize < 1 {
+		pageSize = 10
+	}
+
+	results, total, err := h.Service.GetRecentLogsWithIntegrity(page, pageSize, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log terbaru"})
+		return
+	}
+
+	data := make([]RecentLogResponse, 0, len(results))
+	for _, r := range results {
+		l := r.Log
+		item := RecentLogResponse{
+			LogID:           l.LogID,
+			ClientID:        l.ClientID,
+			Actor:           l.Actor,
+			Action:          l.Action,
+			SourceTable:     parseSourceTable(l.Resource),
+			SourceSystem:    l.SourceSystem,
+			Timestamp:       formatPgTimestamp(l.Timestamp),
+			HashValue:       l.HashValue,
+			MerkleRoot:      l.MerkleRoot,
+			BlockchainTxID:  l.BlockchainTxID,
+			Status:          l.Status,
+			Metadata:        l.Metadata,
+			IntegrityStatus: r.IntegrityStatus,
+		}
+		if l.BlockchainTimestamp != nil {
+			item.BlockchainTimestamp = formatPgTimestamp(*l.BlockchainTimestamp)
+		}
+		data = append(data, item)
+	}
+
+	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": data,
+		"pagination": gin.H{
+			"page":        page,
+			"page_size":   pageSize,
+			"total":       total,
+			"total_pages": totalPages,
+		},
+	})
+}
+
 func (h *Handler) GetResourceInventory(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -283,25 +330,19 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 }
 
 func parseTimeRobust(timeStr string) (time.Time, error) {
-	// 1. Pastikan string cukup panjang
 	if len(timeStr) > 10 {
-		// Jika karakter ke-11 adalah spasi (pemisah tanggal & jam), ganti jadi 'T'
 		if timeStr[10] == ' ' {
 			timeStr = timeStr[:10] + "T" + timeStr[11:]
 		}
 	}
 
-	// 2. Jebakan HTTP: URL mengubah '+' menjadi spasi.
-	// Jika masih ada spasi yang tersisa di belakang (misal " 07"), kita kembalikan jadi '+'
 	timeStr = strings.ReplaceAll(timeStr, " ", "+")
 
-	// 3. Coba parse dengan standar ketat RFC3339
 	t, err := time.Parse(time.RFC3339, timeStr)
 	if err == nil {
 		return t, nil
 	}
 
-	// 4. Jika gagal, gunakan custom layout untuk toleransi zona waktu +07 (tanpa menit)
 	customLayout := "2006-01-02T15:04:05.999999999Z07"
 	return time.Parse(customLayout, timeStr)
 }
@@ -320,7 +361,6 @@ func (h *Handler) VerifyLogRange(c *gin.Context) {
 		return
 	}
 
-	// Gunakan helper function yang sudah dimodifikasi
 	from, err := parseTimeRobust(fromStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan format seperti: 2026-06-26T10:00:00Z atau 2026-06-29 10:26:32.54+07"})

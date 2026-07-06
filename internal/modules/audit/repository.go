@@ -16,6 +16,14 @@ type AuditRepository interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
 	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
+	// GetRecentLogsPaged mengambil satu halaman log terbaru (untuk pagination
+	// server-side) — dipakai GetRecentLogs handler agar verifikasi integritas
+	// hanya dijalankan untuk baris yang benar-benar ditampilkan, bukan semua
+	// log sekaligus.
+	GetRecentLogsPaged(clientID string, limit, offset int) ([]models.AuditLog, error)
+	// CountLogsByClient menghitung total log milik klien — dipakai untuk
+	// metadata pagination (total_pages) di response GetRecentLogs.
+	CountLogsByClient(clientID string) (int64, error)
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
@@ -51,8 +59,6 @@ func (r *auditRepoImpl) GetProofsByHash(hash string) ([]models.MerkleProof, erro
 	return proofs, err
 }
 
-// GetDashboardStats mengambil total, anchored, dan pending dalam satu query
-// menggunakan conditional aggregation — jauh lebih cepat dari tiga COUNT terpisah.
 func (r *auditRepoImpl) GetDashboardStats(clientID string) (map[string]int64, error) {
 	var result struct {
 		Total    int64
@@ -94,6 +100,22 @@ func (r *auditRepoImpl) GetRecentLogs(limit int, clientID string) ([]models.Audi
 	return logs, err
 }
 
+func (r *auditRepoImpl) GetRecentLogsPaged(clientID string, limit, offset int) ([]models.AuditLog, error) {
+	var logs []models.AuditLog
+	err := r.db.Where("client_id = ?", clientID).
+		Order("timestamp desc").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error
+	return logs, err
+}
+
+func (r *auditRepoImpl) CountLogsByClient(clientID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID).Count(&count).Error
+	return count, err
+}
+
 func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Raw(
@@ -110,7 +132,6 @@ func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.A
 	return logs, err
 }
 
-// add
 func (r *auditRepoImpl) GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ?", clientID, from, to).

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"go-blockchain-api/internal/blockchain"
@@ -15,6 +16,21 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// Status integritas untuk GetRecentLogsWithIntegrity — cakupannya HANYA
+// Layer 2 (re-hash lokal) + Layer 4 (match ke Fabric). Kafka (Layer 3)
+// sengaja TIDAK diikutkan di sini karena terlalu mahal dipanggil untuk
+// list, dan sudah tercakup di endpoint verify individual.
+const (
+	IntegrityPending     = "pending"     // belum ANCHORED, belum ada yang bisa dibandingkan ke Fabric
+	IntegrityValid       = "valid"       // re-hash lokal cocok DAN Merkle Root/hash cocok dengan on-chain
+	IntegrityTampered    = "tampered"    // re-hash lokal ATAU data on-chain tidak cocok
+	IntegrityUnreachable = "unreachable" // ANCHORED tapi Fabric gagal diakses (bukan soal data salah)
+)
+
+// maxIntegrityCheckConcurrency membatasi jumlah goroutine paralel yang
+// memanggil Fabric sekaligus saat verifikasi satu halaman GetRecentLogs.
+const maxIntegrityCheckConcurrency = 10
 
 type VerificationResult struct {
 	Status       string  `json:"status"`
@@ -27,7 +43,6 @@ type VerificationResult struct {
 	LogID        string  `json:"log_id"`
 	TxID         *string `json:"blockchain_tx_id,omitempty"`
 
-	// Lapis 3 Kafka
 	KafkaVerified bool   `json:"kafka_verified"`
 	KafkaMessage  string `json:"kafka_message,omitempty"`
 	KafkaHash     string `json:"kafka_hash,omitempty"`
@@ -45,12 +60,23 @@ type DataVerificationResult struct {
 	LastLogID    string      `json:"last_log_id"`
 }
 
+// RecentLogWithStatus membungkus satu AuditLog beserta status integritas
+// yang sudah dihitung (Layer 2 + Layer 4 saja).
+type RecentLogWithStatus struct {
+	Log             models.AuditLog
+	IntegrityStatus string
+}
+
 type Service interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error)
 	GetFabricRecord(anchorID string) (map[string]interface{}, error)
 	VerifyDataIntegrity(resource, clientID string, rawData *map[string]interface{}) (*DataVerificationResult, error)
 	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
+	// GetRecentLogsWithIntegrity mengembalikan satu halaman log terbaru
+	// beserta status integritas (Layer 2 + Layer 4), dan total keseluruhan
+	// log milik klien (untuk pagination).
+	GetRecentLogsWithIntegrity(page, pageSize int, clientID string) ([]RecentLogWithStatus, int64, error)
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	VerifyResourceHistory(resource, clientID string) (*VerificationResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
@@ -159,7 +185,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
 
-		// Re-hash lokal (Lapis 2) — TESTING: tanpa prevHash
 		logCopy := auditLog
 		canonicalizeLog(&logCopy)
 		recalcHash := hasher.GenerateLogHash(&logCopy)
@@ -252,8 +277,6 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 	return s.repo.GetDashboardStats(clientID)
 }
 
-// canonicalizeLog memastikan field-field AuditLog dalam format yang identik
-// dengan saat log pertama kali di-hash di kafkaconsumer/consumer.go.
 func canonicalizeLog(auditLog *models.AuditLog) {
 	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
 		var metaMap interface{}
@@ -271,15 +294,12 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 	}
 }
 
-// VerifyLogIntegrity menerima log_id (bukan hash) sebagai identifier.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
-	// === LAPIS 1: Cek keberadaan di DB by log_id ===
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
 	}
 
-	// === LAPIS 2: Re-Hash Lokal (TESTING: tanpa prevHash) ===
 	canonicalizeLog(auditLog)
 	recalculatedHash := hasher.GenerateLogHash(auditLog)
 	if recalculatedHash != auditLog.HashValue {
@@ -293,7 +313,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
-	// === LAPIS 3: Verifikasi ke Kafka ===
 	var kafkaVerified bool
 	var kafkaMsg, kafkaHash, kafkaTopic string
 	var kafkaOffset int64
@@ -324,7 +343,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}
 	}
 
-	// === Pending check ===
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
 			Status:        "pending",
@@ -338,7 +356,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
-	// === LAPIS 4: Konsensus Blockchain ===
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	if err != nil {
 		return nil, errors.New("fabric_error")
@@ -464,15 +481,104 @@ func (s *auditService) GetRecentLogs(limit int, clientID string) ([]models.Audit
 	return s.repo.GetRecentLogs(limit, clientID)
 }
 
+// GetRecentLogsWithIntegrity mengambil satu halaman log (server-side
+// pagination) dan menghitung status integritas HANYA untuk baris di
+// halaman itu — bukan seluruh data. Verifikasi ke Fabric dijalankan
+// paralel (worker pool dibatasi maxIntegrityCheckConcurrency) supaya
+// waktu respons tidak melonjak proporsional dengan jumlah baris.
+func (s *auditService) GetRecentLogsWithIntegrity(page, pageSize int, clientID string) ([]RecentLogWithStatus, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 200 {
+		pageSize = 200 // safety cap — mencegah page_size=100000 dipakai untuk bypass pagination
+	}
+	offset := (page - 1) * pageSize
+
+	logs, err := s.repo.GetRecentLogsPaged(clientID, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := s.repo.CountLogsByClient(clientID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	results := make([]RecentLogWithStatus, len(logs))
+
+	sem := make(chan struct{}, maxIntegrityCheckConcurrency)
+	var wg sync.WaitGroup
+
+	for i := range logs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[idx] = RecentLogWithStatus{
+				Log:             logs[idx],
+				IntegrityStatus: s.checkIntegrity(logs[idx]),
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	return results, total, nil
+}
+
+// checkIntegrity menghitung status integritas satu log — cakupannya HANYA
+// Layer 2 (re-hash lokal) + Layer 4 (match ke Fabric). Kafka (Layer 3)
+// sengaja tidak diikutkan supaya murah dipanggil untuk banyak baris.
+func (s *auditService) checkIntegrity(auditLog models.AuditLog) string {
+	// Log yang belum ANCHORED tidak punya apapun untuk dibandingkan ke
+	// Fabric — statusnya pending, bukan tampered/valid.
+	if auditLog.Status != "ANCHORED" {
+		return IntegrityPending
+	}
+
+	// Layer 2: re-hash lokal. Kalau ini saja sudah gagal, tidak perlu
+	// panggil Fabric — sudah cukup bukti data di DB dimodifikasi.
+	logCopy := auditLog
+	canonicalizeLog(&logCopy)
+	recalculatedHash := hasher.GenerateLogHash(&logCopy)
+	if recalculatedHash != auditLog.HashValue {
+		return IntegrityTampered
+	}
+
+	// Layer 4: match ke Fabric.
+	if s.fabric == nil || auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "" {
+		return IntegrityUnreachable
+	}
+
+	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
+	if err != nil {
+		// Gagal diakses (network/Fabric down) — BUKAN berarti datanya
+		// salah, jadi dibedakan dari tampered.
+		return IntegrityUnreachable
+	}
+
+	var fabricResponse struct {
+		MerkleRoot string `json:"merkle_root"`
+	}
+	if err := json.Unmarshal([]byte(onChainData), &fabricResponse); err != nil {
+		return IntegrityUnreachable
+	}
+
+	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
+		return IntegrityTampered
+	}
+
+	return IntegrityValid
+}
+
 func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
 	return s.repo.GetResourceInventory(clientID)
 }
 
-// VerifyResourceHistory memverifikasi seluruh riwayat satu resource.
-//
-// TESTING: validasi local chain ("Previous Hash tidak cocok") DIHAPUS —
-// tidak relevan lagi karena setiap log kini berdiri sendiri, tidak lagi
-// terikat pada hash log sebelumnya (previousHash tidak ada di model).
 func (s *auditService) VerifyResourceHistory(resource, clientID string) (*VerificationResult, error) {
 	logs, err := s.repo.GetLogsByResource(resource, clientID)
 	if err != nil || len(logs) == 0 {
@@ -482,8 +588,8 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 	hasPending := false
 	var lastValidResult *VerificationResult
 
-	for _, log := range logs {
-		res, err := s.VerifyLogIntegrity(log.LogID, clientID)
+	for _, logItem := range logs {
+		res, err := s.VerifyLogIntegrity(logItem.LogID, clientID)
 		if err != nil {
 			return &VerificationResult{
 				Status:  "failed_system",
@@ -493,7 +599,7 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 		}
 
 		if !res.IsValid {
-			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + log.Action + "' telah dirusak! (" + res.Message + ")"
+			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + logItem.Action + "' telah dirusak! (" + res.Message + ")"
 			return res, nil
 		}
 
