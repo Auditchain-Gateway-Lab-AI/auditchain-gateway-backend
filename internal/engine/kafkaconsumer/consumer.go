@@ -27,9 +27,9 @@ type Engine struct {
 	DB *gorm.DB
 
 	// Fabric di-inject agar setiap log yang berhasil disimpan (HASHED)
-	// langsung di-anchor saat itu juga (event-driven), menggantikan
-	// ticker + Merkle Tree batching. Boleh nil (mis. saat Fabric gagal
-	// connect di startup) — processMessage akan skip anchoring saja.
+	// langsung di-anchor saat itu juga (event-driven, strict serial —
+	// satu log diproses tuntas dari consume sampai anchor sebelum
+	// message berikutnya diambil). Boleh nil.
 	Fabric *blockchain.FabricService
 }
 
@@ -53,8 +53,7 @@ func (e *Engine) StartConsumers(ctx context.Context) error {
 }
 
 // resolveSourceSystem mengambil nama sumber sistem untuk klien dari
-// Client.CompanyName (tabel clients) — supaya source_system selalu
-// mencerminkan identitas resmi tenant. Fallback ke cfg.SourceSystem jika
+// Client.CompanyName (tabel clients). Fallback ke cfg.SourceSystem jika
 // Client tidak ditemukan atau CompanyName kosong.
 func (e *Engine) resolveSourceSystem(cfg models.ClientKafkaConfig) string {
 	var clientData models.Client
@@ -162,6 +161,11 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 			}
 
 		default:
+			// STRICT SERIAL: FetchMessage berikutnya baru dipanggil setelah
+			// processMessage (consume→hash→save→anchor) untuk message
+			// sebelumnya benar-benar selesai. Ini disengaja sesuai desain
+			// yang diminta — satu log diproses tuntas dalam satu waktu,
+			// tidak ada concurrency/decoupling antara consume dan anchor.
 			fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			msg, err := reader.FetchMessage(fetchCtx)
 			cancel()
@@ -218,7 +222,12 @@ func (e *Engine) discoverTopics(cfg models.ClientKafkaConfig) []string {
 	return topics
 }
 
-// processMessage memproses satu message Kafka menjadi AuditLog
+// processMessage memproses satu message Kafka menjadi AuditLog.
+//
+// TESTING: mekanisme local chain (query previous hash + field GENESIS)
+// DIHAPUS TOTAL — tidak lagi relevan setelah Merkle Tree dihilangkan.
+// Alur sekarang: parse → hash (tanpa prevHash) → save (HASHED) → anchor
+// langsung ke Fabric, semua dalam satu pemanggilan sinkron.
 func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig, sourceSystemName string) error {
 	if len(msg.Value) == 0 {
 		return nil
@@ -281,7 +290,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	metaBytes, _ := json.Marshal(metadata)
 	canonicalMeta := string(metaBytes)
 
-	// Cek duplikasi
+	// Cek duplikasi (tidak terkait local chain — tetap dipertahankan
+	// untuk mencegah double-insert kalau Kafka redeliver message).
 	var existing models.AuditLog
 	if err := e.DB.Where(
 		"resource = ? AND timestamp = ? AND client_id = ?",
@@ -290,32 +300,22 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 		return nil
 	}
 
-	// Hitung previous hash
-	var lastLog models.AuditLog
-	var prevHash string
-	if err := e.DB.Where("client_id = ? AND status IN ?",
-		cfg.ClientID, []string{"HASHED", "ANCHORED"},
-	).Order("timestamp desc").First(&lastLog).Error; err == nil {
-		prevHash = lastLog.HashValue
-	} else {
-		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
-	}
-
 	auditLog := &models.AuditLog{
-		LogID:                generateLogID(),
-		ClientID:             cfg.ClientID,
-		Actor:                actor,
-		Action:               action,
-		Resource:             resource,
-		Timestamp:            timestamp,
-		SourceSystem:         sourceSystemName,
-		Metadata:             canonicalMeta,
+		LogID:        generateLogID(),
+		ClientID:     cfg.ClientID,
+		Actor:        actor,
+		Action:       action,
+		Resource:     resource,
+		Timestamp:    timestamp,
+		SourceSystem: sourceSystemName,
+		Metadata:     canonicalMeta,
+		// AuthorizationContext sengaja dibiarkan "" untuk log dari Kafka
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
-		PreviousHash:         prevHash,
 	}
 
-	auditLog.HashValue = generateLogHash(auditLog, prevHash)
+	// Hash tanpa prevHash — setiap log berdiri sendiri
+	auditLog.HashValue = generateLogHash(auditLog)
 	auditLog.Status = "HASHED"
 
 	if err := e.DB.Create(auditLog).Error; err != nil {
@@ -335,8 +335,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig,
 	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
 		action, resource, cfg.ClientID, sourceSystemName)
 
-	// TESTING: anchor langsung ke Fabric event-driven, tanpa ticker dan
-	// tanpa Merkle Tree batching — memakai HashValue individual.
+	// Anchor langsung ke Fabric — sinkron, blocking, strict serial by design.
 	if e.Fabric != nil {
 		if err := e.Fabric.AnchorSingleHash(auditLog); err != nil {
 			log.Printf("⚠️  [KafkaConsumer] Gagal anchor langsung log %s: %v", auditLog.LogID, err)
@@ -470,13 +469,15 @@ func generateLogID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
+// generateLogHash — format string HARUS identik dengan hasher.GenerateLogHash.
+// TESTING: parameter prevHash DIHAPUS.
+func generateLogHash(auditLog *models.AuditLog) string {
 	authCtx := auditLog.AuthorizationContext
 	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
 		authCtx = ""
 	}
 
-	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s",
+	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s",
 		auditLog.LogID,
 		auditLog.Actor,
 		auditLog.Action,
@@ -484,7 +485,6 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
 		authCtx,
-		prevHash,
 		auditLog.Metadata,
 	)
 	return crypto.GenerateSHA3_256(contextString)
