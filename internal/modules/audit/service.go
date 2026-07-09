@@ -604,15 +604,15 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	}
 
 	items := make([]RecentLogItem, 0, len(logs))
-	for _, l := range logs {
-		status := s.classifyIntegrity(l)
-		if status == integrityStatus {
-			items = append(items, RecentLogItem{
-				AuditLog:        l,
-				IntegrityStatus: status,
-			})
-		}
-	}
+	// for _, l := range logs {
+	// 	status := s.classifyIntegrity(l)
+	// 	if status == integrityStatus {
+	// 		items = append(items, RecentLogItem{
+	// 			AuditLog:        l,
+	// 			IntegrityStatus: status,
+	// 		})
+	// 	}
+	// }
 
 	totalPages := int(anchoredTotal) / pageSize
 	if int(anchoredTotal)%pageSize != 0 {
