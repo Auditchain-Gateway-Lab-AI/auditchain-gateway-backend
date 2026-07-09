@@ -468,7 +468,7 @@ func generateLogHash(auditLog *models.AuditLog) string {
 		authCtx = ""
 	}
 
-	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s",
+	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s",
 		auditLog.LogID,
 		auditLog.Actor,
 		auditLog.Action,
