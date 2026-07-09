@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
-	"go-blockchain-api/pkg/crypto"
 
 	"github.com/segmentio/kafka-go"
 	"gorm.io/gorm"
@@ -311,8 +311,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		Status:               "RECEIVED",
 	}
 
-	// Hash menggunakan fungsi yang sama format-nya dengan hasher.GenerateLogHash
-	auditLog.HashValue = generateLogHash(auditLog)
+	// Hash menggunakan fungsi shared agar canonicalization konsisten
+	auditLog.HashValue = hasher.GenerateLogHash(auditLog)
 	auditLog.Status = "HASHED"
 
 	if err := e.DB.Create(auditLog).Error; err != nil {
@@ -462,25 +462,6 @@ func generateLogID() string {
 
 // generateLogHash — format string HARUS identik dengan hasher.GenerateLogHash
 // Normalisasi AuthorizationContext: "null"/"<nil>"/"" → selalu ""
-func generateLogHash(auditLog *models.AuditLog) string {
-	authCtx := auditLog.AuthorizationContext
-	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
-		authCtx = ""
-	}
-
-	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s",
-		auditLog.LogID,
-		auditLog.Actor,
-		auditLog.Action,
-		auditLog.Resource,
-		auditLog.Timestamp.UnixMicro(),
-		auditLog.SourceSystem,
-		authCtx,
-		auditLog.Metadata,
-	)
-	return crypto.GenerateSHA3_256(contextString)
-}
-
 type mapResolver struct {
 	overrides map[string]string
 }

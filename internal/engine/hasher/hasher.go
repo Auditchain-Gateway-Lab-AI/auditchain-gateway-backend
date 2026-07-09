@@ -1,6 +1,7 @@
 package hasher
 
 import (
+	"encoding/json"
 	"fmt"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
@@ -11,6 +12,24 @@ import (
 
 type Engine struct {
 	DB *gorm.DB
+}
+
+func canonicalizeJSON(raw string) string {
+	if raw == "" || raw == "null" || raw == "<nil>" {
+		return ""
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return raw
+	}
+
+	normalized, err := json.Marshal(parsed)
+	if err != nil {
+		return raw
+	}
+
+	return string(normalized)
 }
 
 // GenerateLogHash menghasilkan hash deterministik dari AuditLog.
@@ -24,6 +43,7 @@ func GenerateLogHash(auditLog *models.AuditLog) string {
 	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
 		authCtx = ""
 	}
+	metadata := canonicalizeJSON(auditLog.Metadata)
 
 	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s",
 		auditLog.LogID,
@@ -33,7 +53,7 @@ func GenerateLogHash(auditLog *models.AuditLog) string {
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
 		authCtx,
-		auditLog.Metadata,
+		metadata,
 	)
 
 	return crypto.GenerateSHA3_256(contextString)
