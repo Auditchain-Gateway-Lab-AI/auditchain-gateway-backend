@@ -14,16 +14,18 @@ type Engine struct {
 }
 
 // GenerateLogHash menghasilkan hash deterministik dari AuditLog.
-// Normalisasi yang diterapkan harus IDENTIK dengan generateLogHash di kafkaconsumer/consumer.go:
-//   - AuthorizationContext: "null", "<nil>", atau "" → selalu ""
-//   - Metadata: dipakai apa adanya dari DB (sudah canonical saat insert)
-func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
+// CATATAN: prevHash TIDAK LAGI menjadi bagian dari hash formula.
+// Local chain (PreviousHash) dihapus dari skema verifikasi — lihat
+// AUDIT_CONTEXT.md testing branch notes. Parameter prevHash dipertahankan
+// pada signature hanya untuk kompatibilitas caller lama; TIDAK dipakai
+// dalam perhitungan hash.
+func GenerateLogHash(auditLog *models.AuditLog) string {
 	authCtx := auditLog.AuthorizationContext
 	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
 		authCtx = ""
 	}
 
-	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s|%s",
+	contextString := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s",
 		auditLog.LogID,
 		auditLog.Actor,
 		auditLog.Action,
@@ -31,7 +33,6 @@ func GenerateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
 		authCtx,
-		prevHash,
 		auditLog.Metadata,
 	)
 
@@ -52,22 +53,9 @@ func (h *Engine) ProcessPendingLogs() error {
 	}
 
 	for _, auditLog := range pendingLogs {
-		var lastLog models.AuditLog
-		var prevHash string
-
-		result := h.DB.Where("status IN ?", []string{"HASHED", "ANCHORED"}).Order("timestamp desc").First(&lastLog)
-		if result.Error == nil {
-			prevHash = lastLog.HashValue
-		} else {
-			prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
-		}
-
-		hashValue := GenerateLogHash(&auditLog, prevHash)
-
+		hashValue := GenerateLogHash(&auditLog)
 		auditLog.HashValue = hashValue
-		auditLog.PreviousHash = prevHash
 		auditLog.Status = "HASHED"
-
 		if err := h.DB.Save(&auditLog).Error; err != nil {
 			log.Printf("[Hasher] Gagal menyimpan hash untuk log %s: %v", auditLog.LogID, err)
 			continue

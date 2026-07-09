@@ -185,7 +185,7 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 
 		logCopy := auditLog
 		canonicalizeLog(&logCopy)
-		recalcHash := hasher.GenerateLogHash(&logCopy, logCopy.PreviousHash)
+		recalcHash := hasher.GenerateLogHash(&logCopy)
 		item.RecalcHash = recalcHash
 		item.HashMatch = (recalcHash == auditLog.HashValue)
 
@@ -306,7 +306,7 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	}
 
 	canonicalizeLog(auditLog)
-	recalculatedHash := hasher.GenerateLogHash(auditLog, auditLog.PreviousHash)
+	recalculatedHash := hasher.GenerateLogHash(auditLog)
 	if recalculatedHash != auditLog.HashValue {
 		return &VerificationResult{
 			Status:       "failed_local",
@@ -448,7 +448,7 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 // Verifikasi sepenuhnya berbasis DB (off-chain) + Fabric (on-chain) saja.
 func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 	canonicalizeLog(&auditLog)
-	recalculated := hasher.GenerateLogHash(&auditLog, auditLog.PreviousHash)
+	recalculated := hasher.GenerateLogHash(&auditLog)
 	if recalculated != auditLog.HashValue {
 		return "tampered"
 	}

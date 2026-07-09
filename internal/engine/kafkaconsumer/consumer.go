@@ -292,17 +292,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
-	// Hitung previous hash
-	var lastLog models.AuditLog
-	var prevHash string
-	if err := e.DB.Where("client_id = ? AND status IN ?",
-		cfg.ClientID, []string{"HASHED", "ANCHORED"},
-	).Order("timestamp desc").First(&lastLog).Error; err == nil {
-		prevHash = lastLog.HashValue
-	} else {
-		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
-	}
-
 	// source_system = Client.CompanyName (diadopsi dari branch testing),
 	// fallback ke cfg.SourceSystem jika company_name klien belum diisi.
 	sourceSystem := e.resolveSourceSystem(cfg)
@@ -320,11 +309,10 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		// — konsisten dengan normalisasi di generateLogHash
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
-		PreviousHash:         prevHash,
 	}
 
 	// Hash menggunakan fungsi yang sama format-nya dengan hasher.GenerateLogHash
-	auditLog.HashValue = generateLogHash(auditLog, prevHash)
+	auditLog.HashValue = generateLogHash(auditLog)
 	auditLog.Status = "HASHED"
 
 	if err := e.DB.Create(auditLog).Error; err != nil {
@@ -474,7 +462,7 @@ func generateLogID() string {
 
 // generateLogHash — format string HARUS identik dengan hasher.GenerateLogHash
 // Normalisasi AuthorizationContext: "null"/"<nil>"/"" → selalu ""
-func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
+func generateLogHash(auditLog *models.AuditLog) string {
 	authCtx := auditLog.AuthorizationContext
 	if authCtx == "null" || authCtx == "<nil>" || authCtx == "" {
 		authCtx = ""
@@ -488,7 +476,6 @@ func generateLogHash(auditLog *models.AuditLog, prevHash string) string {
 		auditLog.Timestamp.UnixMicro(),
 		auditLog.SourceSystem,
 		authCtx,
-		prevHash,
 		auditLog.Metadata,
 	)
 	return crypto.GenerateSHA3_256(contextString)
