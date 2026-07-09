@@ -90,18 +90,6 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 				"message":  result.Message,
 			},
 		})
-	case "failed_kafka":
-		c.JSON(http.StatusConflict, gin.H{
-			"status": "failed", "layer": "3_kafka",
-			"data": gin.H{
-				"is_valid":     result.IsValid,
-				"log_id":       result.LogID,
-				"message":      result.Message,
-				"kafka_hash":   result.KafkaHash,
-				"kafka_topic":  result.KafkaTopic,
-				"kafka_offset": result.KafkaOffset,
-			},
-		})
 	case "pending":
 		c.JSON(http.StatusAccepted, gin.H{
 			"status":  "pending",

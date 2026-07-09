@@ -9,7 +9,6 @@ import (
 
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/engine/hasher"
-	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 
@@ -26,13 +25,6 @@ type VerificationResult struct {
 	ChainRoot    string  `json:"chain_root"`
 	LogID        string  `json:"log_id"`
 	TxID         *string `json:"blockchain_tx_id,omitempty"`
-
-	// Lapis 3 Kafka
-	KafkaVerified bool   `json:"kafka_verified"`
-	KafkaMessage  string `json:"kafka_message,omitempty"`
-	KafkaHash     string `json:"kafka_hash,omitempty"`
-	KafkaTopic    string `json:"kafka_topic,omitempty"`
-	KafkaOffset   int64  `json:"kafka_offset,omitempty"`
 }
 
 type DataVerificationResult struct {
@@ -87,9 +79,8 @@ type Service interface {
 }
 
 type auditService struct {
-	repo          AuditRepository
-	fabric        *blockchain.FabricService
-	kafkaVerifier *kafkaconsumer.KafkaVerifier
+	repo   AuditRepository
+	fabric *blockchain.FabricService
 }
 
 // Struct baru
@@ -272,11 +263,14 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 	return anchor, nil
 }
 
+// NewService mempertahankan parameter db pada signature (meski tidak lagi
+// dipakai untuk Kafka verifier) supaya main.go yang memanggil
+// audit.NewService(auditRepo, fabricSvc, db) tidak perlu diubah.
 func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {
+	_ = db
 	return &auditService{
-		repo:          repo,
-		fabric:        fabric,
-		kafkaVerifier: &kafkaconsumer.KafkaVerifier{DB: db},
+		repo:   repo,
+		fabric: fabric,
 	}
 }
 
@@ -301,6 +295,10 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 	}
 }
 
+// VerifyLogIntegrity menjalankan verifikasi 2-lapis: Layer 2 (re-hash lokal
+// terhadap PostgreSQL) dan Layer 4 (kecocokan merkle_root vs Fabric ledger).
+// Verifikasi Kafka (Layer 3) SENGAJA DIHAPUS — cukup DB (off-chain) dan
+// Fabric (on-chain) saja sesuai keputusan terbaru.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
@@ -320,46 +318,12 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
-	var kafkaVerified bool
-	var kafkaMsg, kafkaHash, kafkaTopic string
-	var kafkaOffset int64
-
-	kafkaResult, err := s.kafkaVerifier.VerifyAgainstKafka(auditLog)
-	if err != nil {
-		log.Printf("⚠️  [Verify] Kafka verify error: %v", err)
-		kafkaMsg = "Kafka tidak dapat diverifikasi: " + err.Error()
-	} else {
-		kafkaVerified = kafkaResult.IsValid
-		kafkaMsg = kafkaResult.Message
-		kafkaHash = kafkaResult.KafkaHash
-		kafkaTopic = kafkaResult.Topic
-		kafkaOffset = kafkaResult.Offset
-
-		if !kafkaResult.IsValid {
-			return &VerificationResult{
-				Status:        "failed_kafka",
-				Message:       kafkaResult.Message,
-				IsValid:       false,
-				LogID:         auditLog.LogID,
-				KafkaVerified: false,
-				KafkaMessage:  kafkaMsg,
-				KafkaHash:     kafkaHash,
-				KafkaTopic:    kafkaTopic,
-				KafkaOffset:   kafkaOffset,
-			}, nil
-		}
-	}
-
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
-			Status:        "pending",
-			Message:       "Log otentik secara lokal dan terverifikasi di Kafka. Menunggu antrean Blockchain.",
-			IsValid:       true,
-			LogID:         auditLog.LogID,
-			KafkaVerified: kafkaVerified,
-			KafkaMessage:  kafkaMsg,
-			KafkaTopic:    kafkaTopic,
-			KafkaOffset:   kafkaOffset,
+			Status:  "pending",
+			Message: "Log otentik secara lokal. Menunggu antrean Blockchain.",
+			IsValid: true,
+			LogID:   auditLog.LogID,
 		}, nil
 	}
 
@@ -377,30 +341,23 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 
 	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
 		return &VerificationResult{
-			Status:        "failed_onchain",
-			Message:       "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
-			IsValid:       false,
-			LogID:         auditLog.LogID,
-			DBRoot:        auditLog.MerkleRoot,
-			ChainRoot:     fabricResponse.MerkleRoot,
-			KafkaVerified: kafkaVerified,
-			KafkaMessage:  kafkaMsg,
+			Status:    "failed_onchain",
+			Message:   "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
+			IsValid:   false,
+			LogID:     auditLog.LogID,
+			DBRoot:    auditLog.MerkleRoot,
+			ChainRoot: fabricResponse.MerkleRoot,
 		}, nil
 	}
 
 	return &VerificationResult{
-		Status:        "success",
-		Message:       "✅ DATA OTENTIK: Terverifikasi di Kafka dan Blockchain.",
-		IsValid:       true,
-		LogID:         auditLog.LogID,
-		ExpectedHash:  auditLog.HashValue,
-		DBRoot:        auditLog.MerkleRoot,
-		TxID:          auditLog.BlockchainTxID,
-		KafkaVerified: kafkaVerified,
-		KafkaMessage:  kafkaMsg,
-		KafkaHash:     kafkaHash,
-		KafkaTopic:    kafkaTopic,
-		KafkaOffset:   kafkaOffset,
+		Status:       "success",
+		Message:      "✅ DATA OTENTIK: Terverifikasi di database dan Blockchain.",
+		IsValid:      true,
+		LogID:        auditLog.LogID,
+		ExpectedHash: auditLog.HashValue,
+		DBRoot:       auditLog.MerkleRoot,
+		TxID:         auditLog.BlockchainTxID,
 	}, nil
 }
 
@@ -488,11 +445,7 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 // Layer 4 (cocokkan merkle_root vs Fabric ledger) HANYA untuk log berstatus
 // ANCHORED. Log yang belum ANCHORED (RECEIVED/HASHED/AGGREGATED) diberi
 // status "pending" karena belum bisa diverifikasi sampai Layer 4.
-//
-// Ini SENGAJA tidak memanggil VerifyLogIntegrity() penuh (yang juga
-// menyertakan pengecekan Kafka) — untuk daftar list view, cukup re-hash +
-// status Fabric; pengecekan Kafka lengkap tetap tersedia di detail view
-// (GET /verify/:log_id) agar list tetap ringan dipanggil berulang kali.
+// Verifikasi sepenuhnya berbasis DB (off-chain) + Fabric (on-chain) saja.
 func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 	canonicalizeLog(&auditLog)
 	recalculated := hasher.GenerateLogHash(&auditLog, auditLog.PreviousHash)
