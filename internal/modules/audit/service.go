@@ -279,16 +279,12 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 }
 
 func canonicalizeLog(auditLog *models.AuditLog) {
-	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
-		var metaMap interface{}
-		if err := json.Unmarshal([]byte(auditLog.Metadata), &metaMap); err == nil {
-			canonicalBytes, err := json.Marshal(metaMap)
-			if err == nil {
-				auditLog.Metadata = string(canonicalBytes)
-			}
-		}
-	}
-
+	// Metadata TIDAK di-re-marshal. String yang tersimpan di DB adalah
+	// hasil json.Marshal() satu kali saat log pertama ditulis (consumer.go
+	// / normalizer.go), dan itu SUDAH final — re-encode ulang di sini
+	// tidak dijamin idempotent untuk nilai numerik (int vs float64,
+	// notasi eksponensial pada angka besar, dst), sehingga bisa memicu
+	// false-positive "tampered" meski data tidak pernah berubah.
 	if auditLog.AuthorizationContext == "null" ||
 		auditLog.AuthorizationContext == "<nil>" {
 		auditLog.AuthorizationContext = ""
