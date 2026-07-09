@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"go-blockchain-api/internal/blockchain"
@@ -291,6 +292,22 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 	}
 }
 
+func isHashStillPending(auditLog *models.AuditLog) bool {
+	if auditLog == nil {
+		return false
+	}
+
+	if auditLog.Status == "RECEIVED" {
+		return true
+	}
+
+	if auditLog.HashValue == "" {
+		return true
+	}
+
+	return strings.HasPrefix(auditLog.HashValue, "PENDING-")
+}
+
 // VerifyLogIntegrity menjalankan verifikasi 2-lapis: Layer 2 (re-hash lokal
 // terhadap PostgreSQL) dan Layer 4 (kecocokan merkle_root vs Fabric ledger).
 // Verifikasi Kafka (Layer 3) SENGAJA DIHAPUS — cukup DB (off-chain) dan
@@ -299,6 +316,15 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
+	}
+
+	if isHashStillPending(auditLog) {
+		return &VerificationResult{
+			Status:  "pending",
+			Message: "Log sudah diterima, tetapi hash final masih diproses pipeline.",
+			IsValid: true,
+			LogID:   auditLog.LogID,
+		}, nil
 	}
 
 	canonicalizeLog(auditLog)
@@ -443,6 +469,10 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 // status "pending" karena belum bisa diverifikasi sampai Layer 4.
 // Verifikasi sepenuhnya berbasis DB (off-chain) + Fabric (on-chain) saja.
 func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
+	if isHashStillPending(&auditLog) {
+		return "pending"
+	}
+
 	canonicalizeLog(&auditLog)
 	recalculated := hasher.GenerateLogHash(&auditLog)
 	if recalculated != auditLog.HashValue {
