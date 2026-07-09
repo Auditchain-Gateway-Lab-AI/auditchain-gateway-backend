@@ -2,6 +2,7 @@ package audit
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,17 +180,48 @@ func (h *Handler) VerifyData(c *gin.Context) {
 	}
 }
 
+// GetRecentLogs sekarang mendukung pagination sesungguhnya via query params
+// ?page=&page_size= (default: page=1, page_size=10, maksimum 200), serta
+// filter opsional ?integrity_status=valid|tampered|unreachable.
+//
+// Response contract baru: {"data": [...], "pagination": {...}, "note"?: "..."}
+// menggantikan array polos yang dipakai versi lama (limit hardcoded 500).
+// Frontend (src/App.js) perlu disesuaikan untuk membaca res.data.data alih-alih
+// res.data langsung — lihat catatan terpisah, belum diterapkan di sesi ini.
 func (h *Handler) GetRecentLogs(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
 		return
 	}
-	logs, err := h.Service.GetRecentLogs(500, clientID)
+
+	page := 1
+	if p := c.Query("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	pageSize := 10
+	if ps := c.Query("page_size"); ps != "" {
+		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 {
+			pageSize = parsed
+		}
+	}
+
+	integrityStatus := strings.TrimSpace(c.Query("integrity_status"))
+
+	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus)
 	if err != nil {
+		if err.Error() == "invalid_integrity_status" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Parameter integrity_status tidak valid. Gunakan salah satu: valid, tampered, unreachable.",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log terbaru"})
 		return
 	}
-	c.JSON(http.StatusOK, logs)
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) GetResourceInventory(c *gin.Context) {
@@ -240,25 +272,19 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 }
 
 func parseTimeRobust(timeStr string) (time.Time, error) {
-	// 1. Pastikan string cukup panjang
 	if len(timeStr) > 10 {
-		// Jika karakter ke-11 adalah spasi (pemisah tanggal & jam), ganti jadi 'T'
 		if timeStr[10] == ' ' {
 			timeStr = timeStr[:10] + "T" + timeStr[11:]
 		}
 	}
 
-	// 2. Jebakan HTTP: URL mengubah '+' menjadi spasi.
-	// Jika masih ada spasi yang tersisa di belakang (misal " 07"), kita kembalikan jadi '+'
 	timeStr = strings.ReplaceAll(timeStr, " ", "+")
 
-	// 3. Coba parse dengan standar ketat RFC3339
 	t, err := time.Parse(time.RFC3339, timeStr)
 	if err == nil {
 		return t, nil
 	}
 
-	// 4. Jika gagal, gunakan custom layout untuk toleransi zona waktu +07 (tanpa menit)
 	customLayout := "2006-01-02T15:04:05.999999999Z07"
 	return time.Parse(customLayout, timeStr)
 }
@@ -277,7 +303,6 @@ func (h *Handler) VerifyLogRange(c *gin.Context) {
 		return
 	}
 
-	// Gunakan helper function yang sudah dimodifikasi
 	from, err := parseTimeRobust(fromStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan format seperti: 2026-06-26T10:00:00Z atau 2026-06-29 10:26:32.54+07"})

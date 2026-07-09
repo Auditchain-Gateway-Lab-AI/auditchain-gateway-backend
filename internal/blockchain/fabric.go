@@ -106,7 +106,15 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 	}, nil
 }
 
-// AnchorPendingRoots mencari Merkle Root yang belum di-anchor dan mengirimnya ke Blockchain
+// AnchorPendingRoots mencari Merkle Root yang belum di-anchor dan mengirimnya ke Blockchain.
+//
+// CATATAN (diadopsi dari branch testing): setiap root yang berhasil di-anchor
+// akan menandai SEMUA log dalam batch tersebut dengan blockchain_timestamp
+// yang sama (waktu saat transaksi Fabric sukses di-submit). Ini memungkinkan
+// pengukuran delta 3 titik: Timestamp (kejadian) → DBTimestamp (insert DB)
+// → BlockchainTimestamp (anchor selesai), meski granularitasnya per-batch
+// (bukan per-log seperti direct-anchoring), karena arsitektur Merkle Tree
+// batch tetap dipertahankan di branch ini.
 func (f *FabricService) AnchorPendingRoots() error {
 	// Cari Merkle Root yang unik dari log berstatus AGGREGATED
 	var distinctRoots []string
@@ -129,7 +137,8 @@ func (f *FabricService) AnchorPendingRoots() error {
 		// hanya presisi detik. Chaincode StoreMerkleRoot menerima timestamp
 		// sebagai string biasa, jadi perubahan format ini TIDAK memerlukan
 		// redeploy/upgrade chaincode.
-		timestamp := time.Now().Format(time.RFC3339Nano)
+		anchorTime := time.Now()
+		timestamp := anchorTime.Format(time.RFC3339Nano)
 		sourceGateway := "AuditChain_Gateway_Node1"
 		batchSizeStr := fmt.Sprintf("%d", meta.BatchSize)
 
@@ -146,12 +155,14 @@ func (f *FabricService) AnchorPendingRoots() error {
 		// Karena SDK Gateway v1.x mengabstraksi TxID, kita gunakan anchorID sebagai representasi transaksi (atau modifikasi chaincode untuk me-return TxID asli)
 		blockchainTxID := anchorID
 
-		// Update database: Tandai log sebagai ANCHORED dan simpan TxID
+		// Update database: Tandai log sebagai ANCHORED, simpan TxID, dan catat
+		// blockchain_timestamp untuk seluruh log dalam batch ini sekaligus.
 		err = f.DB.Model(&models.AuditLog{}).
 			Where("merkle_root = ?", root).
 			Updates(map[string]interface{}{
-				"status":           "ANCHORED",
-				"blockchain_tx_id": blockchainTxID,
+				"status":               "ANCHORED",
+				"blockchain_tx_id":     blockchainTxID,
+				"blockchain_timestamp": anchorTime,
 			}).Error
 
 		if err == nil {

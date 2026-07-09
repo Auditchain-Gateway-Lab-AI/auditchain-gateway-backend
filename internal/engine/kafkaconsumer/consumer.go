@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"go-blockchain-api/internal/models"
@@ -24,6 +25,36 @@ type DebeziumOracleMessage map[string]interface{}
 
 type Engine struct {
 	DB *gorm.DB
+
+	// sourceSystemCache menghindari query "clients" berulang untuk setiap
+	// message Kafka yang masuk (throughput tinggi). Company name jarang
+	// berubah, jadi cache in-memory per-proses cukup aman; restart service
+	// akan otomatis me-refresh cache ini.
+	sourceSystemCache sync.Map // map[clientID string]string
+}
+
+// resolveSourceSystem mengikuti prinsip yang sama dengan ingestion handler:
+// source_system idealnya = Client.CompanyName supaya konsisten di seluruh
+// jalur masuk data (API ingestion maupun Kafka CDC). Fallback ke
+// cfg.SourceSystem (field manual di ClientKafkaConfig) jika company_name
+// klien belum diisi. Hasil query di-cache per client_id agar tidak
+// membebani DB pada throughput tinggi.
+func (e *Engine) resolveSourceSystem(cfg models.ClientKafkaConfig) string {
+	if cached, ok := e.sourceSystemCache.Load(cfg.ClientID); ok {
+		return cached.(string)
+	}
+
+	resolved := cfg.SourceSystem
+	var companyName string
+	if err := e.DB.Table("clients").
+		Select("company_name").
+		Where("id = ?", cfg.ClientID).
+		Scan(&companyName).Error; err == nil && companyName != "" {
+		resolved = companyName
+	}
+
+	e.sourceSystemCache.Store(cfg.ClientID, resolved)
+	return resolved
 }
 
 // StartConsumers memulai consumer untuk semua klien yang punya ClientKafkaConfig aktif
@@ -272,6 +303,10 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		prevHash = "GENESIS_00000000000000000000000000000000000000000000000000000000"
 	}
 
+	// source_system = Client.CompanyName (diadopsi dari branch testing),
+	// fallback ke cfg.SourceSystem jika company_name klien belum diisi.
+	sourceSystem := e.resolveSourceSystem(cfg)
+
 	auditLog := &models.AuditLog{
 		LogID:        generateLogID(),
 		ClientID:     cfg.ClientID,
@@ -279,7 +314,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		Action:       action,
 		Resource:     resource,
 		Timestamp:    timestamp,
-		SourceSystem: cfg.SourceSystem,
+		SourceSystem: sourceSystem,
 		Metadata:     canonicalMeta,
 		// AuthorizationContext sengaja dibiarkan "" untuk log dari Kafka
 		// — konsisten dengan normalisasi di generateLogHash
@@ -307,8 +342,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
 	}
 
-	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s",
-		action, resource, cfg.ClientID)
+	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
+		action, resource, cfg.ClientID, sourceSystem)
 
 	return nil
 }

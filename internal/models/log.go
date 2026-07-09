@@ -23,11 +23,12 @@ type AuditLog struct {
 	SourceRecordID string `gorm:"type:varchar(100);index" json:"source_record_id"`
 
 	// Elemen Kriptografi & Blockchain
-	HashValue      string  `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
-	PreviousHash   string  `gorm:"type:varchar(64)" json:"previous_hash"`
-	MerkleRoot     string  `gorm:"type:varchar(64);index" json:"merkle_root"`
-	BlockchainTxID *string `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
-	Status         string  `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
+	HashValue           string     `gorm:"type:varchar(64);uniqueIndex" json:"hash_value"`
+	PreviousHash        string     `gorm:"type:varchar(64)" json:"previous_hash"`
+	MerkleRoot          string     `gorm:"type:varchar(64);index" json:"merkle_root"`
+	BlockchainTxID      *string    `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
+	Status              string     `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
+	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp"`
 }
 
 type MerkleMetadata struct {

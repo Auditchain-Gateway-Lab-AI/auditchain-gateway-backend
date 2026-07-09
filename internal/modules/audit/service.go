@@ -45,12 +45,41 @@ type DataVerificationResult struct {
 	LastLogID    string      `json:"last_log_id"`
 }
 
+// PaginationMeta menampung metadata pagination untuk response GetRecentLogs.
+type PaginationMeta struct {
+	Page       int   `json:"page"`
+	PageSize   int   `json:"page_size"`
+	TotalItems int64 `json:"total_items"`
+	TotalPages int   `json:"total_pages"`
+}
+
+// RecentLogItem membungkus AuditLog dengan integrity_status hasil
+// pengecekan Layer 2 (re-hash) dan, jika sudah ANCHORED, Layer 4
+// (kecocokan merkle_root vs ledger Fabric).
+type RecentLogItem struct {
+	models.AuditLog
+	IntegrityStatus string `json:"integrity_status"` // valid | tampered | unreachable | pending
+}
+
+// RecentLogsResult adalah bentuk response baru GetRecentLogs:
+// {"data": [...], "pagination": {...}, "note": "..."}
+type RecentLogsResult struct {
+	Data       []RecentLogItem `json:"data"`
+	Pagination PaginationMeta  `json:"pagination"`
+	Note       string          `json:"note,omitempty"`
+}
+
 type Service interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error)
 	GetFabricRecord(anchorID string) (map[string]interface{}, error)
 	VerifyDataIntegrity(resource, clientID string, rawData *map[string]interface{}) (*DataVerificationResult, error)
-	GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error)
+
+	// GetRecentLogsPaginated menggantikan GetRecentLogs lama sebagai entry
+	// point handler dashboard. limit hardcoded 500 di versi lama diganti
+	// page/pageSize. integrityStatus kosong berarti tanpa filter.
+	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error)
+
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
 	VerifyResourceHistory(resource, clientID string) (*VerificationResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
@@ -93,28 +122,12 @@ type FabricAnchorData struct {
 
 // pgTimestampLayout mencocokkan format default tampilan PostgreSQL dengan
 // presisi microsecond (6 digit), contoh: 2026-06-30 09:06:52.766123+07
-//
-// CATATAN PRESISI:
-//   - PostgreSQL timestamptz native presisinya microsecond (6 digit).
-//   - Layout ini sengaja dibuat 6 digit (".000000") supaya tidak memotong
-//     presisi asli dari kolom timestamp/db_timestamp di DB.
 const pgTimestampLayout = "2006-01-02 15:04:05.000000-07"
 
-// formatPgTimestamp memformat time.Time ke string ala PostgreSQL (waktu lokal, bukan UTC)
 func formatPgTimestamp(t time.Time) string {
 	return t.Local().Format(pgTimestampLayout)
 }
 
-// formatFabricTimestamp mem-parse timestamp dari Fabric lalu memformat ulang
-// ke gaya PostgreSQL. Jika gagal parse, kembalikan apa adanya.
-//
-// FIX PRESISI: gunakan time.RFC3339Nano (bukan time.RFC3339) saat parsing.
-// RFC3339 di Go bersifat strict dan GAGAL mem-parse string yang punya
-// pecahan detik (mis. "...01.123456789Z"), sehingga sebelumnya timestamp
-// presisi tinggi dari Fabric tidak pernah terbaca dengan benar.
-// RFC3339Nano kompatibel untuk mem-parse string RFC3339 dengan ATAU tanpa
-// pecahan detik, sehingga aman juga untuk anchor lama yang masih berformat
-// RFC3339 polos (presisi detik).
 func formatFabricTimestamp(raw string) string {
 	if raw == "" {
 		return raw
@@ -164,7 +177,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	}
 
 	for _, auditLog := range logs {
-		// Field dasar
 		item := RangeItemResult{
 			LogID:          auditLog.LogID,
 			Resource:       auditLog.Resource,
@@ -176,22 +188,16 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			MerkleRoot:     auditLog.MerkleRoot,
 		}
 
-		// db_timestamp berasal dari kolom DBTimestamp (waktu insert ke DB),
-		// bukan dari Timestamp (waktu kejadian/log dibuat). DBTimestamp
-		// adalah pointer (nullable) untuk log lama sebelum kolom ini
-		// ditambahkan, jadi perlu nil-check.
 		if auditLog.DBTimestamp != nil {
 			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
 		}
 
-		// Re-hash lokal (Lapis 2) — tanpa perlu panggil VerifyLogIntegrity dua kali
 		logCopy := auditLog
 		canonicalizeLog(&logCopy)
 		recalcHash := hasher.GenerateLogHash(&logCopy, logCopy.PreviousHash)
 		item.RecalcHash = recalcHash
 		item.HashMatch = (recalcHash == auditLog.HashValue)
 
-		// Verifikasi lengkap (termasuk Kafka + Blockchain)
 		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)
 		if err != nil {
 			item.VerifyStatus = "error"
@@ -205,7 +211,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			}
 		}
 
-		// Fetch data Fabric jika sudah ANCHORED
 		if auditLog.BlockchainTxID != nil &&
 			*auditLog.BlockchainTxID != "" &&
 			*auditLog.BlockchainTxID != "PENDING_OR_FAILED" &&
@@ -218,7 +223,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			}
 		}
 
-		// Summary
 		switch item.VerifyStatus {
 		case "success":
 			result.Summary.Valid++
@@ -234,7 +238,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	return result, nil
 }
 
-// fetchFabricAnchor mengambil dan memetakan data anchor dari Hyperledger Fabric
 func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error) {
 	raw, err := s.fabric.GetAnchorFromLedger(txID)
 	if err != nil {
@@ -254,8 +257,6 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 		anchor.MerkleRoot = v
 	}
 	if v, ok := parsed["timestamp"].(string); ok {
-		// Format ulang timestamp Fabric (RFC3339Nano, presisi tinggi) ke gaya
-		// PostgreSQL agar konsisten dengan field timestamp/db_timestamp lainnya.
 		anchor.Timestamp = formatFabricTimestamp(v)
 	}
 	if v, ok := parsed["batch_size"].(string); ok {
@@ -283,11 +284,7 @@ func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, err
 	return s.repo.GetDashboardStats(clientID)
 }
 
-// canonicalizeLog memastikan field-field AuditLog dalam format yang identik
-// dengan saat log pertama kali di-hash di kafkaconsumer/consumer.go.
-// Wajib dipanggil sebelum GenerateLogHash saat verifikasi.
 func canonicalizeLog(auditLog *models.AuditLog) {
-	// Metadata: unmarshal + marshal ulang untuk memastikan key ordering konsisten
 	if auditLog.Metadata != "" && auditLog.Metadata != "null" {
 		var metaMap interface{}
 		if err := json.Unmarshal([]byte(auditLog.Metadata), &metaMap); err == nil {
@@ -298,24 +295,18 @@ func canonicalizeLog(auditLog *models.AuditLog) {
 		}
 	}
 
-	// AuthorizationContext: normalisasi "null"/"<nil>"/"" → ""
 	if auditLog.AuthorizationContext == "null" ||
 		auditLog.AuthorizationContext == "<nil>" {
 		auditLog.AuthorizationContext = ""
 	}
 }
 
-// VerifyLogIntegrity menerima log_id (bukan hash) sebagai identifier.
-// Hash value diambil dari DB setelah log ditemukan, lalu dipakai untuk re-hashing.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
-	// === LAPIS 1: Cek keberadaan di DB by log_id ===
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
 	}
 
-	// === LAPIS 2: Re-Hash Lokal ===
-	// Canonicalize terlebih dahulu agar format identik dengan saat insert
 	canonicalizeLog(auditLog)
 	recalculatedHash := hasher.GenerateLogHash(auditLog, auditLog.PreviousHash)
 	if recalculatedHash != auditLog.HashValue {
@@ -329,7 +320,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
-	// === LAPIS 3: Verifikasi ke Kafka ===
 	var kafkaVerified bool
 	var kafkaMsg, kafkaHash, kafkaTopic string
 	var kafkaOffset int64
@@ -360,7 +350,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}
 	}
 
-	// === Pending check ===
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
 			Status:        "pending",
@@ -374,7 +363,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
-	// === LAPIS 4: Konsensus Blockchain ===
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	if err != nil {
 		return nil, errors.New("fabric_error")
@@ -496,8 +484,154 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 	}, nil
 }
 
-func (s *auditService) GetRecentLogs(limit int, clientID string) ([]models.AuditLog, error) {
-	return s.repo.GetRecentLogs(limit, clientID)
+// classifyIntegrity menjalankan Layer 2 (re-hash) untuk semua log, dan
+// Layer 4 (cocokkan merkle_root vs Fabric ledger) HANYA untuk log berstatus
+// ANCHORED. Log yang belum ANCHORED (RECEIVED/HASHED/AGGREGATED) diberi
+// status "pending" karena belum bisa diverifikasi sampai Layer 4.
+//
+// Ini SENGAJA tidak memanggil VerifyLogIntegrity() penuh (yang juga
+// menyertakan pengecekan Kafka) — untuk daftar list view, cukup re-hash +
+// status Fabric; pengecekan Kafka lengkap tetap tersedia di detail view
+// (GET /verify/:log_id) agar list tetap ringan dipanggil berulang kali.
+func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
+	canonicalizeLog(&auditLog)
+	recalculated := hasher.GenerateLogHash(&auditLog, auditLog.PreviousHash)
+	if recalculated != auditLog.HashValue {
+		return "tampered"
+	}
+
+	if auditLog.Status != "ANCHORED" || auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "" {
+		return "pending"
+	}
+
+	if s.fabric == nil {
+		return "unreachable"
+	}
+
+	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
+	if err != nil {
+		return "unreachable"
+	}
+
+	var fabricResponse struct {
+		MerkleRoot string `json:"merkle_root"`
+	}
+	if err := json.Unmarshal([]byte(onChainData), &fabricResponse); err != nil {
+		return "unreachable"
+	}
+
+	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
+		return "tampered"
+	}
+
+	return "valid"
+}
+
+// GetRecentLogsPaginated menggantikan limit-500 lama dengan pagination
+// sesungguhnya (page/page_size), plus filter opsional integrity_status.
+//
+// KETERBATASAN (didokumentasikan secara transparan via field "note"):
+// integrity_status dihitung IN-MEMORY setelah query, bukan di level SQL,
+// karena status valid/tampered/unreachable baru diketahui setelah re-hash
+// lokal + query ke Fabric. Akibatnya saat filter aktif:
+//   - Basis pagination (total_items) memakai total log ANCHORED, BUKAN
+//     jumlah log yang benar-benar cocok filter — sehingga total_items dan
+//     total_pages bersifat APPROXIMATE saat integrity_status diisi.
+//   - Ini adalah trade-off yang disengaja: menghitung exact count untuk
+//     filter ini butuh full-scan + verifikasi semua log ANCHORED pada
+//     setiap request, yang mahal. Field "note" memberi tahu API consumer
+//     secara eksplisit.
+func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true}
+
+	// Tanpa filter integrity_status: pagination langsung dari SQL, exact count.
+	if integrityStatus == "" {
+		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize)
+		if err != nil {
+			return nil, err
+		}
+
+		items := make([]RecentLogItem, 0, len(logs))
+		for _, l := range logs {
+			items = append(items, RecentLogItem{
+				AuditLog:        l,
+				IntegrityStatus: s.classifyIntegrity(l),
+			})
+		}
+
+		totalPages := int(total) / pageSize
+		if int(total)%pageSize != 0 {
+			totalPages++
+		}
+		if totalPages == 0 {
+			totalPages = 1
+		}
+
+		return &RecentLogsResult{
+			Data: items,
+			Pagination: PaginationMeta{
+				Page:       page,
+				PageSize:   pageSize,
+				TotalItems: total,
+				TotalPages: totalPages,
+			},
+		}, nil
+	}
+
+	if !validFilter[integrityStatus] {
+		return nil, errors.New("invalid_integrity_status")
+	}
+
+	// Dengan filter: hanya log ANCHORED yang relevan (lihat classifyIntegrity).
+	anchoredTotal, err := s.repo.CountAnchoredLogs(clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	logs, err := s.repo.GetAnchoredLogsPage(clientID, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]RecentLogItem, 0, len(logs))
+	for _, l := range logs {
+		status := s.classifyIntegrity(l)
+		if status == integrityStatus {
+			items = append(items, RecentLogItem{
+				AuditLog:        l,
+				IntegrityStatus: status,
+			})
+		}
+	}
+
+	totalPages := int(anchoredTotal) / pageSize
+	if int(anchoredTotal)%pageSize != 0 {
+		totalPages++
+	}
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	return &RecentLogsResult{
+		Data: items,
+		Pagination: PaginationMeta{
+			Page:       page,
+			PageSize:   pageSize,
+			TotalItems: anchoredTotal,
+			TotalPages: totalPages,
+		},
+		Note: "integrity_status filter aktif: total_items & total_pages dihitung dari total log berstatus ANCHORED (bukan jumlah pasti yang cocok filter), karena status integritas ditentukan setelah verifikasi in-memory per baris, bukan di level query SQL.",
+	}, nil
 }
 
 func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
@@ -515,7 +649,6 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 	var lastValidResult *VerificationResult
 
 	for i, log := range logs {
-		// VerifyLogIntegrity sekarang pakai log_id
 		res, err := s.VerifyLogIntegrity(log.LogID, clientID)
 		if err != nil {
 			return &VerificationResult{
