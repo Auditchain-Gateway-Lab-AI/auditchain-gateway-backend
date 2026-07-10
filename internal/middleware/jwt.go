@@ -60,6 +60,11 @@ func JWTAuth() gin.HandlerFunc {
 		}
 
 		c.Set("client_id", clientID)
+		if roleVal, hasRole := claims["role"]; hasRole {
+			if roleStr, okRole := roleVal.(string); okRole {
+				c.Set("role", roleStr)
+			}
+		}
 		c.Next()
 	}
 }
