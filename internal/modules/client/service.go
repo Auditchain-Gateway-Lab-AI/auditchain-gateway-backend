@@ -11,6 +11,19 @@ import (
 
 type Service interface {
 	RegisterClient(req CreateClientRequest) (*models.Client, string, error)
+	GetClients() ([]models.Client, error)
+	GetKafkaConfigs() ([]KafkaConfigWithClient, error)
+	GetDashboardSummary() (DashboardSummary, error)
+}
+
+type KafkaConfigWithClient struct {
+	models.ClientKafkaConfig
+	CompanyName string `json:"company_name"`
+}
+
+type DashboardSummary struct {
+	TotalClients  int64 `json:"total_clients"`
+	ActiveStreams int64 `json:"active_streams"`
 }
 
 type clientService struct {
@@ -33,14 +46,6 @@ func (s *clientService) RegisterClient(req CreateClientRequest) (*models.Client,
 	apiKeyHash := hex.EncodeToString(hash[:])
 	apiKeyPrefix := rawAPIKey[:16]
 
-	tier := req.SubscriptionTier
-	if tier == "" {
-		tier = "basic"
-	}
-	rateLimit := req.RateLimitPerSec
-	if rateLimit == 0 {
-		rateLimit = 50
-	}
 	status := req.Status
 	if status == "" {
 		status = "active"
@@ -50,8 +55,6 @@ func (s *clientService) RegisterClient(req CreateClientRequest) (*models.Client,
 		CompanyName:        req.CompanyName,
 		APIKeyHash:         apiKeyHash,
 		APIKeyPrefix:       apiKeyPrefix,
-		SubscriptionTier:   tier,
-		RateLimitPerSec:    rateLimit,
 		Status:             status,
 		ActorField:         req.ActorField,
 		FallbackActorField: req.FallbackActorField,
@@ -64,4 +67,63 @@ func (s *clientService) RegisterClient(req CreateClientRequest) (*models.Client,
 	}
 
 	return newClient, rawAPIKey, nil
+}
+
+func (s *clientService) GetClients() ([]models.Client, error) {
+	return s.repo.GetClients()
+}
+
+func (s *clientService) GetKafkaConfigs() ([]KafkaConfigWithClient, error) {
+	configs, err := s.repo.GetKafkaConfigs()
+	if err != nil {
+		return nil, err
+	}
+
+	clients, err := s.repo.GetClients()
+	if err != nil {
+		return nil, err
+	}
+
+	clientMap := make(map[string]string)
+	for _, c := range clients {
+		clientMap[c.ID] = c.CompanyName
+	}
+
+	var result []KafkaConfigWithClient
+	for _, cfg := range configs {
+		companyName := clientMap[cfg.ClientID]
+		if companyName == "" {
+			companyName = "Unknown Client"
+		}
+		result = append(result, KafkaConfigWithClient{
+			ClientKafkaConfig: cfg,
+			CompanyName:       companyName,
+		})
+	}
+
+	return result, nil
+}
+
+func (s *clientService) GetDashboardSummary() (DashboardSummary, error) {
+	clients, err := s.repo.GetClients()
+	if err != nil {
+		return DashboardSummary{}, err
+	}
+
+	configs, err := s.repo.GetKafkaConfigs()
+	if err != nil {
+		return DashboardSummary{}, err
+	}
+
+	var activeStreams int64
+	for _, cfg := range configs {
+		if cfg.IsActive {
+			activeStreams++
+		}
+	}
+
+	return DashboardSummary{
+		TotalClients:  int64(len(clients)),
+		ActiveStreams: activeStreams,
+	}, nil
 }

@@ -13,12 +13,10 @@ type Client struct {
 	CompanyName string `gorm:"type:varchar(100);not null" json:"company_name"`
 
 	// Keamanan API Key
-	APIKeyPrefix string `gorm:"type:varchar(20);uniqueIndex;not null" json:"-"`
+	APIKeyPrefix string `gorm:"type:varchar(20);uniqueIndex;not null" json:"api_key_prefix"`
 	APIKeyHash   string `gorm:"type:varchar(255);not null" json:"-"`
 
 	// Konfigurasi SaaS
-	SubscriptionTier string `gorm:"type:varchar(20);default:'basic'" json:"subscription_tier"`
-	RateLimitPerSec  int    `gorm:"default:50" json:"rate_limit_per_sec"`
 	Status           string `gorm:"type:varchar(20);default:'active'" json:"status"`
 
 	// Konfigurasi Mapping Field Dinamis

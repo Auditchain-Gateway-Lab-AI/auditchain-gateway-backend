@@ -20,8 +20,6 @@ func NewHandler(service Service) *Handler {
 
 type CreateClientRequest struct {
 	CompanyName        string `json:"company_name" binding:"required" example:"PT Karya Bangsa"`
-	SubscriptionTier   string `json:"subscription_tier" example:"enterprise"`
-	RateLimitPerSec    int    `json:"rate_limit_per_sec" example:"100"`
 	Status             string `json:"status" example:"active"`
 	ActorField         string `json:"actor_field" example:"app_user"`
 	FallbackActorField string `json:"fallback_actor_field" example:"db_user"`
@@ -136,4 +134,31 @@ func (h *Handler) CreateClient(c *gin.Context) {
 			"resource_field":       clientData.ResourceField,
 		},
 	})
+}
+
+func (h *Handler) ListClients(c *gin.Context) {
+	clients, err := h.Service.GetClients()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar klien"})
+		return
+	}
+	c.JSON(http.StatusOK, clients)
+}
+
+func (h *Handler) ListKafkaConfigs(c *gin.Context) {
+	configs, err := h.Service.GetKafkaConfigs()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar konfigurasi Kafka"})
+		return
+	}
+	c.JSON(http.StatusOK, configs)
+}
+
+func (h *Handler) GetDashboardSummary(c *gin.Context) {
+	summary, err := h.Service.GetDashboardSummary()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil ringkasan dashboard"})
+		return
+	}
+	c.JSON(http.StatusOK, summary)
 }
