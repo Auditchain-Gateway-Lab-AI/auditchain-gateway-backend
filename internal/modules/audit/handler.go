@@ -28,6 +28,18 @@ func (h *Handler) getClientID(c *gin.Context) (string, bool) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client pada token tidak valid."})
 		return "", false
 	}
+
+	// Jika user adalah admin, izinkan override client_id via query param
+	roleVal, hasRole := c.Get("role")
+	if hasRole {
+		roleStr, okRole := roleVal.(string)
+		if okRole && strings.ToLower(roleStr) == "admin" {
+			if queryClientID := c.Query("client_id"); queryClientID != "" {
+				return queryClientID, true
+			}
+		}
+	}
+
 	return clientID, true
 }
 
