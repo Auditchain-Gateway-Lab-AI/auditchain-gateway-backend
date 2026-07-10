@@ -1,7 +1,0 @@
-$kind: http-request
-method: GET
-url: '{{baseUrl}}/api/dashboard/inventory'
-order: 11000
-headers:
-  - key: Authorization
-    value: 'Bearer {{bearerToken}}'

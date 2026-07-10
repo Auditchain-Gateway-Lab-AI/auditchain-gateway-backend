@@ -1,7 +1,0 @@
-$kind: http-request
-method: GET
-url: '{{baseUrl}}/api/dashboard/agent/ping'
-order: 16000
-headers:
-  - key: Authorization
-    value: 'Bearer {{bearerToken}}'
