@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go-blockchain-api/internal/blockchain"
+	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
@@ -74,7 +75,7 @@ type Service interface {
 	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error)
 
 	GetResourceInventory(clientID string) ([]models.AuditLog, error)
-	VerifyResourceHistory(resource, clientID string) (*VerificationResult, error)
+	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
 }
@@ -82,9 +83,43 @@ type Service interface {
 type auditService struct {
 	repo   AuditRepository
 	fabric *blockchain.FabricService
+	agent  *agentverifier.Service
 }
 
-// Struct baru
+type ResourceLogVerification struct {
+	LogID           string `json:"log_id"`
+	Action          string `json:"action"`
+	Actor           string `json:"actor"`
+	Timestamp       string `json:"timestamp"`
+	HashValue       string `json:"hash_value"`
+	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
+
+	// AgentStatus mencerminkan hasil Layer 3 (verifikasi ke sistem sumber
+	// klien via Agent), TERPISAH dari IntegrityStatus (Layer 2+4) supaya
+	// frontend bisa menampilkan alasan spesifik kalau berbeda.
+	//   matched        — Agent dihubungi, data cocok
+	//   mismatch       — Agent dihubungi, ada perbedaan (lihat AgentDiscrepancies)
+	//   unreachable    — Agent terkonfigurasi tapi gagal dihubungi
+	//   not_configured — klien belum setup AgentConfig, layer ini dilewati
+	AgentStatus        string                      `json:"agent_status"`
+	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
+}
+
+type ResourceChainResult struct {
+	Resource    string                    `json:"resource"`
+	ChainStatus string                    `json:"chain_status"` // valid | tampered | pending | unreachable
+	TotalLogs   int                       `json:"total_logs"`
+	Logs        []ResourceLogVerification `json:"logs"`
+}
+
+func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {
+	return &auditService{
+		repo:   repo,
+		fabric: fabric,
+		agent:  agentverifier.NewService(db),
+	}
+}
+
 type RangeVerificationResult struct {
 	Range   RangeInfo         `json:"range"`
 	Summary RangeSummary      `json:"summary"`
@@ -262,17 +297,6 @@ func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error)
 	}
 
 	return anchor, nil
-}
-
-// NewService mempertahankan parameter db pada signature (meski tidak lagi
-// dipakai untuk Kafka verifier) supaya main.go yang memanggil
-// audit.NewService(auditRepo, fabricSvc, db) tidak perlu diubah.
-func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm.DB) Service {
-	_ = db
-	return &auditService{
-		repo:   repo,
-		fabric: fabric,
-	}
 }
 
 func (s *auditService) GetDashboardStats(clientID string) (map[string]int64, error) {
@@ -649,57 +673,48 @@ func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog,
 	return s.repo.GetResourceInventory(clientID)
 }
 
-func (s *auditService) VerifyResourceHistory(resource, clientID string) (*VerificationResult, error) {
+func (s *auditService) VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error) {
 	logs, err := s.repo.GetLogsByResource(resource, clientID)
 	if err != nil || len(logs) == 0 {
 		return nil, errors.New("log_not_found")
 	}
 
-	var expectedPrevHash string
+	result := &ResourceChainResult{
+		Resource:  resource,
+		TotalLogs: len(logs),
+		Logs:      make([]ResourceLogVerification, 0, len(logs)),
+	}
+
+	hasTampered := false
+	hasUnreachable := false
 	hasPending := false
-	var lastValidResult *VerificationResult
 
-	for i, log := range logs {
-		res, err := s.VerifyLogIntegrity(log.LogID, clientID)
-		if err != nil {
-			return &VerificationResult{
-				Status:  "failed_system",
-				Message: "🚨 Gagal memverifikasi salah satu riwayat masa lalu.",
-				IsValid: false,
-			}, nil
-		}
+	for _, auditLog := range logs {
+		item := s.classifyResourceLog(auditLog)
+		result.Logs = append(result.Logs, item)
 
-		if !res.IsValid {
-			res.Message = "🚨 RIWAYAT TERMANIPULASI: Log aksi '" + log.Action + "' telah dirusak! (" + res.Message + ")"
-			return res, nil
-		}
-
-		if i > 0 && log.PreviousHash != expectedPrevHash {
-			return &VerificationResult{
-				Status:       "failed_chain",
-				Message:      "🚨 RANTAI TERPUTUS: Previous Hash tidak cocok.",
-				IsValid:      false,
-				ExpectedHash: expectedPrevHash,
-				ActualHash:   log.PreviousHash,
-			}, nil
-		}
-		expectedPrevHash = log.HashValue
-
-		if res.Status == "pending" {
+		switch item.IntegrityStatus {
+		case "tampered":
+			hasTampered = true
+		case "unreachable":
+			hasUnreachable = true
+		case "pending":
 			hasPending = true
 		}
-		lastValidResult = res
 	}
 
-	if lastValidResult != nil && hasPending {
-		lastValidResult.Status = "pending"
-		lastValidResult.Message = "✅ RIWAYAT LOKAL AMAN: Beberapa log masih dalam antrean Blockchain."
-	} else if lastValidResult != nil {
-		lastValidResult.Status = "success"
-		lastValidResult.Message = "✅ RIWAYAT OTENTIK 100%: Seluruh rantai transaksi tidak pernah dimanipulasi."
+	switch {
+	case hasTampered:
+		result.ChainStatus = "tampered"
+	case hasUnreachable:
+		result.ChainStatus = "unreachable"
+	case hasPending:
+		result.ChainStatus = "pending"
+	default:
+		result.ChainStatus = "valid"
 	}
 
-	return lastValidResult, nil
+	return result, nil
 }
 
 func (s *auditService) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
@@ -716,4 +731,53 @@ func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 		})
 	}
 	return result
+}
+
+// classifyResourceLog menjalankan Layer 2+4 (classifyIntegrity, sudah ada)
+// DAN Layer 3 (Agent source verification, BARU) untuk satu log, lalu
+// menggabungkannya menjadi satu IntegrityStatus akhir. Agent HANYA
+// mempengaruhi status akhir jika benar-benar dipanggil (AgentUsed) — klien
+// yang belum setup Agent tidak dirugikan/tidak mempengaruhi hasil.
+func (s *auditService) classifyResourceLog(auditLog models.AuditLog) ResourceLogVerification {
+	baseStatus := s.classifyIntegrity(auditLog)
+
+	item := ResourceLogVerification{
+		LogID:           auditLog.LogID,
+		Action:          auditLog.Action,
+		Actor:           auditLog.Actor,
+		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
+		HashValue:       auditLog.HashValue,
+		IntegrityStatus: baseStatus,
+		AgentStatus:     "not_configured",
+	}
+
+	logCopy := auditLog
+	agentResult, err := s.agent.VerifyAgainstAgent(&logCopy)
+	if err != nil {
+		// AgentConfig ada tapi request ke Agent gagal (timeout/network/401) —
+		// beda dengan "not_configured", karena di sini klien SUDAH setup
+		// Agent, cuma sedang tidak bisa dihubungi.
+		item.AgentStatus = "unreachable"
+	} else if agentResult.AgentUsed {
+		if agentResult.IsMatch {
+			item.AgentStatus = "matched"
+		} else {
+			item.AgentStatus = "mismatch"
+			item.AgentDiscrepancies = agentResult.Discrepancies
+		}
+	}
+	// else: AgentUsed == false → klien belum setup Agent, biarkan "not_configured"
+
+	switch {
+	case baseStatus == "tampered" || item.AgentStatus == "mismatch":
+		item.IntegrityStatus = "tampered"
+	case baseStatus == "unreachable" || item.AgentStatus == "unreachable":
+		item.IntegrityStatus = "unreachable"
+	case baseStatus == "pending":
+		item.IntegrityStatus = "pending"
+	default:
+		item.IntegrityStatus = "valid"
+	}
+
+	return item
 }

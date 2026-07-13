@@ -247,14 +247,14 @@ func (h *Handler) VerifyResourceHistory(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Riwayat resource tidak ditemukan."})
 		return
 	}
-	if result.IsValid {
-		if result.Status == "pending" {
-			c.JSON(http.StatusAccepted, result)
-		} else {
-			c.JSON(http.StatusOK, result)
-		}
-	} else {
+
+	switch result.ChainStatus {
+	case "tampered":
 		c.JSON(http.StatusConflict, result)
+	case "pending":
+		c.JSON(http.StatusAccepted, result)
+	default: // valid, unreachable
+		c.JSON(http.StatusOK, result)
 	}
 }
 
