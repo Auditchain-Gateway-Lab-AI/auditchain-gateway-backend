@@ -361,24 +361,46 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		return nil, errors.New("parse_error")
 	}
 
-	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
-		return &VerificationResult{
-			Status:    "failed_onchain",
-			Message:   "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
-			IsValid:   false,
-			LogID:     auditLog.LogID,
-			DBRoot:    auditLog.MerkleRoot,
-			ChainRoot: fabricResponse.MerkleRoot,
-		}, nil
+	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
+	if perr != nil {
+		return nil, errors.New("proof_lookup_error")
+	}
+
+	reconstructedRoot := auditLog.HashValue // batch 1-leaf: root == hash itu sendiri
+	if len(proofs) > 0 {
+		reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
+	}
+
+	verifiedVia := "merkle_proof"
+	if reconstructedRoot != fabricResponse.MerkleRoot {
+		// Fallback untuk data lama yang di-anchor SEBELUM fix ini (proof
+		// level>0 & IsLeft belum tersimpan benar) — supaya tidak false-positive
+		// menandai log lama yang sebenarnya sah sebagai "tampered".
+		if auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+			return &VerificationResult{
+				Status:    "failed_onchain",
+				Message:   "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
+				IsValid:   false,
+				LogID:     auditLog.LogID,
+				DBRoot:    reconstructedRoot,
+				ChainRoot: fabricResponse.MerkleRoot,
+			}, nil
+		}
+		verifiedVia = "legacy_field_fallback"
+	}
+
+	successMsg := "✅ DATA OTENTIK: Terverifikasi di database dan Blockchain."
+	if verifiedVia == "legacy_field_fallback" {
+		successMsg += " (diverifikasi via metode lama — log ini di-anchor sebelum perbaikan Merkle proof)"
 	}
 
 	return &VerificationResult{
 		Status:       "success",
-		Message:      "✅ DATA OTENTIK: Terverifikasi di database dan Blockchain.",
+		Message:      successMsg,
 		IsValid:      true,
 		LogID:        auditLog.LogID,
 		ExpectedHash: auditLog.HashValue,
-		DBRoot:       auditLog.MerkleRoot,
+		DBRoot:       reconstructedRoot,
 		TxID:         auditLog.BlockchainTxID,
 	}, nil
 }
@@ -499,7 +521,17 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 		return "unreachable"
 	}
 
-	if fabricResponse.MerkleRoot != auditLog.MerkleRoot {
+	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
+	if perr != nil {
+		return "unreachable"
+	}
+
+	reconstructedRoot := auditLog.HashValue
+	if len(proofs) > 0 {
+		reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
+	}
+
+	if reconstructedRoot != fabricResponse.MerkleRoot && auditLog.MerkleRoot != fabricResponse.MerkleRoot {
 		return "tampered"
 	}
 
@@ -672,4 +704,16 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Verifi
 
 func (s *auditService) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
 	return s.repo.GetLogsByResource(resource, clientID)
+}
+
+func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
+	result := make([]crypto.MerkleProofData, 0, len(proofs))
+	for _, p := range proofs {
+		result = append(result, crypto.MerkleProofData{
+			SiblingHash: p.SiblingHash,
+			IsLeft:      p.IsLeft,
+			TreeLevel:   p.TreeLevel,
+		})
+	}
+	return result
 }

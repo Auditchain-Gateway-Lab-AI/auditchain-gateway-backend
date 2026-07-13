@@ -42,6 +42,7 @@ type MerkleProof struct {
 	ID              uint   `gorm:"primaryKey"`
 	TransactionHash string `gorm:"type:varchar(64);index"`
 	SiblingHash     string `gorm:"type:varchar(64)"`
+	IsLeft          bool   `gorm:"default:false"`
 	TreeLevel       int    `gorm:"type:int"`
 	MerkleRoot      string `gorm:"type:varchar(64);index"`
 }

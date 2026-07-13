@@ -63,6 +63,7 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 				mp := models.MerkleProof{
 					TransactionHash: logItem.HashValue,
 					SiblingHash:     p.SiblingHash,
+					IsLeft:          p.IsLeft, // BARU — sebelumnya hilang, membuat proof tidak bisa direkonstruksi dengan urutan yang benar
 					TreeLevel:       p.TreeLevel,
 					MerkleRoot:      merkleResult.Root,
 				}
