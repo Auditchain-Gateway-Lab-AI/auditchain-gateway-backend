@@ -26,19 +26,17 @@ type DebeziumOracleMessage map[string]interface{}
 type Engine struct {
 	DB *gorm.DB
 
-	// sourceSystemCache menghindari query "clients" berulang untuk setiap
-	// message Kafka yang masuk (throughput tinggi). Company name jarang
-	// berubah, jadi cache in-memory per-proses cukup aman; restart service
-	// akan otomatis me-refresh cache ini.
-	sourceSystemCache sync.Map // map[clientID string]string
+	sourceSystemCache sync.Map
+
+	mu        sync.Mutex
+	consumers map[string]*runningConsumer // key: ClientID
 }
 
-// resolveSourceSystem mengikuti prinsip yang sama dengan ingestion handler:
-// source_system idealnya = Client.CompanyName supaya konsisten di seluruh
-// jalur masuk data (API ingestion maupun Kafka CDC). Fallback ke
-// cfg.SourceSystem (field manual di ClientKafkaConfig) jika company_name
-// klien belum diisi. Hasil query di-cache per client_id agar tidak
-// membebani DB pada throughput tinggi.
+type runningConsumer struct {
+	cancel      context.CancelFunc
+	fingerprint string
+}
+
 func (e *Engine) resolveSourceSystem(cfg models.ClientKafkaConfig) string {
 	if cached, ok := e.sourceSystemCache.Load(cfg.ClientID); ok {
 		return cached.(string)
@@ -57,20 +55,51 @@ func (e *Engine) resolveSourceSystem(cfg models.ClientKafkaConfig) string {
 	return resolved
 }
 
+func configFingerprint(cfg models.ClientKafkaConfig) string {
+	return cfg.TopicPrefix + "|" + cfg.KafkaBrokers + "|" + cfg.ActorField + "|" + cfg.PKField
+}
+
 // StartConsumers memulai consumer untuk semua klien yang punya ClientKafkaConfig aktif
-func (e *Engine) StartConsumers(ctx context.Context) error {
+func (e *Engine) Reconcile(ctx context.Context) error {
 	var configs []models.ClientKafkaConfig
 	if err := e.DB.Where("is_active = true").Find(&configs).Error; err != nil {
 		return fmt.Errorf("gagal load kafka configs: %w", err)
 	}
 
-	if len(configs) == 0 {
-		log.Println("⚠️  [KafkaConsumer] Tidak ada klien dengan Kafka config aktif")
-		return nil
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.consumers == nil {
+		e.consumers = make(map[string]*runningConsumer)
 	}
 
+	seen := make(map[string]bool, len(configs))
+
 	for _, cfg := range configs {
-		go e.startClientConsumer(ctx, cfg)
+		seen[cfg.ClientID] = true
+		fp := configFingerprint(cfg)
+
+		if existing, running := e.consumers[cfg.ClientID]; running {
+			if existing.fingerprint == fp {
+				continue // tidak ada perubahan, biarkan goroutine yang sudah jalan
+			}
+			log.Printf("🔄 [KafkaConsumer] Config klien=%s berubah, restart consumer...", cfg.ClientID)
+			existing.cancel()
+		}
+
+		consumerCtx, cancel := context.WithCancel(ctx)
+		e.consumers[cfg.ClientID] = &runningConsumer{cancel: cancel, fingerprint: fp}
+		go e.startClientConsumer(consumerCtx, cfg)
+	}
+
+	// Stop consumer untuk klien yang config-nya sudah dihapus/dinonaktifkan
+	// sejak siklus reconcile sebelumnya — inilah yang tadinya hilang.
+	for clientID, rc := range e.consumers {
+		if !seen[clientID] {
+			log.Printf("🛑 [KafkaConsumer] Config klien=%s sudah tidak aktif, menghentikan consumer...", clientID)
+			rc.cancel()
+			delete(e.consumers, clientID)
+		}
 	}
 
 	return nil

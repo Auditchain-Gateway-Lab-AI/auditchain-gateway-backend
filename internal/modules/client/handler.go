@@ -109,7 +109,6 @@ func (h *Handler) ToggleKafkaConfig(c *gin.Context) {
 	})
 }
 
-
 func (h *Handler) CreateClient(c *gin.Context) {
 	var req CreateClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -133,6 +132,39 @@ func (h *Handler) CreateClient(c *gin.Context) {
 			"action_field":         clientData.ActionField,
 			"resource_field":       clientData.ResourceField,
 		},
+	})
+}
+
+func (h *Handler) DeleteKafkaConfig(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID konfigurasi tidak boleh kosong"})
+		return
+	}
+
+	var cfg models.ClientKafkaConfig
+	if err := h.DB.First(&cfg, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Konfigurasi Kafka tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencari konfigurasi Kafka"})
+		}
+		return
+	}
+
+	// Soft delete via GORM (mengisi deleted_at), BUKAN raw SQL DELETE —
+	// supaya riwayat config tetap tertelusuri, dan supaya query Reconcile
+	// (yang otomatis exclude baris ber-deleted_at berkat model punya
+	// gorm.DeletedAt) langsung mengecualikan baris ini di siklus berikutnya.
+	if err := h.DB.Delete(&cfg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus konfigurasi Kafka"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Konfigurasi Kafka dihapus. Consumer terkait akan berhenti otomatis dalam ≤15 detik (siklus reconcile).",
+		"id":        cfg.ID,
+		"client_id": cfg.ClientID,
 	})
 }
 

@@ -69,8 +69,20 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 
 	// Kafka consumer: satu goroutine per klien aktif
 	go func() {
-		if err := kafkaEngine.StartConsumers(ctx); err != nil {
-			log.Printf("⚠️  [KafkaConsumer] Error start: %v\n", err)
+		if err := kafkaEngine.Reconcile(ctx); err != nil {
+			log.Printf("⚠️  [KafkaConsumer] Reconcile awal gagal: %v\n", err)
+		}
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := kafkaEngine.Reconcile(ctx); err != nil {
+					log.Printf("⚠️  [KafkaConsumer] Reconcile gagal: %v\n", err)
+				}
+			}
 		}
 	}()
 }
