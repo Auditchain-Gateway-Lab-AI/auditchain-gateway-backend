@@ -93,14 +93,18 @@ type ResourceLogVerification struct {
 	Timestamp       string `json:"timestamp"`
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
+	IsLatest        bool   `json:"is_latest"`
 
-	// AgentStatus mencerminkan hasil Layer 3 (verifikasi ke sistem sumber
-	// klien via Agent), TERPISAH dari IntegrityStatus (Layer 2+4) supaya
-	// frontend bisa menampilkan alasan spesifik kalau berbeda.
-	//   matched        — Agent dihubungi, data cocok
-	//   mismatch       — Agent dihubungi, ada perbedaan (lihat AgentDiscrepancies)
-	//   unreachable    — Agent terkonfigurasi tapi gagal dihubungi
-	//   not_configured — klien belum setup AgentConfig, layer ini dilewati
+	// AgentStatus HANYA relevan untuk log_id = log terbaru pada resource ini
+	// (IsLatest=true). Agent cuma bisa membaca kondisi TERKINI data klien,
+	// jadi membandingkannya ke log lama pasti mismatch meski tidak ada
+	// tampering — itu bukan bukti manipulasi, itu snapshot historis yang
+	// memang sudah usang secara wajar.
+	//   matched            — log terbaru, Agent dihubungi, data cocok
+	//   mismatch           — log terbaru, Agent dihubungi, ada perbedaan
+	//   unreachable        — log terbaru, Agent terkonfigurasi tapi gagal dihubungi
+	//   not_configured     — log terbaru, klien belum setup AgentConfig
+	//   skipped_historical — BUKAN log terbaru, Layer 3 tidak relevan untuk baris ini
 	AgentStatus        string                      `json:"agent_status"`
 	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
@@ -689,8 +693,9 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 	hasUnreachable := false
 	hasPending := false
 
-	for _, auditLog := range logs {
-		item := s.classifyResourceLog(auditLog)
+	lastIndex := len(logs) - 1
+	for i, auditLog := range logs {
+		item := s.classifyResourceLog(auditLog, i == lastIndex)
 		result.Logs = append(result.Logs, item)
 
 		switch item.IntegrityStatus {
@@ -733,12 +738,13 @@ func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 	return result
 }
 
-// classifyResourceLog menjalankan Layer 2+4 (classifyIntegrity, sudah ada)
-// DAN Layer 3 (Agent source verification, BARU) untuk satu log, lalu
-// menggabungkannya menjadi satu IntegrityStatus akhir. Agent HANYA
-// mempengaruhi status akhir jika benar-benar dipanggil (AgentUsed) — klien
-// yang belum setup Agent tidak dirugikan/tidak mempengaruhi hasil.
-func (s *auditService) classifyResourceLog(auditLog models.AuditLog) ResourceLogVerification {
+// classifyResourceLog menjalankan Layer 2+4 (rehash + Merkle vs Fabric) untuk
+// SEMUA log, tapi Layer 3 (Agent, live data klien) HANYA untuk log terbaru —
+// karena hanya baris terbaru yang seharusnya cocok dengan kondisi data klien
+// saat ini. Log lama SENGAJA dilewati dari perbandingan Agent supaya tidak
+// menghasilkan false-positive "mismatch" akibat data yang memang sudah
+// berubah secara sah setelah log itu dibuat.
+func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bool) ResourceLogVerification {
 	baseStatus := s.classifyIntegrity(auditLog)
 
 	item := ResourceLogVerification{
@@ -748,15 +754,19 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog) ResourceLog
 		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
 		HashValue:       auditLog.HashValue,
 		IntegrityStatus: baseStatus,
-		AgentStatus:     "not_configured",
+		IsLatest:        isLatest,
+		AgentStatus:     "skipped_historical",
 	}
+
+	if !isLatest {
+		return item
+	}
+
+	item.AgentStatus = "not_configured"
 
 	logCopy := auditLog
 	agentResult, err := s.agent.VerifyAgainstAgent(&logCopy)
 	if err != nil {
-		// AgentConfig ada tapi request ke Agent gagal (timeout/network/401) —
-		// beda dengan "not_configured", karena di sini klien SUDAH setup
-		// Agent, cuma sedang tidak bisa dihubungi.
 		item.AgentStatus = "unreachable"
 	} else if agentResult.AgentUsed {
 		if agentResult.IsMatch {
@@ -766,7 +776,6 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog) ResourceLog
 			item.AgentDiscrepancies = agentResult.Discrepancies
 		}
 	}
-	// else: AgentUsed == false → klien belum setup Agent, biarkan "not_configured"
 
 	switch {
 	case baseStatus == "tampered" || item.AgentStatus == "mismatch":
