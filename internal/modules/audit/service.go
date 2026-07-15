@@ -593,7 +593,24 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 
 	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true}
 
-	// Tanpa filter integrity_status: pagination langsung dari SQL, exact count.
+	// GetRecentLogsPaginated menggantikan limit-500 lama dengan pagination
+	// sesungguhnya (page/page_size), plus filter opsional integrity_status.
+	//
+	// PERUBAHAN: endpoint ini TIDAK LAGI menjalankan verifikasi (rehash + query
+	// Fabric) secara otomatis untuk setiap baris yang ditampilkan. IntegrityStatus
+	// dikembalikan sebagai "not_checked" secara default. Verifikasi sesungguhnya
+	// per log dilakukan on-demand lewat GET /dashboard/verify/:log_id, dipicu
+	// oleh aksi eksplisit user (tombol verifikasi di frontend) — bukan lagi
+	// dibebankan ke setiap polling/render daftar transaksi. Ini menghindari
+	// rehash + Fabric round-trip berulang setiap 5 detik (siklus polling
+	// Dashboard) untuk log yang bahkan belum diminta diverifikasi siapa pun.
+	//
+	// KETERBATASAN (sudah ada sebelumnya, tidak berubah): saat integrity_status
+	// filter AKTIF, endpoint ini tetap butuh verifikasi in-memory untuk
+	// menentukan kecocokan filter — jalur ini TIDAK terpengaruh perubahan di
+	// atas karena secara desain memang harus menghitung status sebelum bisa
+	// difilter. (Catatan: implementasi loop filter saat ini masih dinonaktifkan/
+	// commented — di luar scope perubahan ini.)
 	if integrityStatus == "" {
 		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize)
 		if err != nil {
@@ -604,7 +621,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 		for _, l := range logs {
 			items = append(items, RecentLogItem{
 				AuditLog:        l,
-				IntegrityStatus: s.classifyIntegrity(l),
+				IntegrityStatus: "not_checked",
 			})
 		}
 
