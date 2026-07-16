@@ -112,6 +112,7 @@ type ResourceLogVerification struct {
 type ResourceChainResult struct {
 	Resource    string                    `json:"resource"`
 	ChainStatus string                    `json:"chain_status"` // valid | tampered | pending | unreachable
+	ChainIssues []string                  `json:"chain_issues,omitempty"`
 	TotalLogs   int                       `json:"total_logs"`
 	Logs        []ResourceLogVerification `json:"logs"`
 }
@@ -694,6 +695,21 @@ func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog,
 	return s.repo.GetResourceInventory(clientID)
 }
 
+// VerifyResourceHistory menjalankan verifikasi Layer 2 (re-hash) + Layer 4
+// (Merkle proof reconstruction vs Fabric) untuk SETIAP log milik resource
+// ini, dan Layer 3 (Agent, live client data) HANYA untuk log terbaru — lihat
+// classifyResourceLog. Hasilnya diagregasi menjadi satu chain_status.
+//
+// ChainIssues memberi detail KENAPA chain_status jadi "tampered", dengan dua
+// kategori yang SENGAJA dipisah (bisa muncul bersamaan, karena dua-duanya
+// independen satu sama lain):
+//   - "client_mismatch:<log_id>"      → data live di klien (via Agent) sudah
+//     berbeda dari log TERBARU resource ini. Bukan berarti log itu sendiri
+//     rusak — datanya sudah berubah lagi di sisi klien tanpa lewat AuditChain.
+//   - "log_integrity_failed:<log_id>" → log tersebut gagal Layer 2 dan/atau
+//     Layer 4 (rehash lokal tidak cocok, atau rekonstruksi Merkle root tidak
+//     cocok dengan Fabric). Bisa muncul untuk log manapun dalam riwayat,
+//     tidak terbatas pada log terbaru.
 func (s *auditService) VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error) {
 	logs, err := s.repo.GetLogsByResource(resource, clientID)
 	if err != nil || len(logs) == 0 {
@@ -709,11 +725,26 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 	hasTampered := false
 	hasUnreachable := false
 	hasPending := false
+	var chainIssues []string
 
 	lastIndex := len(logs) - 1
 	for i, auditLog := range logs {
 		item := s.classifyResourceLog(auditLog, i == lastIndex)
 		result.Logs = append(result.Logs, item)
+
+		// baseIntegrityFailed dicek terpisah dari item.IntegrityStatus supaya
+		// "log_integrity_failed" hanya dilaporkan untuk kegagalan Layer 2/4
+		// yang sesungguhnya — bukan ikut ter-flag saat penyebabnya murni
+		// client_mismatch (yang juga bisa membuat item.IntegrityStatus jadi
+		// "tampered" lewat classifyResourceLog, lihat baseStatus vs AgentStatus
+		// di sana).
+		baseIntegrityFailed := s.classifyIntegrity(auditLog) == "tampered"
+		if baseIntegrityFailed {
+			chainIssues = append(chainIssues, fmt.Sprintf("log_integrity_failed:%s", auditLog.LogID))
+		}
+		if item.IsLatest && item.AgentStatus == "mismatch" {
+			chainIssues = append(chainIssues, fmt.Sprintf("client_mismatch:%s", auditLog.LogID))
+		}
 
 		switch item.IntegrityStatus {
 		case "tampered":
@@ -728,6 +759,7 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 	switch {
 	case hasTampered:
 		result.ChainStatus = "tampered"
+		result.ChainIssues = chainIssues
 	case hasUnreachable:
 		result.ChainStatus = "unreachable"
 	case hasPending:
