@@ -64,6 +64,8 @@ func (h *Handler) Login(c *gin.Context) {
 		switch err.Error() {
 		case "invalid_credentials":
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Username atau Password salah!"})
+		case "client_inactive":
+			c.JSON(http.StatusForbidden, gin.H{"error": "Account is disabled because the associated client is inactive."})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencetak token keamanan"})
 		}

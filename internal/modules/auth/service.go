@@ -59,6 +59,14 @@ func (s *authService) Login(username, password string) (string, error) {
 		return "", errors.New("invalid_credentials")
 	}
 
+	// Periksa status klien untuk user non-Admin
+	if user.Role != "Admin" {
+		client, err := s.repo.CheckClient(user.ClientID)
+		if err != nil || client.Status != "active" {
+			return "", errors.New("client_inactive")
+		}
+	}
+
 	claims := jwt.MapClaims{
 		"user_id":   user.ID,
 		"client_id": user.ClientID,
