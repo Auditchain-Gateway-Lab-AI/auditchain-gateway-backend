@@ -27,6 +27,11 @@ type CreateClientRequest struct {
 	ResourceField      string `json:"resource_field" example:"tabel"`
 }
 
+type CreateClientUserRequest struct {
+	Username string `json:"username" binding:"required,min=4"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 type CreateKafkaConfigRequest struct {
 	ClientID     string `json:"client_id" binding:"required"`
 	TopicPrefix  string `json:"topic_prefix" binding:"required"`
@@ -193,4 +198,110 @@ func (h *Handler) GetDashboardSummary(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, summary)
+}
+
+func (h *Handler) ToggleClientStatus(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	client, err := h.Service.ToggleClientStatus(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal merubah status klien"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Status klien berhasil diperbarui",
+		"id":      client.ID,
+		"status":  client.Status,
+	})
+}
+
+func (h *Handler) DeleteClient(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	if err := h.Service.DeleteClient(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus klien"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Klien berhasil dihapus dari sistem",
+		"id":      id,
+	})
+}
+
+func (h *Handler) GetClientUsers(c *gin.Context) {
+	clientID := c.Param("id")
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	users, err := h.Service.GetUsersByClient(clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar pengguna klien"})
+		return
+	}
+
+	c.JSON(http.StatusOK, users)
+}
+
+func (h *Handler) CreateClientUser(c *gin.Context) {
+	clientID := c.Param("id")
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	var req CreateClientUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.Service.AddUserToClient(clientID, req.Username, req.Password)
+	if err != nil {
+		if err.Error() == "username_already_exists" {
+			c.JSON(http.StatusConflict, gin.H{"error": "Username is already taken"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan pengguna klien"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Pengguna klien berhasil ditambahkan",
+		"user": map[string]interface{}{
+			"id":        user.ID,
+			"client_id": user.ClientID,
+			"username":  user.Username,
+			"role":      user.Role,
+		},
+	})
+}
+
+func (h *Handler) DeleteClientUser(c *gin.Context) {
+	userID := c.Param("id")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID pengguna tidak boleh kosong"})
+		return
+	}
+
+	if err := h.Service.RemoveUser(userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus pengguna klien"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Pengguna klien berhasil dihapus",
+		"id":      userID,
+	})
 }

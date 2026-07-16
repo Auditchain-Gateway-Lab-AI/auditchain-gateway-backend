@@ -12,5 +12,10 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.PATCH("/kafka-config/:id/toggle", h.ToggleKafkaConfig)
 		adminRoutes.GET("/summary", h.GetDashboardSummary)
 		adminRoutes.DELETE("/kafka-config/:id", h.DeleteKafkaConfig)
+		adminRoutes.PATCH("/clients/:id/toggle", h.ToggleClientStatus)
+		adminRoutes.DELETE("/clients/:id", h.DeleteClient)
+		adminRoutes.GET("/clients/:id/users", h.GetClientUsers)
+		adminRoutes.POST("/clients/:id/users", h.CreateClientUser)
+		adminRoutes.DELETE("/users/:id", h.DeleteClientUser)
 	}
 }

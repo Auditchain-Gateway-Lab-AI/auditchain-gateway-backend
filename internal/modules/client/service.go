@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"go-blockchain-api/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Service interface {
@@ -14,6 +15,11 @@ type Service interface {
 	GetClients() ([]models.Client, error)
 	GetKafkaConfigs() ([]KafkaConfigWithClient, error)
 	GetDashboardSummary() (DashboardSummary, error)
+	ToggleClientStatus(id string) (*models.Client, error)
+	DeleteClient(id string) error
+	GetUsersByClient(clientID string) ([]models.User, error)
+	AddUserToClient(clientID string, username, password string) (*models.User, error)
+	RemoveUser(userID string) error
 }
 
 type KafkaConfigWithClient struct {
@@ -126,4 +132,72 @@ func (s *clientService) GetDashboardSummary() (DashboardSummary, error) {
 		TotalClients:  int64(len(clients)),
 		ActiveStreams: activeStreams,
 	}, nil
+}
+
+func (s *clientService) ToggleClientStatus(id string) (*models.Client, error) {
+	client, err := s.repo.GetClientByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	newStatus := "active"
+	if client.Status == "active" {
+		newStatus = "inactive"
+	}
+
+	if err := s.repo.UpdateClientStatus(id, newStatus); err != nil {
+		return nil, err
+	}
+
+	client.Status = newStatus
+	return client, nil
+}
+
+func (s *clientService) DeleteClient(id string) error {
+	return s.repo.DeleteClient(id)
+}
+
+func (s *clientService) GetUsersByClient(clientID string) ([]models.User, error) {
+	_, err := s.repo.GetClientByID(clientID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetUsersByClientID(clientID)
+}
+
+func (s *clientService) AddUserToClient(clientID string, username, password string) (*models.User, error) {
+	_, err := s.repo.GetClientByID(clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	exists, err := s.repo.CheckUsernameExists(username)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, errors.New("username_already_exists")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	newUser := &models.User{
+		ClientID: clientID,
+		Username: username,
+		Password: string(hashedPassword),
+		Role:     "Auditor",
+	}
+
+	if err := s.repo.CreateUser(newUser); err != nil {
+		return nil, err
+	}
+
+	return newUser, nil
+}
+
+func (s *clientService) RemoveUser(userID string) error {
+	return s.repo.DeleteUserByID(userID)
 }
