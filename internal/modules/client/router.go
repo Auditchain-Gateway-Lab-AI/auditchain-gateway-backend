@@ -1,9 +1,13 @@
 package client
 
-import "github.com/gin-gonic/gin"
+import (
+	"go-blockchain-api/internal/middleware"
+
+	"github.com/gin-gonic/gin"
+)
 
 func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
-	adminRoutes := routerGroup.Group("/admin")
+	adminRoutes := routerGroup.Group("/admin", middleware.AdminAuth())
 	{
 		adminRoutes.POST("/clients", h.CreateClient)
 		adminRoutes.GET("/clients", h.ListClients)
@@ -19,3 +23,4 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.DELETE("/users/:id", h.DeleteClientUser)
 	}
 }
+
