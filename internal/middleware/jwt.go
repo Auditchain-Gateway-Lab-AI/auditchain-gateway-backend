@@ -69,24 +69,63 @@ func JWTAuth() gin.HandlerFunc {
 	}
 }
 
-// AdminAuth melindungi endpoint admin — hanya internal system yang boleh akses
-// Gunakan ADMIN_SECRET di .env, inject via header X-Admin-Secret
+// AdminAuth melindungi endpoint admin — memvalidasi token JWT dan memastikan role adalah "admin"
 func AdminAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		secret := os.Getenv("ADMIN_SECRET")
-		if secret == "" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Konfigurasi admin belum diset."})
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Akses ditolak. Token tidak ditemukan."})
 			c.Abort()
 			return
 		}
 
-		provided := c.GetHeader("X-Admin-Secret")
-		if provided == "" || provided != secret {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Akses ditolak. Kredensial admin tidak valid."})
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Format token salah. Gunakan format: Bearer <token>"})
 			c.Abort()
 			return
 		}
 
+		tokenString := parts[1]
+		secret := os.Getenv("JWT_SECRET")
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, http.ErrAbortHandler
+			}
+			return []byte(secret), nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Token tidak valid atau sudah kedaluwarsa. Silakan login kembali.",
+			})
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Klaim token tidak valid."})
+			c.Abort()
+			return
+		}
+
+		roleVal, hasRole := claims["role"]
+		roleStr, okRole := roleVal.(string)
+		if !hasRole || !okRole || strings.ToLower(roleStr) != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak. Endpoint ini hanya untuk Administrator."})
+			c.Abort()
+			return
+		}
+
+		clientIDVal, ok := claims["client_id"]
+		clientID, okString := clientIDVal.(string)
+		if ok && okString && clientID != "" {
+			c.Set("client_id", clientID)
+		}
+
+		c.Set("role", roleStr)
 		c.Next()
 	}
 }
