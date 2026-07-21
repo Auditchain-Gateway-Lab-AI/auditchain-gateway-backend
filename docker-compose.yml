@@ -36,8 +36,10 @@ services:
     volumes:
       - /home/besu/audit_blockchain/organizations:/home/besu/audit_blockchain/organizations:ro
     extra_hosts:
-      - "peer0.org1.audit.example.com:192.168.11.94"
-      - "orderer.audit.example.com:192.168.11.94"
+      - "peer0.org1.audit.example.com:100.125.142.44"
+      - "peer0.org2.audit.example.com:100.126.175.124"
+      - "peer0.org3.audit.example.com:100.103.85.7"
+      - "orderer.audit.example.com:100.125.142.44"
     networks:
       - gateway-net
       - fabric-net
