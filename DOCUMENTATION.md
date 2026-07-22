@@ -14,6 +14,10 @@ Dokumentasi ini menjelaskan endpoint API **Admin Panel** pada AuditChain Gateway
 | `GET` | `/api/admin/kafka-configs` | Mengambil daftar semua konfigurasi Kafka |
 | `PATCH` | `/api/admin/kafka-config/:id/toggle` | Mengaktifkan/Menonaktifkan stream Kafka |
 | `GET` | `/api/admin/summary` | Mengambil statistik ringkasan dashboard |
+| `POST` | `/api/admin/clients/:id/agent-config` | Mendaftarkan konfigurasi Agent (Lapis 3) untuk klien |
+| `GET` | `/api/admin/clients/:id/agent-config` | Melihat konfigurasi Agent milik klien |
+| `DELETE` | `/api/admin/clients/:id/agent-config` | Menghapus konfigurasi Agent milik klien |
+| `GET` | `/api/admin/clients/:id/agent-ping` | Melakukan test ping ke Agent klien |
 
 ---
 
