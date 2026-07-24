@@ -430,3 +430,83 @@ func (h *Handler) PingAgentConfig(c *gin.Context) {
 		"http_status": resp.StatusCode,
 	})
 }
+
+type AgentTelemetryRequest struct {
+	APIKeyPrefix   string `json:"api_key_prefix" binding:"required"`
+	KafkaBrokers   string `json:"kafka_brokers" binding:"required"`
+	AgentServerURL string `json:"agent_server_url" binding:"required"`
+	Hostname       string `json:"hostname"`
+	Status         string `json:"status"`
+}
+
+func (h *Handler) ProcessTelemetry(c *gin.Context) {
+	var req AgentTelemetryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	searchPrefix := req.APIKeyPrefix
+	if len(searchPrefix) > 16 {
+		searchPrefix = searchPrefix[:16]
+	}
+
+	var client models.Client
+	err := h.DB.Where("api_key_prefix = ?", searchPrefix).First(&client).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			client = models.Client{
+				CompanyName:  "Auto Registered (" + req.Hostname + ")",
+				APIKeyPrefix: req.APIKeyPrefix,
+				Status:       "pending_setup",
+			}
+			if err := h.DB.Create(&client).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan draft klien baru"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			return
+		}
+	}
+
+	var agentCfg models.AgentConfig
+	if err := h.DB.Where("client_id = ?", client.ID).First(&agentCfg).Error; err != nil {
+		agentCfg = models.AgentConfig{
+			ClientID: client.ID,
+			AgentURL: req.AgentServerURL,
+			IsActive: false,
+		}
+		h.DB.Create(&agentCfg)
+	} else {
+		h.DB.Model(&agentCfg).Updates(models.AgentConfig{
+			AgentURL: req.AgentServerURL,
+		})
+	}
+
+	var kafkaCfg models.ClientKafkaConfig
+	if err := h.DB.Where("client_id = ?", client.ID).First(&kafkaCfg).Error; err != nil {
+		kafkaCfg = models.ClientKafkaConfig{
+			ClientID:     client.ID,
+			KafkaBrokers: req.KafkaBrokers,
+			TopicPrefix:  "draft." + client.ID,
+			SourceSystem: req.Hostname,
+			IsActive:     false,
+		}
+		h.DB.Create(&kafkaCfg)
+	} else {
+		h.DB.Model(&kafkaCfg).Updates(models.ClientKafkaConfig{
+			KafkaBrokers: req.KafkaBrokers,
+			SourceSystem: req.Hostname,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "Telemetri berhasil diterima dan disimpan dalam status pending_setup.",
+		"client_id":        client.ID,
+		"status":           "pending_setup",
+		"kafka_brokers":    req.KafkaBrokers,
+		"agent_server_url": req.AgentServerURL,
+	})
+}
+

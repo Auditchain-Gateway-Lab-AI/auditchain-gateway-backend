@@ -18,6 +18,9 @@ Dokumentasi ini menjelaskan endpoint API **Admin Panel** pada AuditChain Gateway
 | `GET` | `/api/admin/clients/:id/agent-config` | Melihat konfigurasi Agent milik klien |
 | `DELETE` | `/api/admin/clients/:id/agent-config` | Menghapus konfigurasi Agent milik klien |
 | `GET` | `/api/admin/clients/:id/agent-ping` | Melakukan test ping ke Agent klien |
+| `POST` | `/api/agent/telemetry` | Public callback telemetri dari `install.sh` |
+| `GET` | `/install.sh` | Download file script installer 1-command |
+
 
 ---
 

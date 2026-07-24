@@ -28,5 +28,10 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.DELETE("/clients/:id/agent-config", h.DeleteAgentConfig)
 		adminRoutes.GET("/clients/:id/agent-ping", h.PingAgentConfig)
 	}
+
+	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)
+	routerGroup.POST("/agent/telemetry", h.ProcessTelemetry)
+	routerGroup.StaticFile("/install.sh", "./scripts/install.sh")
 }
+
 
