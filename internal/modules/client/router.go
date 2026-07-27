@@ -31,7 +31,6 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)
 	routerGroup.POST("/agent/telemetry", h.ProcessTelemetry)
+	routerGroup.POST("/agent/tailscale-key", h.GenerateTailscaleKey)
 	routerGroup.StaticFile("/install.sh", "./scripts/install.sh")
 }
-
-

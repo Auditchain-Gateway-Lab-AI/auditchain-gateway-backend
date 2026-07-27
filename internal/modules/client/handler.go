@@ -1,7 +1,12 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+
 	"go-blockchain-api/internal/models"
 	"net/http"
 
@@ -507,6 +512,75 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 		"status":           "pending_setup",
 		"kafka_brokers":    req.KafkaBrokers,
 		"agent_server_url": req.AgentServerURL,
+	})
+}
+
+// GenerateTailscaleKey Requests a new ephemeral Auth Key from Tailscale OAuth API
+func (h *Handler) GenerateTailscaleKey(c *gin.Context) {
+	var req struct {
+		APIKeyPrefix string `json:"api_key_prefix" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		return
+	}
+
+	searchPrefix := req.APIKeyPrefix
+	if len(searchPrefix) > 16 {
+		searchPrefix = searchPrefix[:16]
+	}
+
+	var client models.Client
+	if err := h.DB.Where("api_key_prefix = ?", searchPrefix).First(&client).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client not found or invalid API Key"})
+		return
+	}
+
+	apiToken := os.Getenv("TAILSCALE_API_TOKEN")
+	tailnet := os.Getenv("TAILSCALE_TAILNET")
+
+	if apiToken == "" || tailnet == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tailscale API Token not configured on Gateway"})
+		return
+	}
+
+	// 1. Generate new Auth Key directly using API Token
+	keyPayload := map[string]interface{}{
+		"capabilities": map[string]interface{}{
+			"devices": map[string]interface{}{
+				"create": map[string]interface{}{
+					"reusable":      false,
+					"ephemeral":     false,
+					"preauthorized": true,
+				},
+			},
+		},
+		"expirySeconds": 3600,
+	}
+
+	keyPayloadBytes, _ := json.Marshal(keyPayload)
+	reqHttp, _ := http.NewRequest("POST", fmt.Sprintf("https://api.tailscale.com/api/v2/tailnet/%s/keys", tailnet), bytes.NewBuffer(keyPayloadBytes))
+	reqHttp.Header.Set("Authorization", "Bearer "+apiToken)
+	reqHttp.Header.Set("Content-Type", "application/json")
+
+	keyResp, err := http.DefaultClient.Do(reqHttp)
+	if err != nil || keyResp.StatusCode != 200 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate Tailscale Auth Key"})
+		return
+	}
+	defer keyResp.Body.Close()
+
+	var keyData struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(keyResp.Body).Decode(&keyData); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode Tailscale key response"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"auth_key": keyData.Key,
 	})
 }
 

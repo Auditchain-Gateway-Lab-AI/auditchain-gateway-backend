@@ -37,7 +37,6 @@ fi
 
 GATEWAY_URL=${GATEWAY_URL:-${1:-"https://api.auditchain.id"}}
 CLIENT_KEY=${CLIENT_KEY:-$2}
-TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-"tskey-auth-kj1d5Zj9Bm11CNTRL-wGdo4ffFtCccEqXuFqCHCcV5yMJuuUDh7"}
 
 if [ -z "$CLIENT_KEY" ]; then
     echo -e "${RED}[ERROR] CLIENT_KEY (API Key Klien) wajib diisi!${NC}"
@@ -45,12 +44,6 @@ if [ -z "$CLIENT_KEY" ]; then
     echo "Contoh: GATEWAY_URL=\"http://100.103.5.72:8082\" CLIENT_KEY=\"ak_live_xxxx\" sudo -E bash"
     exit 1
 fi
-
-if [ -z "$TAILSCALE_AUTHKEY" ]; then
-    echo -e "${YELLOW}[WARNING] TAILSCALE_AUTHKEY tidak ditemukan di environment.${NC}"
-    echo -e "${YELLOW}Menggunakan fallback auth key default / prompt mode...${NC}"
-fi
-
 
 # ------------------------------------------------------------------------------
 # 2. TAILSCALE VPN INSTALLATION & UNATTENDED AUTHENTICATION
@@ -64,11 +57,25 @@ else
     echo "Tailscale sudah terpasang di sistem."
 fi
 
-if [ -n "$TAILSCALE_AUTHKEY" ]; then
-    echo -e "Menghubungkan server ke Grup VPN AuditChain secara otomatis..."
-    tailscale up --authkey="${TAILSCALE_AUTHKEY}" --unattended --accept-routes || true
+echo -e "\nMeminta Auth Key sementara (sekali pakai) secara aman dari AuditChain Gateway..."
+KEY_PAYLOAD=$(cat <<EOF
+{
+  "api_key_prefix": "${CLIENT_KEY}"
+}
+EOF
+)
+
+TAILSCALE_AUTHKEY=$(curl -s -X POST "${GATEWAY_URL}/api/agent/tailscale-key" \
+    -H "Content-Type: application/json" \
+    -d "${KEY_PAYLOAD}" | grep -o '"auth_key":"[^"]*"' | cut -d'"' -f4)
+
+if [ -n "$TAILSCALE_AUTHKEY" ] && [ "$TAILSCALE_AUTHKEY" != "null" ]; then
+    echo -e "${GREEN}✓ Auth Key berhasil didapatkan! Menghubungkan VPN secara otomatis...${NC}"
+    tailscale up --authkey="${TAILSCALE_AUTHKEY}" --accept-routes || true
 else
-    echo -e "${YELLOW}[SKIP] Menjalankan Tailscale tanpa authkey khusus.${NC}"
+    echo -e "${RED}[ERROR] Gagal mendapatkan Auth Key dari Gateway. Periksa API_KEY atau kredensial OAuth Admin.${NC}"
+    echo -e "${YELLOW}Mencoba menghubungkan secara interaktif (Manual Login URL)...${NC}"
+    tailscale up --accept-routes || true
 fi
 
 # Mengambil IP Virtual Tailscale (IPv4)
