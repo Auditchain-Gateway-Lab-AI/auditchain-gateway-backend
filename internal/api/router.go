@@ -31,8 +31,7 @@ func SetupRouter(
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	apiGroup := router.Group("/api")
-	apiGroup.StaticFile("/install.sh", "./scripts/install.sh")
-	
+
 	auth.RegisterRoutes(apiGroup, authHandler)
 	client.RegisterRoutes(apiGroup, clientHandler)
 	audit.RegisterRoutes(apiGroup, auditHandler)
