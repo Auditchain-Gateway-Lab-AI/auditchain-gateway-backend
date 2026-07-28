@@ -74,7 +74,7 @@ type Service interface {
 	// page/pageSize. integrityStatus kosong berarti tanpa filter.
 	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error)
 
-	GetResourceInventory(clientID string) ([]models.AuditLog, error)
+	GetResourceInventory(clientID string) (interface{}, error)
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
@@ -172,25 +172,9 @@ func formatFabricTimestamp(raw string) string {
 }
 
 type RangeItemResult struct {
-	LogID       string `json:"log_id"`
-	Resource    string `json:"resource"`
-	Action      string `json:"action"`
-	Timestamp   string `json:"timestamp"`
-	DBTimestamp string `json:"db_timestamp,omitempty"`
-
-	HashValue  string `json:"hash_value"`
-	RecalcHash string `json:"recalc_hash"`
-	HashMatch  bool   `json:"hash_match"`
-
-	Status       string `json:"status"`
+	LogID        string `json:"log_id"`
 	VerifyStatus string `json:"verify_status"`
-	Message      string `json:"message"`
-	ExpectedHash string `json:"expected_hash,omitempty"`
-	ActualHash   string `json:"actual_hash,omitempty"`
-
-	BlockchainTxID *string           `json:"blockchain_tx_id,omitempty"`
-	MerkleRoot     string            `json:"merkle_root,omitempty"`
-	Fabric         *FabricAnchorData `json:"fabric,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 // Implementasi
@@ -210,25 +194,8 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 
 	for _, auditLog := range logs {
 		item := RangeItemResult{
-			LogID:          auditLog.LogID,
-			Resource:       auditLog.Resource,
-			Action:         auditLog.Action,
-			Timestamp:      formatPgTimestamp(auditLog.Timestamp),
-			HashValue:      auditLog.HashValue,
-			Status:         auditLog.Status,
-			BlockchainTxID: auditLog.BlockchainTxID,
-			MerkleRoot:     auditLog.MerkleRoot,
+			LogID: auditLog.LogID,
 		}
-
-		if auditLog.DBTimestamp != nil {
-			item.DBTimestamp = formatPgTimestamp(*auditLog.DBTimestamp)
-		}
-
-		logCopy := auditLog
-		canonicalizeLog(&logCopy)
-		recalcHash := hasher.GenerateLogHash(&logCopy)
-		item.RecalcHash = recalcHash
-		item.HashMatch = (recalcHash == auditLog.HashValue)
 
 		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)
 		if err != nil {
@@ -237,22 +204,6 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 		} else {
 			item.VerifyStatus = verifyResult.Status
 			item.Message = verifyResult.Message
-			if verifyResult.Status == "failed_local" {
-				item.ExpectedHash = verifyResult.ExpectedHash
-				item.ActualHash = verifyResult.ActualHash
-			}
-		}
-
-		if auditLog.BlockchainTxID != nil &&
-			*auditLog.BlockchainTxID != "" &&
-			*auditLog.BlockchainTxID != "PENDING_OR_FAILED" &&
-			s.fabric != nil {
-			fabricData, ferr := s.fetchFabricAnchor(*auditLog.BlockchainTxID)
-			if ferr != nil {
-				log.Printf("⚠️  [VerifyRange] Gagal fetch Fabric TxID=%s: %v", *auditLog.BlockchainTxID, ferr)
-			} else {
-				item.Fabric = fabricData
-			}
 		}
 
 		switch item.VerifyStatus {
@@ -691,8 +642,8 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	}, nil
 }
 
-func (s *auditService) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
-	return s.repo.GetResourceInventory(clientID)
+func (s *auditService) GetResourceInventory(clientID string) (interface{}, error) {
+	return s.repo.GetClientTables(clientID)
 }
 
 // VerifyResourceHistory menjalankan verifikasi Layer 2 (re-hash) + Layer 4

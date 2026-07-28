@@ -29,6 +29,7 @@ func ConnectDB() *gorm.DB {
 		&models.AgentConfig{},
 		&models.ClientKafkaConfig{},
 		&models.KafkaOffset{},
+		&models.ClientTable{},
 	)
 	if err != nil {
 		log.Fatalf("Gagal migrasi database: %v", err)
