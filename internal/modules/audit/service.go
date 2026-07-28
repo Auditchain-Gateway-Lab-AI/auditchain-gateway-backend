@@ -778,7 +778,7 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 	}
 
 	switch {
-	case baseStatus == "tampered" || item.AgentStatus == "mismatch":
+	case baseStatus == "tampered":
 		item.IntegrityStatus = "tampered"
 	case baseStatus == "unreachable" || item.AgentStatus == "unreachable":
 		item.IntegrityStatus = "unreachable"
