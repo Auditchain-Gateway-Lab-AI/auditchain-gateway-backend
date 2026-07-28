@@ -9,14 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"go-blockchain-api/internal/models"
 
 	"gorm.io/gorm"
-
-	"strings"
 )
 
 // AuditTrailRecord adalah respons dari endpoint GET /verify/:id di Agent.
@@ -265,18 +266,24 @@ func (s *Service) compareResourceData(auditLog *models.AuditLog, rec *ResourceRe
 	}
 
 	for key, logVal := range logMeta {
-		if skipFields[key] {
+		if skipFields[strings.ToLower(key)] {
 			continue
 		}
 		agentVal, exists := rec.Data[key]
 		if !exists {
 			continue
 		}
-		if fmt.Sprintf("%v", logVal) != fmt.Sprintf("%v", agentVal) {
+		
+		strLogVal := formatValueToString(logVal)
+		strAgentVal := formatValueToString(agentVal)
+
+		strLogVal, strAgentVal = tryNormalizeTimeMatch(strLogVal, strAgentVal)
+
+		if strLogVal != strAgentVal {
 			diffs = append(diffs, Discrepancy{
 				Field:   key,
-				InLog:   fmt.Sprintf("%v", logVal),
-				InAgent: fmt.Sprintf("%v", agentVal),
+				InLog:   strLogVal,
+				InAgent: strAgentVal,
 			})
 		}
 	}
@@ -401,6 +408,75 @@ func (s *Service) compareFields(auditLog *models.AuditLog, agent *AuditTrailReco
 	}
 
 	return diffs
+}
+
+func formatValueToString(val interface{}) string {
+	if val == nil {
+		return "null"
+	}
+
+	switch v := val.(type) {
+	case float64:
+		if v == math.Trunc(v) {
+			return fmt.Sprintf("%.0f", v)
+		}
+		return fmt.Sprintf("%g", v)
+	case json.Number:
+		return v.String()
+	case string:
+		return v
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func tryNormalizeTimeMatch(strLog, strAgent string) (string, string) {
+	if strLog == strAgent {
+		return strLog, strAgent
+	}
+
+	var timeLog, timeAgent time.Time
+	var errLog, errAgent error
+
+	// Coba parse Agent time sebagai ISO-8601 (RFC3339)
+	timeAgent, errAgent = time.Parse(time.RFC3339, strAgent)
+	if errAgent != nil {
+		return strLog, strAgent
+	}
+
+	// Parse Log time
+	timeLog, errLog = time.Parse(time.RFC3339, strLog)
+	if errLog != nil {
+		// Coba parse sebagai angka epoch (dari Debezium)
+		epochFloat, err := strconv.ParseFloat(strLog, 64)
+		if err == nil {
+			if epochFloat > 1e14 {
+				// Microseconds
+				timeLog = time.Unix(0, int64(epochFloat*1000)).UTC()
+			} else if epochFloat > 1e11 {
+				// Milliseconds
+				timeLog = time.UnixMilli(int64(epochFloat)).UTC()
+			} else {
+				// Seconds
+				timeLog = time.Unix(int64(epochFloat), 0).UTC()
+			}
+		} else {
+			return strLog, strAgent
+		}
+	}
+
+	// Bandingkan selisih waktu
+	diff := timeLog.Sub(timeAgent)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	// Jika selisih max 1 detik (toleransi presisi/pembulatan), anggap cocok
+	if diff <= time.Second {
+		return timeAgent.Format(time.RFC3339), strAgent
+	}
+
+	return strLog, strAgent
 }
 
 func normalizeJSON(raw string) string {
