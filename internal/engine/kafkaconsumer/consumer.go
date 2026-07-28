@@ -348,6 +348,30 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return fmt.Errorf("gagal simpan audit log: %w", err)
 	}
 
+	// Update counter cache di client_tables
+	tableNameOnly := tableName
+	if tableNameOnly == "" {
+		if strings.Contains(resource, ":") {
+			tableNameOnly = strings.Split(resource, ":")[0]
+		} else {
+			tableNameOnly = resource
+		}
+	}
+	upsertQuery := `
+		INSERT INTO client_tables (client_id, table_name, row_count, last_action, last_actor, last_updated_at, created_at)
+		VALUES (?, ?, CASE WHEN ? = 'INSERT' THEN 1 ELSE 0 END, ?, ?, ?, NOW())
+		ON CONFLICT (client_id, table_name) DO UPDATE SET
+			row_count = CASE 
+				WHEN EXCLUDED.last_action = 'INSERT' THEN client_tables.row_count + 1
+				WHEN EXCLUDED.last_action = 'DELETE' THEN GREATEST(client_tables.row_count - 1, 0)
+				ELSE client_tables.row_count 
+			END,
+			last_action = EXCLUDED.last_action,
+			last_actor = EXCLUDED.last_actor,
+			last_updated_at = EXCLUDED.last_updated_at
+	`
+	_ = e.DB.Exec(upsertQuery, cfg.ClientID, tableNameOnly, action, action, actor, timestamp)
+
 	// Simpan Kafka offset untuk verifikasi Lapis 3
 	kafkaOffset := &models.KafkaOffset{
 		LogID:     auditLog.LogID,
