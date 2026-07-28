@@ -71,11 +71,11 @@ TAILSCALE_AUTHKEY=$(curl -s -X POST "${GATEWAY_URL}/api/agent/tailscale-key" \
 
 if [ -n "$TAILSCALE_AUTHKEY" ] && [ "$TAILSCALE_AUTHKEY" != "null" ]; then
     echo -e "${GREEN}✓ Auth Key berhasil didapatkan! Menghubungkan VPN secara otomatis...${NC}"
-    tailscale up --authkey="${TAILSCALE_AUTHKEY}" --accept-routes || true
+    tailscale up --authkey="${TAILSCALE_AUTHKEY}" --accept-routes --reset || true
 else
     echo -e "${RED}[ERROR] Gagal mendapatkan Auth Key dari Gateway. Periksa API_KEY atau kredensial OAuth Admin.${NC}"
     echo -e "${YELLOW}Mencoba menghubungkan secara interaktif (Manual Login URL)...${NC}"
-    tailscale up --accept-routes || true
+    tailscale up --accept-routes --reset || true
 fi
 
 # Mengambil IP Virtual Tailscale (IPv4)
@@ -95,11 +95,58 @@ else
     echo "Docker Engine siap."
 fi
 
-echo -e "\n${BLUE}[3/5] Menyiapkan Folder Konfigurasi Agent...${NC}"
+if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+    echo "Docker Compose belum terpasang. Mengunduh Docker Compose..."
+    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+fi
+
+echo -e "\n${BLUE}[3/5] Menyiapkan Folder Konfigurasi Agent & Docker Compose...${NC}"
 mkdir -p /etc/auditchain
 mkdir -p /var/log/auditchain
 
-echo -e "\n${BLUE}[4/5] Mendeteksi Endpoint Network & Telemetri...${NC}"
+cat <<EOF > /etc/auditchain/docker-compose.yml
+version: '3.8'
+services:
+  zookeeper:
+    image: quay.io/debezium/zookeeper:2.4
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+  kafka:
+    image: quay.io/debezium/kafka:2.4
+    ports:
+      - "9092:9092"
+    environment:
+      - ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
+    depends_on:
+      - zookeeper
+  debezium:
+    image: quay.io/debezium/connect:2.4
+    ports:
+      - "8083:8083"
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=my_connect_configs
+      - OFFSET_STORAGE_TOPIC=my_connect_offsets
+      - STATUS_STORAGE_TOPIC=my_connect_statuses
+    depends_on:
+      - kafka
+EOF
+
+echo -e "\n${BLUE}[4/5] Menjalankan Engine Database CDC (Zookeeper, Kafka, Debezium)...${NC}"
+cd /etc/auditchain
+if command -v docker-compose &> /dev/null; then
+    docker-compose up -d
+else
+    docker compose up -d
+fi
+
+echo -e "\n${BLUE}[5/5] Mendeteksi Endpoint Network & Telemetri...${NC}"
 
 KAFKA_BROKERS="${TAILSCALE_IP}:9092"
 AGENT_SERVER_URL="http://${TAILSCALE_IP}:8081"
