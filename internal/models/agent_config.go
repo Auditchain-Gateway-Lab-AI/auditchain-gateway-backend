@@ -18,8 +18,12 @@ type AgentConfig struct {
 	// Contoh: http://192.168.11.50:9090
 	AgentURL string `gorm:"type:varchar(255);not null" json:"agent_url"`
 
+	// Field auto-filled oleh install.sh telemetry callback
+	TailscaleIP string `gorm:"type:varchar(45)" json:"tailscale_ip"`
+	Hostname    string `gorm:"type:varchar(100)" json:"hostname"`
+
 	// Bearer token untuk autentikasi — harus cocok dengan AGENT_VERIFY_TOKEN di Agent.
-	VerifyToken string `gorm:"type:varchar(255);not null" json:"-"`
+	VerifyToken string `gorm:"type:varchar(255)" json:"-"`
 
 	// Timeout dalam detik untuk request ke Agent (default: 5)
 	TimeoutSeconds int `gorm:"default:5" json:"timeout_seconds"`

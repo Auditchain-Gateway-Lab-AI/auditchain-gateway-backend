@@ -11,6 +11,7 @@ type Repository interface {
 	GetClients() ([]models.Client, error)
 	GetKafkaConfigs() ([]models.ClientKafkaConfig, error)
 	UpdateClientStatus(id string, status string) error
+	UpdateClient(client *models.Client) error
 	DeleteClient(id string) error
 	GetClientByID(id string) (*models.Client, error)
 	GetUsersByClientID(clientID string) ([]models.User, error)
@@ -45,6 +46,10 @@ func (r *clientRepository) GetKafkaConfigs() ([]models.ClientKafkaConfig, error)
 
 func (r *clientRepository) UpdateClientStatus(id string, status string) error {
 	return r.db.Model(&models.Client{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func (r *clientRepository) UpdateClient(client *models.Client) error {
+	return r.db.Save(client).Error
 }
 
 func (r *clientRepository) DeleteClient(id string) error {

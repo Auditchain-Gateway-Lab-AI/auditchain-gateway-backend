@@ -36,6 +36,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 GATEWAY_URL=${GATEWAY_URL:-${1:-"https://api.auditchain.id"}}
+GATEWAY_URL=$(echo "$GATEWAY_URL" | sed -E 's|/api/?$||' | sed -E 's|/$||')
 CLIENT_KEY=${CLIENT_KEY:-$2}
 
 if [ -z "$CLIENT_KEY" ]; then
@@ -179,6 +180,7 @@ PAYLOAD=$(cat <<EOF
   "kafka_brokers": "${KAFKA_BROKERS}",
   "agent_server_url": "${AGENT_SERVER_URL}",
   "hostname": "${HOSTNAME}",
+  "tailscale_ip": "${TAILSCALE_IP}",
   "status": "pending_setup"
 }
 EOF
