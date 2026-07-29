@@ -26,6 +26,7 @@ type AuditRepository interface {
 	GetClientTables(clientID string) ([]models.ClientTable, error)
 	UpsertClientTable(clientID, tableName, action, actor string, ts time.Time) error
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	GetTableResources(tableName, clientID string) ([]models.AuditLog, error)
 	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
 }
 
@@ -167,6 +168,18 @@ func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.A
 	var logs []models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
 		Order("timestamp asc").Find(&logs).Error
+	return logs, err
+}
+
+func (r *auditRepoImpl) GetTableResources(tableName, clientID string) ([]models.AuditLog, error) {
+	var logs []models.AuditLog
+	// Fetch the latest log for each resource in the table
+	err := r.db.Raw(`
+		SELECT DISTINCT ON (resource) * 
+		FROM audit_logs 
+		WHERE client_id = ? AND (resource = ? OR resource LIKE ?) 
+		ORDER BY resource, timestamp DESC
+	`, clientID, tableName, tableName+":%").Scan(&logs).Error
 	return logs, err
 }
 

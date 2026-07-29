@@ -76,6 +76,7 @@ type Service interface {
 	GetResourceInventory(clientID string) (interface{}, error)
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error)
 	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
 }
 
@@ -87,11 +88,15 @@ type auditService struct {
 
 type ResourceLogVerification struct {
 	LogID           string `json:"log_id"`
+	Resource        string `json:"resource"`         // Menyimpan nama/id resource
 	Action          string `json:"action"`
+	LastAction      string `json:"last_action"`      // Alias untuk kompabilitas frontend
 	Actor           string `json:"actor"`
 	Timestamp       string `json:"timestamp"`
+	LastUpdatedAt   string `json:"last_updated_at"`  // Alias untuk kompabilitas frontend
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
+	ChainStatus     string `json:"chain_status"`     // Alias untuk kompabilitas frontend
 	IsLatest        bool   `json:"is_latest"`
 
 	// AgentStatus HANYA relevan untuk log_id = log terbaru pada resource ini
@@ -725,6 +730,21 @@ func (s *auditService) GetLogsByResource(resource, clientID string) ([]models.Au
 	return s.repo.GetLogsByResource(resource, clientID)
 }
 
+func (s *auditService) GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error) {
+	logs, err := s.repo.GetTableResources(tableName, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]ResourceLogVerification, 0, len(logs))
+	for _, auditLog := range logs {
+		item := s.classifyResourceLog(auditLog, true)
+		results = append(results, item)
+	}
+
+	return results, nil
+}
+
 func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 	result := make([]crypto.MerkleProofData, 0, len(proofs))
 	for _, p := range proofs {
@@ -748,11 +768,15 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 
 	item := ResourceLogVerification{
 		LogID:           auditLog.LogID,
+		Resource:        auditLog.Resource,
 		Action:          auditLog.Action,
+		LastAction:      auditLog.Action,
 		Actor:           auditLog.Actor,
 		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
+		LastUpdatedAt:   formatPgTimestamp(auditLog.Timestamp),
 		HashValue:       auditLog.HashValue,
 		IntegrityStatus: baseStatus,
+		ChainStatus:     baseStatus,
 		IsLatest:        isLatest,
 		AgentStatus:     "skipped_historical",
 	}
@@ -779,12 +803,16 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 	switch {
 	case baseStatus == "tampered":
 		item.IntegrityStatus = "tampered"
+		item.ChainStatus = "tampered"
 	case baseStatus == "unreachable" || item.AgentStatus == "unreachable":
 		item.IntegrityStatus = "unreachable"
+		item.ChainStatus = "unreachable"
 	case baseStatus == "pending":
 		item.IntegrityStatus = "pending"
+		item.ChainStatus = "pending"
 	default:
 		item.IntegrityStatus = "valid"
+		item.ChainStatus = "valid"
 	}
 
 	return item

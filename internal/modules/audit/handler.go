@@ -242,7 +242,56 @@ func (h *Handler) VerifyResourceHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.Service.VerifyResourceHistory(c.Param("resource"), clientID)
+
+	resourceParam := c.Param("resource")
+
+	// Deteksi jika param adalah nama tabel (tidak mengandung ':')
+	if !strings.Contains(resourceParam, ":") {
+		// Ambil semua resource (baris terbaru) di dalam tabel ini
+		resources, err := h.Service.GetTableResources(resourceParam, clientID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data baris tabel."})
+			return
+		}
+
+		// Agregasi status tabel
+		hasTampered := false
+		hasUnreachable := false
+		hasPending := false
+		for _, res := range resources {
+			switch res.ChainStatus {
+			case "tampered":
+				hasTampered = true
+			case "unreachable":
+				hasUnreachable = true
+			case "pending":
+				hasPending = true
+			}
+		}
+
+		chainStatus := "valid"
+		switch {
+		case hasTampered:
+			chainStatus = "tampered"
+		case hasUnreachable:
+			chainStatus = "unreachable"
+		case hasPending:
+			chainStatus = "pending"
+		}
+
+		result := &ResourceChainResult{
+			Resource:    resourceParam,
+			ChainStatus: chainStatus,
+			TotalLogs:   len(resources),
+			Logs:        resources,
+		}
+
+		// Gunakan HTTP 200 karena ini adalah tampilan daftar, kecuali jika semuanya conflict
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	result, err := h.Service.VerifyResourceHistory(resourceParam, clientID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Riwayat resource tidak ditemukan."})
 		return
