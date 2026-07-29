@@ -436,11 +436,113 @@ func (h *Handler) PingAgentConfig(c *gin.Context) {
 	})
 }
 
+type UpdateClientRequest struct {
+	CompanyName        string `json:"company_name"`
+	Status             string `json:"status"`
+	ActorField         string `json:"actor_field"`
+	FallbackActorField string `json:"fallback_actor_field"`
+	ActionField        string `json:"action_field"`
+	ResourceField      string `json:"resource_field"`
+	TopicPrefix        string `json:"topic_prefix"`
+}
+
+func (h *Handler) UpdateClient(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	var req UpdateClientRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format request tidak valid: " + err.Error()})
+		return
+	}
+
+	var client models.Client
+	if err := h.DB.First(&client, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencari data klien"})
+		}
+		return
+	}
+
+	if req.CompanyName != "" {
+		client.CompanyName = req.CompanyName
+	}
+	if req.ActorField != "" {
+		client.ActorField = req.ActorField
+	}
+	client.FallbackActorField = req.FallbackActorField
+	if req.ActionField != "" {
+		client.ActionField = req.ActionField
+	}
+	if req.ResourceField != "" {
+		client.ResourceField = req.ResourceField
+	}
+	if req.Status != "" {
+		client.Status = req.Status
+	}
+
+	if err := h.DB.Save(&client).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal meng-update data klien"})
+		return
+	}
+
+	if req.TopicPrefix != "" {
+		h.DB.Model(&models.ClientKafkaConfig{}).Where("client_id = ?", client.ID).Update("topic_prefix", req.TopicPrefix)
+	}
+
+	// Jika status di-update menjadi 'active' (Approved), aktifkan juga AgentConfig & ClientKafkaConfig
+	if client.Status == "active" {
+		h.DB.Model(&models.AgentConfig{}).Where("client_id = ?", client.ID).Update("is_active", true)
+		h.DB.Model(&models.ClientKafkaConfig{}).Where("client_id = ?", client.ID).Update("is_active", true)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Data klien berhasil diperbarui",
+		"client":  client,
+	})
+}
+
+func (h *Handler) GetClientDetail(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	var client models.Client
+	if err := h.DB.First(&client, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data klien"})
+		}
+		return
+	}
+
+	var agentCfg models.AgentConfig
+	_ = h.DB.Where("client_id = ?", id).First(&agentCfg).Error
+
+	var kafkaCfg models.ClientKafkaConfig
+	_ = h.DB.Where("client_id = ?", id).First(&kafkaCfg).Error
+
+	c.JSON(http.StatusOK, gin.H{
+		"client":       client,
+		"agent_config": agentCfg,
+		"kafka_config": kafkaCfg,
+	})
+}
+
 type AgentTelemetryRequest struct {
 	APIKeyPrefix   string `json:"api_key_prefix" binding:"required"`
 	KafkaBrokers   string `json:"kafka_brokers" binding:"required"`
 	AgentServerURL string `json:"agent_server_url" binding:"required"`
 	Hostname       string `json:"hostname"`
+	TailscaleIP    string `json:"tailscale_ip"`
 	Status         string `json:"status"`
 }
 
@@ -478,14 +580,18 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 	var agentCfg models.AgentConfig
 	if err := h.DB.Where("client_id = ?", client.ID).First(&agentCfg).Error; err != nil {
 		agentCfg = models.AgentConfig{
-			ClientID: client.ID,
-			AgentURL: req.AgentServerURL,
-			IsActive: false,
+			ClientID:    client.ID,
+			AgentURL:    req.AgentServerURL,
+			TailscaleIP: req.TailscaleIP,
+			Hostname:    req.Hostname,
+			IsActive:    false,
 		}
 		h.DB.Create(&agentCfg)
 	} else {
-		h.DB.Model(&agentCfg).Updates(models.AgentConfig{
-			AgentURL: req.AgentServerURL,
+		h.DB.Model(&agentCfg).Updates(map[string]interface{}{
+			"agent_url":    req.AgentServerURL,
+			"tailscale_ip": req.TailscaleIP,
+			"hostname":     req.Hostname,
 		})
 	}
 
@@ -582,5 +688,25 @@ func (h *Handler) GenerateTailscaleKey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"auth_key": keyData.Key,
 	})
+}
+
+func (h *Handler) ServeInstallScript(c *gin.Context) {
+	possiblePaths := []string{
+		"./scripts/install.sh",
+		"./auditchain-gateway-backend/scripts/install.sh",
+		"../scripts/install.sh",
+		"scripts/install.sh",
+		"/etc/auditchain/install.sh",
+	}
+
+	for _, p := range possiblePaths {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			c.Header("Content-Type", "text/x-shellscript")
+			c.File(p)
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"error": "File script install.sh tidak ditemukan di server Gateway"})
 }
 
