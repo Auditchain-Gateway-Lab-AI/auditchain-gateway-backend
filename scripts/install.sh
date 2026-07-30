@@ -393,7 +393,8 @@ EOF
 )
             fi
 
-            DBZ_RESP=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8083/connectors \
+            DBZ_BODY_FILE="/tmp/dbz_response_$$.json"
+            DBZ_RESP=$(curl -s -w "%{http_code}" -o "${DBZ_BODY_FILE}" -X POST http://localhost:8083/connectors \
                 -H "Content-Type: application/json" \
                 -d "${CONNECTOR_PAYLOAD}" || echo "000")
 
@@ -401,9 +402,15 @@ EOF
                 echo -e "${GREEN}✓ Konektor Database Debezium BERHASIL didaftarkan! Data mulai disedot.${NC}"
                 CONNECTOR_SETUP_STATUS="running"
             else
-                echo -e "${YELLOW}[NOTE] Respon Debezium (HTTP Status: ${DBZ_RESP}). Konfigurasi dapat diperiksa via Admin Dashboard.${NC}"
+                echo -e "${YELLOW}[NOTE] Respon Debezium (HTTP Status: ${DBZ_RESP}).${NC}"
+                if [ -f "${DBZ_BODY_FILE}" ]; then
+                    echo -e "${YELLOW}Detail Error Debezium:${NC}"
+                    cat "${DBZ_BODY_FILE}"
+                    echo ""
+                fi
                 CONNECTOR_SETUP_STATUS="failed_${DBZ_RESP}"
             fi
+            rm -f "${DBZ_BODY_FILE}"
         else
             echo -e "${YELLOW}[NOTE] Debezium belum siap merespon. Konfigurasi otomatis ditunda.${NC}"
             CONNECTOR_SETUP_STATUS="debezium_not_ready"
