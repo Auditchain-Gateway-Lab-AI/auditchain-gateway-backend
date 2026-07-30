@@ -325,16 +325,44 @@ else
         fi
 
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            NEEDS_PG_RESTART=false
+
+            # --- Cek WAL Level ---
             CURRENT_WAL=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
             if [ "$CURRENT_WAL" != "logical" ]; then
                 echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
-                read -p "Ubah wal_level ke 'logical' dan restart PostgreSQL? [Y/n]: " CONFIRM_RESTART < /dev/tty
-                CONFIRM_RESTART=${CONFIRM_RESTART:-Y}
-                if [[ "$CONFIRM_RESTART" =~ ^[Yy]$ ]]; then
-                    sudo -u postgres psql -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
-                    systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
-                    echo -e "${GREEN}✓ WAL Level diubah ke 'logical' & PostgreSQL di-restart.${NC}"
+                sudo -u postgres psql -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
+                echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
+                NEEDS_PG_RESTART=true
+            fi
+
+            # --- Cek listen_addresses agar Docker bisa connect ---
+            CURRENT_LISTEN=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
+            if [ "$CURRENT_LISTEN" = "localhost" ]; then
+                echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via 172.17.0.1.${NC}"
+                sudo -u postgres psql -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
+                echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
+                NEEDS_PG_RESTART=true
+            fi
+
+            # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
+            PG_HBA=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
+            if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
+                if ! grep -q "172.17.0.0/16" "$PG_HBA" 2>/dev/null; then
+                    echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
+                    echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
+                    echo "host    all    ${AGENT_DB_USER}    172.17.0.0/16    md5" >> "$PG_HBA"
+                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan untuk user '${AGENT_DB_USER}' dari Docker.${NC}"
+                    NEEDS_PG_RESTART=true
                 fi
+            fi
+
+            # --- Restart PostgreSQL jika ada perubahan ---
+            if [ "$NEEDS_PG_RESTART" = true ]; then
+                echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
+                systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
+                sleep 2
+                echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
             fi
         fi
 
