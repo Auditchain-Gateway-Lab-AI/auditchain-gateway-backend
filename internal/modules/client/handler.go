@@ -538,12 +538,16 @@ func (h *Handler) GetClientDetail(c *gin.Context) {
 }
 
 type AgentTelemetryRequest struct {
-	APIKeyPrefix   string `json:"api_key_prefix" binding:"required"`
-	KafkaBrokers   string `json:"kafka_brokers" binding:"required"`
-	AgentServerURL string `json:"agent_server_url" binding:"required"`
-	Hostname       string `json:"hostname"`
-	TailscaleIP    string `json:"tailscale_ip"`
-	Status         string `json:"status"`
+	APIKeyPrefix    string `json:"api_key_prefix" binding:"required"`
+	KafkaBrokers    string `json:"kafka_brokers" binding:"required"`
+	AgentServerURL  string `json:"agent_server_url" binding:"required"`
+	Hostname        string `json:"hostname"`
+	TailscaleIP     string `json:"tailscale_ip"`
+	Status          string `json:"status"`
+	DBEngine        string `json:"db_engine"`
+	DBName          string `json:"db_name"`
+	DBTables        string `json:"db_tables"`
+	ConnectorStatus string `json:"connector_status"`
 }
 
 func (h *Handler) ProcessTelemetry(c *gin.Context) {
@@ -562,8 +566,12 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 	err := h.DB.Where("api_key_prefix = ?", searchPrefix).First(&client).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			companyName := "Auto Registered (" + req.Hostname + ")"
+			if req.DBName != "" {
+				companyName = "Auto Registered (" + req.Hostname + " - " + req.DBName + ")"
+			}
 			client = models.Client{
-				CompanyName:  "Auto Registered (" + req.Hostname + ")",
+				CompanyName:  companyName,
 				APIKeyPrefix: req.APIKeyPrefix,
 				Status:       "pending_setup",
 			}
@@ -595,20 +603,31 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 		})
 	}
 
+	sourceSys := req.Hostname
+	if req.DBEngine != "" && req.DBName != "" {
+		sourceSys = req.DBEngine + " - " + req.DBName + " (" + req.Hostname + ")"
+	}
+
+	topicPrefix := "draft." + client.ID
+	if req.DBName != "" {
+		topicPrefix = req.Hostname + "_" + req.DBName + "."
+	}
+
 	var kafkaCfg models.ClientKafkaConfig
 	if err := h.DB.Where("client_id = ?", client.ID).First(&kafkaCfg).Error; err != nil {
 		kafkaCfg = models.ClientKafkaConfig{
 			ClientID:     client.ID,
 			KafkaBrokers: req.KafkaBrokers,
-			TopicPrefix:  "draft." + client.ID,
-			SourceSystem: req.Hostname,
+			TopicPrefix:  topicPrefix,
+			SourceSystem: sourceSys,
 			IsActive:     false,
 		}
 		h.DB.Create(&kafkaCfg)
 	} else {
 		h.DB.Model(&kafkaCfg).Updates(models.ClientKafkaConfig{
 			KafkaBrokers: req.KafkaBrokers,
-			SourceSystem: req.Hostname,
+			SourceSystem: sourceSys,
+			TopicPrefix:  topicPrefix,
 		})
 	}
 
