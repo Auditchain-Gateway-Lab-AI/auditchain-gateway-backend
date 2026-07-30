@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"go-blockchain-api/internal/models"
@@ -60,7 +61,7 @@ func (s *authService) Login(username, password string) (string, error) {
 	}
 
 	// Periksa status klien untuk user non-Admin
-	if user.Role != "Admin" {
+	if !strings.EqualFold(user.Role, "admin") {
 		client, err := s.repo.CheckClient(user.ClientID)
 		if err != nil || client.Status != "active" {
 			return "", errors.New("client_inactive")
