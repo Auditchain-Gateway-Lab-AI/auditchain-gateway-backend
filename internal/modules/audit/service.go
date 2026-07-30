@@ -738,7 +738,7 @@ func (s *auditService) GetTableResources(tableName, clientID string) ([]Resource
 
 	results := make([]ResourceLogVerification, 0, len(logs))
 	for _, auditLog := range logs {
-		item := s.classifyResourceLog(auditLog, true)
+		item := s.classifyResourceLog(auditLog, false)
 		results = append(results, item)
 	}
 
