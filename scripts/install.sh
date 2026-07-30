@@ -363,7 +363,7 @@ else
     "database.user": "${AGENT_DB_USER}",
     "database.password": "${AGENT_DB_PASS}",
     "database.dbname": "${TARGET_DB}",
-    "database.server.name": "${HOSTNAME}_${TARGET_DB}",
+    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
     "plugin.name": "pgoutput"
   }
@@ -382,11 +382,11 @@ EOF
     "database.user": "${AGENT_DB_USER}",
     "database.password": "${AGENT_DB_PASS}",
     "database.server.id": "184054",
-    "database.server.name": "${HOSTNAME}_${TARGET_DB}",
+    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "database.include.list": "${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "database.history.kafka.bootstrap.servers": "kafka:9092",
-    "database.history.kafka.topic": "schema-changes.${TARGET_DB}"
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}"
   }
 }
 EOF
