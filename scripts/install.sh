@@ -169,19 +169,60 @@ if command -v mysql &> /dev/null || systemctl is-active --quiet mysql 2>/dev/nul
 fi
 
 if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ]; then
-    echo -e "${YELLOW}[NOTE] Tidak ada PostgreSQL/MySQL terdeteksi di server ini secara lokal.${NC}"
-    echo -e "${YELLOW}Proses konfigurasi konektor dilewati. Anda dapat mengonfigurasinya nanti via Dashboard Admin.${NC}"
+    echo -e "${YELLOW}[NOTE] Tidak ada PostgreSQL/MySQL terdeteksi di port standar.${NC}"
+    echo -e "${YELLOW}Pilih opsi:${NC}"
+    echo "  [M] Manual Entry (masukkan host, port, dan engine secara manual)"
+    echo "  [S] Skip (konfigurasi nanti via Dashboard Admin)"
+    read -p "Pilihan [M]: " NO_DB_CHOICE < /dev/tty
+    NO_DB_CHOICE=${NO_DB_CHOICE:-M}
+    if [[ "$NO_DB_CHOICE" =~ ^[Mm]$ ]]; then
+        MANUAL_MODE=true
+    else
+        MANUAL_MODE=false
+    fi
 else
+    MANUAL_MODE=false
     echo -e "${GREEN}✓ Engine Database Terdeteksi di Server!${NC}"
-    
-    CHOSEN_ENGINE=""
+fi
+
+CHOSEN_ENGINE=""
+DB_HOST="172.17.0.1"
+DB_PORT="5432"
+
+if [ "$MANUAL_MODE" = true ]; then
+    echo -e "\n${BLUE}📝 Manual Entry — Konfigurasi Database${NC}"
+    echo "  [1] PostgreSQL"
+    echo "  [2] MySQL / MariaDB"
+    read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
+    ENGINE_CHOICE=${ENGINE_CHOICE:-1}
+    if [ "$ENGINE_CHOICE" = "2" ]; then
+        CHOSEN_ENGINE="mysql"
+        DB_PORT="3306"
+    else
+        CHOSEN_ENGINE="postgres"
+        DB_PORT="5432"
+    fi
+    read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
+    DB_HOST=${INPUT_HOST:-localhost}
+    if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+        read -p "Database Port [5432]: " INPUT_PORT < /dev/tty
+        DB_PORT=${INPUT_PORT:-5432}
+    else
+        read -p "Database Port [3306]: " INPUT_PORT < /dev/tty
+        DB_PORT=${INPUT_PORT:-3306}
+    fi
+    read -p "Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
+elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
     if [ "$HAS_POSTGRES" = true ] && [ "$HAS_MYSQL" = true ]; then
         echo -e "\n${YELLOW}Beberapa Engine Database Ditemukan:${NC}"
         echo "  [1] PostgreSQL"
         echo "  [2] MySQL / MariaDB"
-        read -p "Pilih Engine Database yang ingin di-audit [1]: " ENGINE_CHOICE < /dev/tty
+        echo "  [M] Manual Entry (host/port custom)"
+        read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
         ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-        if [ "$ENGINE_CHOICE" = "2" ]; then
+        if [[ "$ENGINE_CHOICE" =~ ^[Mm]$ ]]; then
+            MANUAL_MODE=true
+        elif [ "$ENGINE_CHOICE" = "2" ]; then
             CHOSEN_ENGINE="mysql"
         else
             CHOSEN_ENGINE="postgres"
@@ -194,43 +235,81 @@ else
         CHOSEN_ENGINE="mysql"
     fi
 
-    SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
-
-    DB_LIST=()
-    if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-        RAW_DBS=$(sudo -u postgres psql --no-align --tuples-only -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres');" 2>/dev/null || true)
-        if [ -n "$RAW_DBS" ]; then
-            while IFS= read -r line; do
-                [ -n "$line" ] && DB_LIST+=("$line")
-            done <<< "$RAW_DBS"
+    # Jika user memilih Manual di sini
+    if [ "$MANUAL_MODE" = true ]; then
+        echo -e "\n${BLUE}📝 Manual Entry — Konfigurasi Database${NC}"
+        echo "  [1] PostgreSQL"
+        echo "  [2] MySQL / MariaDB"
+        read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
+        ENGINE_CHOICE=${ENGINE_CHOICE:-1}
+        if [ "$ENGINE_CHOICE" = "2" ]; then
+            CHOSEN_ENGINE="mysql"
+            DB_PORT="3306"
+        else
+            CHOSEN_ENGINE="postgres"
+            DB_PORT="5432"
         fi
-    else
-        RAW_DBS=$(mysql --no-defaults -N -e "SHOW DATABASES" 2>/dev/null | grep -vE "^(information_schema|performance_schema|mysql|sys)$" || true)
-        if [ -n "$RAW_DBS" ]; then
-            while IFS= read -r line; do
-                [ -n "$line" ] && DB_LIST+=("$line")
-            done <<< "$RAW_DBS"
+        read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
+        DB_HOST=${INPUT_HOST:-localhost}
+        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            read -p "Database Port [5432]: " INPUT_PORT < /dev/tty
+            DB_PORT=${INPUT_PORT:-5432}
+        else
+            read -p "Database Port [3306]: " INPUT_PORT < /dev/tty
+            DB_PORT=${INPUT_PORT:-3306}
         fi
+        read -p "Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
     fi
 
-    TARGET_DB=""
-    if [ ${#DB_LIST[@]} -gt 0 ]; then
-        echo -e "\n${BLUE}📂 Daftar Database Terdeteksi:${NC}"
-        echo "--------------------------------------"
-        for idx in "${!DB_LIST[@]}"; do
-            echo "  [$((idx+1))] ${DB_LIST[$idx]}"
-        done
-        echo "--------------------------------------"
-        read -p "Pilih nomor database yang ingin di-audit [1]: " DB_IDX < /dev/tty
-        DB_IDX=${DB_IDX:-1}
-        ARRAY_IDX=$((DB_IDX-1))
-        if [ $ARRAY_IDX -ge 0 ] && [ $ARRAY_IDX -lt ${#DB_LIST[@]} ]; then
-            TARGET_DB="${DB_LIST[$ARRAY_IDX]}"
+    SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
+
+    # Auto-discovery database list (hanya jika bukan manual mode)
+    if [ "$MANUAL_MODE" = false ]; then
+        DB_LIST=()
+        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            RAW_DBS=$(sudo -u postgres psql --no-align --tuples-only -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres');" 2>/dev/null || true)
+            if [ -n "$RAW_DBS" ]; then
+                while IFS= read -r line; do
+                    [ -n "$line" ] && DB_LIST+=("$line")
+                done <<< "$RAW_DBS"
+            fi
         else
-            TARGET_DB="${DB_LIST[0]}"
+            RAW_DBS=$(mysql --no-defaults -N -e "SHOW DATABASES" 2>/dev/null | grep -vE "^(information_schema|performance_schema|mysql|sys)$" || true)
+            if [ -n "$RAW_DBS" ]; then
+                while IFS= read -r line; do
+                    [ -n "$line" ] && DB_LIST+=("$line")
+                done <<< "$RAW_DBS"
+            fi
         fi
-    else
-        read -p "Masukkan Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
+
+        TARGET_DB=""
+        if [ ${#DB_LIST[@]} -gt 0 ]; then
+            echo -e "\n${BLUE}📂 Daftar Database Terdeteksi:${NC}"
+            echo "--------------------------------------"
+            for idx in "${!DB_LIST[@]}"; do
+                echo "  [$((idx+1))] ${DB_LIST[$idx]}"
+            done
+            echo "  [M] Manual Entry (database lain / port custom)"
+            echo "--------------------------------------"
+            read -p "Pilih nomor database yang ingin di-audit [1]: " DB_IDX < /dev/tty
+            DB_IDX=${DB_IDX:-1}
+            if [[ "$DB_IDX" =~ ^[Mm]$ ]]; then
+                read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
+                DB_HOST=${INPUT_HOST:-localhost}
+                read -p "Database Port [${DB_PORT}]: " INPUT_PORT < /dev/tty
+                DB_PORT=${INPUT_PORT:-$DB_PORT}
+                read -p "Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
+            else
+                ARRAY_IDX=$((DB_IDX-1))
+                if [ $ARRAY_IDX -ge 0 ] && [ $ARRAY_IDX -lt ${#DB_LIST[@]} ]; then
+                    TARGET_DB="${DB_LIST[$ARRAY_IDX]}"
+                else
+                    TARGET_DB="${DB_LIST[0]}"
+                fi
+            fi
+        else
+            read -p "Masukkan Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
+        fi
     fi
 
     SELECTED_DB_NAME="$TARGET_DB"
@@ -296,8 +375,11 @@ else
 
         AGENT_DB_USER="auditchain_agent"
         AGENT_DB_PASS=$(openssl rand -hex 12 2>/dev/null || echo "ac_pwd_$(date +%s)")
-        DB_PORT="5432"
-        [ "$CHOSEN_ENGINE" = "mysql" ] && DB_PORT="3306"
+        # Set default port hanya jika belum di-set manual
+        if [ "$MANUAL_MODE" = false ]; then
+            DB_PORT="5432"
+            [ "$CHOSEN_ENGINE" = "mysql" ] && DB_PORT="3306"
+        fi
 
         USER_CREATED=false
 
@@ -348,11 +430,11 @@ else
             # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
             PG_HBA=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
             if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
-                if ! grep -q "172.17.0.0/16" "$PG_HBA" 2>/dev/null; then
+                if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
                     echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
                     echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
-                    echo "host    all    ${AGENT_DB_USER}    172.17.0.0/16    md5" >> "$PG_HBA"
-                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan untuk user '${AGENT_DB_USER}' dari Docker.${NC}"
+                    echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
+                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (172.16.0.0/12 - semua subnet Docker).${NC}"
                     NEEDS_PG_RESTART=true
                 fi
             fi
@@ -377,7 +459,10 @@ else
         done
 
         if [ "$DEBEZIUM_READY" = true ]; then
-            HOST_IP_FOR_DOCKER=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
+            # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
+            if [ "$MANUAL_MODE" = false ]; then
+                DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
+            fi
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
@@ -386,7 +471,7 @@ else
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
-    "database.hostname": "${HOST_IP_FOR_DOCKER}",
+    "database.hostname": "${DB_HOST}",
     "database.port": "${DB_PORT}",
     "database.user": "${AGENT_DB_USER}",
     "database.password": "${AGENT_DB_PASS}",
@@ -405,7 +490,7 @@ EOF
   "config": {
     "connector.class": "io.debezium.connector.mysql.MySqlConnector",
     "tasks.max": "1",
-    "database.hostname": "${HOST_IP_FOR_DOCKER}",
+    "database.hostname": "${DB_HOST}",
     "database.port": "${DB_PORT}",
     "database.user": "${AGENT_DB_USER}",
     "database.password": "${AGENT_DB_PASS}",
