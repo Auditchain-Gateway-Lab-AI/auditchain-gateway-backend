@@ -398,9 +398,9 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
 
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if sudo -u postgres psql -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
-                sudo -u postgres psql -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
-                sudo -u postgres psql -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+            if sudo -u postgres psql -p "$DB_PORT" -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
+                sudo -u postgres psql -p "$DB_PORT" -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+                sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
                 USER_CREATED=true
                 echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
             fi
@@ -423,25 +423,25 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
             NEEDS_PG_RESTART=false
 
             # --- Cek WAL Level ---
-            CURRENT_WAL=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
+            CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
             if [ "$CURRENT_WAL" != "logical" ]; then
                 echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
-                sudo -u postgres psql -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
+                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
                 echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
                 NEEDS_PG_RESTART=true
             fi
 
             # --- Cek listen_addresses agar Docker bisa connect ---
-            CURRENT_LISTEN=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
+            CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
             if [ "$CURRENT_LISTEN" = "localhost" ]; then
                 echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via 172.17.0.1.${NC}"
-                sudo -u postgres psql -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
+                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
                 echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
                 NEEDS_PG_RESTART=true
             fi
 
             # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
-            PG_HBA=$(sudo -u postgres psql --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
+            PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
             if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
                 if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
                     echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
