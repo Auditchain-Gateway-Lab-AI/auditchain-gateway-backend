@@ -91,6 +91,16 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 		return &VerifyResult{IsMatch: true, SourceFound: false, AgentUsed: false}, nil
 	}
 
+	if cfg.AgentURL == "" {
+		return &VerifyResult{IsMatch: true, AgentUsed: false}, nil
+	}
+
+	// Jika AgentURL mengarah ke port 8083 (Debezium Native CDC), kita tahu ini bukan Custom Agent Lapis 3.
+	// Debezium tidak memiliki endpoint /verify, sehingga kita skip verifikasi agent untuk klien ini.
+	if strings.Contains(cfg.AgentURL, ":8083") {
+		return &VerifyResult{IsMatch: true, AgentUsed: false}, nil
+	}
+
 	// Mode 1: SIMRS — verifikasi via audit_trail_id (source_record_id)
 	if auditLog.SourceRecordID != "" {
 		return s.verifyViaAuditTrail(cfg, auditLog)
@@ -273,7 +283,7 @@ func (s *Service) compareResourceData(auditLog *models.AuditLog, rec *ResourceRe
 		if !exists {
 			continue
 		}
-		
+
 		strLogVal := formatValueToString(logVal)
 		strAgentVal := formatValueToString(agentVal)
 
