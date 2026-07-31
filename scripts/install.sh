@@ -464,6 +464,10 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                 USER_CREATED=true
                 echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
             fi
+            # Buat Publication untuk Debezium (membutuhkan superuser)
+            echo -e "Membuat Publication CDC untuk Debezium..."
+            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
+            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null || true
         else
             echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
             if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
@@ -594,7 +598,14 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
     "database.dbname": "${TARGET_DB}",
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "plugin.name": "pgoutput"
+    "plugin.name": "pgoutput",
+    "publication.autocreate.mode": "disabled",
+    "publication.name": "dbz_publication",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.unwrap.add.fields": "op,table,ts_ms"
   }
 }
 EOF
@@ -615,12 +626,21 @@ EOF
     "database.include.list": "${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}"
+    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.unwrap.add.fields": "op,table,ts_ms"
   }
 }
 EOF
 )
             fi
+
+            # Hapus konektor jika sudah ada sebelumnya agar konfigurasi baru (SMT) bisa masuk
+            curl -s -X DELETE "http://localhost:8083/connectors/${TARGET_DB}-connector" >/dev/null 2>&1 || true
+            sleep 1
 
             DBZ_BODY_FILE="/tmp/dbz_response_$$.json"
             DBZ_RESP=$(curl -s -w "%{http_code}" -o "${DBZ_BODY_FILE}" -X POST http://localhost:8083/connectors \
