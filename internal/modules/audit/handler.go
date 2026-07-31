@@ -209,8 +209,13 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 	}
 
 	integrityStatus := strings.TrimSpace(c.Query("integrity_status"))
+	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+	sourceTable := strings.TrimSpace(c.Query("source_table"))
 
-	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus)
+	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus, sortOrder, sourceTable)
 	if err != nil {
 		if err.Error() == "invalid_integrity_status" {
 			c.JSON(http.StatusBadRequest, gin.H{

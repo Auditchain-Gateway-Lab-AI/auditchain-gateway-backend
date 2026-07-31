@@ -18,7 +18,7 @@ type AuditRepository interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
 
-	GetRecentLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, int64, error)
+	GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string) ([]models.AuditLog, int64, error)
 	CountAnchoredLogs(clientID string) (int64, error)
 	GetAnchoredLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, error)
 
@@ -110,18 +110,33 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 
 // GetRecentLogsPage mengembalikan satu halaman log terbaru (tanpa filter
 // integrity_status) beserta total count untuk keperluan pagination di
-// dashboard.
-func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, int64, error) {
+// dashboard. Mendukung sortOrder (asc/desc) dan filter sourceTable.
+func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string) ([]models.AuditLog, int64, error) {
 	var logs []models.AuditLog
 	var total int64
 
-	if err := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID).Count(&total).Error; err != nil {
+	countQuery := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID)
+	if sourceTable != "" {
+		countQuery = countQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
+	}
+
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
+	orderClause := "timestamp desc"
+	if sortOrder == "asc" {
+		orderClause = "timestamp asc"
+	}
+
 	offset := (page - 1) * pageSize
-	err := r.db.Where("client_id = ?", clientID).
-		Order("timestamp desc").
+	dataQuery := r.db.Where("client_id = ?", clientID)
+	if sourceTable != "" {
+		dataQuery = dataQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
+	}
+
+	err := dataQuery.
+		Order(orderClause).
 		Limit(pageSize).
 		Offset(offset).
 		Find(&logs).Error

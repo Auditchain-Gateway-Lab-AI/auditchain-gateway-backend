@@ -573,10 +573,10 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			client = models.Client{
 				CompanyName:  companyName,
 				APIKeyPrefix: req.APIKeyPrefix,
-				Status:       "pending_setup",
+				Status:       "active",
 			}
 			if err := h.DB.Create(&client).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan draft klien baru"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan klien baru"})
 				return
 			}
 		} else {
@@ -592,7 +592,7 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			AgentURL:    req.AgentServerURL,
 			TailscaleIP: req.TailscaleIP,
 			Hostname:    req.Hostname,
-			IsActive:    false,
+			IsActive:    true,
 		}
 		h.DB.Create(&agentCfg)
 	} else {
@@ -600,6 +600,7 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			"agent_url":    req.AgentServerURL,
 			"tailscale_ip": req.TailscaleIP,
 			"hostname":     req.Hostname,
+			"is_active":    true,
 		})
 	}
 
@@ -620,7 +621,7 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			KafkaBrokers: req.KafkaBrokers,
 			TopicPrefix:  topicPrefix,
 			SourceSystem: sourceSys,
-			IsActive:     false,
+			IsActive:     true,
 		}
 		h.DB.Create(&kafkaCfg)
 	} else {
@@ -628,13 +629,14 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			KafkaBrokers: req.KafkaBrokers,
 			SourceSystem: sourceSys,
 			TopicPrefix:  topicPrefix,
+			IsActive:     true,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":          "Telemetri berhasil diterima dan disimpan dalam status pending_setup.",
+		"message":          "Telemetri berhasil diterima dan klien otomatis diaktifkan.",
 		"client_id":        client.ID,
-		"status":           "pending_setup",
+		"status":           "active",
 		"kafka_brokers":    req.KafkaBrokers,
 		"agent_server_url": req.AgentServerURL,
 	})

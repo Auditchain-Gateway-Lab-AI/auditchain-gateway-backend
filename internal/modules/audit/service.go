@@ -71,7 +71,7 @@ type Service interface {
 	// GetRecentLogsPaginated menggantikan GetRecentLogs lama sebagai entry
 	// point handler dashboard. limit hardcoded 500 di versi lama diganti
 	// page/pageSize. integrityStatus kosong berarti tanpa filter.
-	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error)
+	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable string) (*RecentLogsResult, error)
 
 	GetResourceInventory(clientID string) (interface{}, error)
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
@@ -536,7 +536,7 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 //     filter ini butuh full-scan + verifikasi semua log ANCHORED pada
 //     setiap request, yang mahal. Field "note" memberi tahu API consumer
 //     secara eksplisit.
-func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error) {
+func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable string) (*RecentLogsResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -568,7 +568,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	// difilter. (Catatan: implementasi loop filter saat ini masih dinonaktifkan/
 	// commented — di luar scope perubahan ini.)
 	if integrityStatus == "" {
-		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize)
+		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize, sortOrder, sourceTable)
 		if err != nil {
 			return nil, err
 		}
