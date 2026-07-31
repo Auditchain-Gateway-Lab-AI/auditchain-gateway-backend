@@ -413,10 +413,53 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
         fi
 
         if [ "$USER_CREATED" = false ]; then
-            echo -e "${YELLOW}[NOTE] Otomasi pembuat user DB membutuhkan kredensial manual.${NC}"
-            read -p "Database Username: " AGENT_DB_USER < /dev/tty
-            read -s -p "Database Password: " AGENT_DB_PASS < /dev/tty
-            echo ""
+            echo -e "${YELLOW}[NOTE] Otomasi pembuat user DB tidak tersedia (mis. database di Docker).${NC}"
+            echo -e "${YELLOW}Silakan masukkan kredensial database yang sudah ada:${NC}"
+
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            CONN_OK=false
+
+            while [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                if [ $RETRY_COUNT -gt 1 ]; then
+                    echo -e "\n${YELLOW}🔄 Percobaan ke-${RETRY_COUNT} dari ${MAX_RETRIES}...${NC}"
+                fi
+
+                read -p "Database Username: " AGENT_DB_USER < /dev/tty
+                read -p "Database Password (terlihat): " AGENT_DB_PASS < /dev/tty
+
+                echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
+
+                if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                    TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1)
+                    if echo "$TEST_RESULT" | grep -q "^1$"; then
+                        CONN_OK=true
+                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
+                    else
+                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
+                        fi
+                    fi
+                else
+                    TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
+                    if [ $? -eq 0 ]; then
+                        CONN_OK=true
+                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
+                    else
+                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
+                        fi
+                    fi
+                fi
+            done
+
+            if [ "$CONN_OK" = false ]; then
+                echo -e "${RED}✗ Gagal terkoneksi setelah ${MAX_RETRIES} percobaan. Proses dibatalkan.${NC}"
+                echo -e "${YELLOW}Tip: Pastikan database bisa diakses dari host ini via TCP: psql -h ${DB_HOST} -p ${DB_PORT} -U <user> -d ${TARGET_DB}${NC}"
+            fi
         fi
 
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
