@@ -266,20 +266,31 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
     # Auto-discovery database list (hanya jika bukan manual mode)
     if [ "$MANUAL_MODE" = false ]; then
         DB_LIST=()
+        PORT_LIST=()
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-            RAW_DBS=$(sudo -u postgres psql --no-align --tuples-only -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres');" 2>/dev/null || true)
-            if [ -n "$RAW_DBS" ]; then
-                while IFS= read -r line; do
-                    [ -n "$line" ] && DB_LIST+=("$line")
-                done <<< "$RAW_DBS"
-            fi
+            for port in 5432 5433 5434 5435; do
+                RAW_DBS=$(sudo -u postgres psql -p "$port" --no-align --tuples-only -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres');" 2>/dev/null || true)
+                if [ -n "$RAW_DBS" ]; then
+                    while IFS= read -r line; do
+                        if [ -n "$line" ]; then
+                            DB_LIST+=("$line")
+                            PORT_LIST+=("$port")
+                        fi
+                    done <<< "$RAW_DBS"
+                fi
+            done
         else
-            RAW_DBS=$(mysql --no-defaults -N -e "SHOW DATABASES" 2>/dev/null | grep -vE "^(information_schema|performance_schema|mysql|sys)$" || true)
-            if [ -n "$RAW_DBS" ]; then
-                while IFS= read -r line; do
-                    [ -n "$line" ] && DB_LIST+=("$line")
-                done <<< "$RAW_DBS"
-            fi
+            for port in 3306 3307 3308; do
+                RAW_DBS=$(mysql --no-defaults -P "$port" -N -e "SHOW DATABASES" 2>/dev/null | grep -vE "^(information_schema|performance_schema|mysql|sys)$" || true)
+                if [ -n "$RAW_DBS" ]; then
+                    while IFS= read -r line; do
+                        if [ -n "$line" ]; then
+                            DB_LIST+=("$line")
+                            PORT_LIST+=("$port")
+                        fi
+                    done <<< "$RAW_DBS"
+                fi
+            done
         fi
 
         TARGET_DB=""
@@ -287,7 +298,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
             echo -e "\n${BLUE}📂 Daftar Database Terdeteksi:${NC}"
             echo "--------------------------------------"
             for idx in "${!DB_LIST[@]}"; do
-                echo "  [$((idx+1))] ${DB_LIST[$idx]}"
+                echo "  [$((idx+1))] ${DB_LIST[$idx]} (Port: ${PORT_LIST[$idx]})"
             done
             echo "  [M] Manual Entry (database lain / port custom)"
             echo "--------------------------------------"
@@ -303,8 +314,10 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                 ARRAY_IDX=$((DB_IDX-1))
                 if [ $ARRAY_IDX -ge 0 ] && [ $ARRAY_IDX -lt ${#DB_LIST[@]} ]; then
                     TARGET_DB="${DB_LIST[$ARRAY_IDX]}"
+                    DB_PORT="${PORT_LIST[$ARRAY_IDX]}"
                 else
                     TARGET_DB="${DB_LIST[0]}"
+                    DB_PORT="${PORT_LIST[0]}"
                 fi
             fi
         else
