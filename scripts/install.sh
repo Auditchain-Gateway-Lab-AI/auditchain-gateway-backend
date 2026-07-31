@@ -305,6 +305,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
             read -p "Pilih nomor database yang ingin di-audit [1]: " DB_IDX < /dev/tty
             DB_IDX=${DB_IDX:-1}
             if [[ "$DB_IDX" =~ ^[Mm]$ ]]; then
+                MANUAL_MODE=true
                 read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
                 DB_HOST=${INPUT_HOST:-localhost}
                 read -p "Database Port [${DB_PORT}]: " INPUT_PORT < /dev/tty
