@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -214,8 +215,22 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 		sortOrder = "desc"
 	}
 	sourceTable := strings.TrimSpace(c.Query("source_table"))
+	fromStr := strings.TrimSpace(c.Query("from"))
+	toStr := strings.TrimSpace(c.Query("to"))
 
-	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus, sortOrder, sourceTable)
+	var fromTime, toTime *time.Time
+	if fromStr != "" {
+		if t, err := parseTimeRobust(fromStr); err == nil {
+			fromTime = &t
+		}
+	}
+	if toStr != "" {
+		if t, err := parseTimeRobust(toStr); err == nil {
+			toTime = &t
+		}
+	}
+
+	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus, sortOrder, sourceTable, fromTime, toTime)
 	if err != nil {
 		if err.Error() == "invalid_integrity_status" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -326,21 +341,39 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 }
 
 func parseTimeRobust(timeStr string) (time.Time, error) {
-	if len(timeStr) > 10 {
-		if timeStr[10] == ' ' {
-			timeStr = timeStr[:10] + "T" + timeStr[11:]
+	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return time.Time{}, fmt.Errorf("empty time string")
+	}
+
+	if len(timeStr) > 10 && timeStr[10] == ' ' {
+		timeStr = timeStr[:10] + "T" + timeStr[11:]
+	}
+
+	// Double space/plus replacement
+	normalized := strings.ReplaceAll(timeStr, " ", "+")
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02T15:04:05.999999999Z07",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, l := range layouts {
+		if t, err := time.Parse(l, normalized); err == nil {
+			return t, nil
+		}
+		if t, err := time.Parse(l, timeStr); err == nil {
+			return t, nil
 		}
 	}
-
-	timeStr = strings.ReplaceAll(timeStr, " ", "+")
-
-	t, err := time.Parse(time.RFC3339, timeStr)
-	if err == nil {
-		return t, nil
-	}
-
-	customLayout := "2006-01-02T15:04:05.999999999Z07"
-	return time.Parse(customLayout, timeStr)
+	return time.Time{}, fmt.Errorf("cannot parse time: %s", timeStr)
 }
 
 func (h *Handler) VerifyLogRange(c *gin.Context) {
