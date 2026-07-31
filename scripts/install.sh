@@ -653,7 +653,7 @@ fi
 echo -e "\n${BLUE}[6/7] Mendeteksi Endpoint Network & Telemetri...${NC}"
 
 KAFKA_BROKERS="${TAILSCALE_IP}:9092"
-AGENT_SERVER_URL="http://${TAILSCALE_IP}:8081"
+AGENT_SERVER_URL="http://${TAILSCALE_IP}:8083"
 HOSTNAME=$(hostname)
 
 # Simpan file environment konfigurasi tunggal di VPS Klien

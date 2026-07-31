@@ -418,7 +418,7 @@ func (h *Handler) PingAgentConfig(c *gin.Context) {
 	}
 
 	client := &http.Client{Timeout: 3e9}
-	resp, err := client.Get(cfg.AgentURL + "/health")
+	resp, err := client.Get(cfg.AgentURL + "/connectors")
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"reachable": false,
