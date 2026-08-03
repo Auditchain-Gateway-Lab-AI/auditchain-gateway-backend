@@ -17,15 +17,17 @@ import (
 )
 
 type VerificationResult struct {
-	Status       string  `json:"status"`
-	Message      string  `json:"message"`
-	IsValid      bool    `json:"is_valid"`
-	ExpectedHash string  `json:"expected_hash"`
-	ActualHash   string  `json:"actual_hash"`
-	DBRoot       string  `json:"db_root"`
-	ChainRoot    string  `json:"chain_root"`
-	LogID        string  `json:"log_id"`
-	TxID         *string `json:"blockchain_tx_id,omitempty"`
+	Status             string                      `json:"status"`
+	Message            string                      `json:"message"`
+	IsValid            bool                        `json:"is_valid"`
+	ExpectedHash       string                      `json:"expected_hash"`
+	ActualHash         string                      `json:"actual_hash"`
+	DBRoot             string                      `json:"db_root"`
+	ChainRoot          string                      `json:"chain_root"`
+	LogID              string                      `json:"log_id"`
+	TxID               *string                     `json:"blockchain_tx_id,omitempty"`
+	AgentStatus        string                      `json:"agent_status,omitempty"`
+	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
 type DataVerificationResult struct {
@@ -176,9 +178,11 @@ func formatFabricTimestamp(raw string) string {
 }
 
 type RangeItemResult struct {
-	LogID        string `json:"log_id"`
-	VerifyStatus string `json:"verify_status"`
-	Message      string `json:"message,omitempty"`
+	LogID              string                      `json:"log_id"`
+	VerifyStatus       string                      `json:"verify_status"`
+	Message            string                      `json:"message,omitempty"`
+	AgentStatus        string                      `json:"agent_status,omitempty"`
+	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
 // Implementasi
@@ -208,6 +212,8 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 		} else {
 			item.VerifyStatus = verifyResult.Status
 			item.Message = verifyResult.Message
+			item.AgentStatus = verifyResult.AgentStatus
+			item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
 		}
 
 		switch item.VerifyStatus {
@@ -378,14 +384,35 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		successMsg += " (diverifikasi via metode lama — log ini di-anchor sebelum perbaikan Merkle proof)"
 	}
 
+	agentStatus := "skipped_historical"
+	var agentDiscrepancies []agentverifier.Discrepancy
+
+	latestLog, latestErr := s.repo.GetLatestLogByResource(auditLog.Resource, clientID)
+	if latestErr == nil && latestLog != nil && latestLog.LogID == auditLog.LogID {
+		agentStatus = "not_configured"
+		agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+		if agentErr != nil {
+			agentStatus = "unreachable"
+		} else if agentResult.AgentUsed {
+			if agentResult.IsMatch {
+				agentStatus = "matched"
+			} else {
+				agentStatus = "mismatch"
+				agentDiscrepancies = agentResult.Discrepancies
+			}
+		}
+	}
+
 	return &VerificationResult{
-		Status:       "success",
-		Message:      successMsg,
-		IsValid:      true,
-		LogID:        auditLog.LogID,
-		ExpectedHash: auditLog.HashValue,
-		DBRoot:       reconstructedRoot,
-		TxID:         auditLog.BlockchainTxID,
+		Status:             "success",
+		Message:            successMsg,
+		IsValid:            true,
+		LogID:              auditLog.LogID,
+		ExpectedHash:       auditLog.HashValue,
+		DBRoot:             reconstructedRoot,
+		TxID:               auditLog.BlockchainTxID,
+		AgentStatus:        agentStatus,
+		AgentDiscrepancies: agentDiscrepancies,
 	}, nil
 }
 

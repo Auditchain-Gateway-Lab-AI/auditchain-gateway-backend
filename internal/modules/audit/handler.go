@@ -122,12 +122,14 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
 			"data": gin.H{
-				"log_id":           result.LogID,
-				"hash_value":       result.ExpectedHash,
-				"merkle_root":      result.DBRoot,
-				"blockchain_tx_id": result.TxID,
-				"is_valid":         result.IsValid,
-				"message":          result.Message,
+				"log_id":              result.LogID,
+				"hash_value":          result.ExpectedHash,
+				"merkle_root":         result.DBRoot,
+				"blockchain_tx_id":    result.TxID,
+				"is_valid":            result.IsValid,
+				"message":             result.Message,
+				"agent_status":        result.AgentStatus,
+				"agent_discrepancies": result.AgentDiscrepancies,
 			},
 		})
 	}
