@@ -319,6 +319,9 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	if mapping.ActionField != "" {
 		if customAction, ok := findFieldInsensitive(payload, mapping.ActionField); ok && customAction != nil {
 			action = extractScalarValue(customAction)
+		} else {
+			// Jika kolom tidak ditemukan, gunakan teks statisnya
+			action = mapping.ActionField
 		}
 	}
 
@@ -338,22 +341,20 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	if mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
 			actor = extractScalarValue(customActor)
+		} else {
+			// Jika kolom tidak ditemukan di tabel, langsung tempel teks statis yang diketik Admin
+			actor = mapping.ActorField
 		}
 	}
 	if actor == "" && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
 			actor = extractScalarValue(fallbackActor)
+		} else {
+			actor = mapping.FallbackActorField
 		}
 	}
 	if actor == "" {
-		payloadBytes, _ := json.Marshal(payload)
-		log.Printf("⚠️ [KafkaConsumer] Peringatan: Actor tidak ditemukan di data Kafka! Sedang mencari kolom '%s'. Isi JSON asli dari Debezium: %s", mapping.ActorField, string(payloadBytes))
-		
-		if mapping.ActorField != "" {
-			actor = "simrs-system (MISSING:" + mapping.ActorField + ")"
-		} else {
-			actor = "simrs-system (MAPPING_KOSONG)"
-		}
+		actor = "simrs-system"
 	}
 
 	var timestamp time.Time
