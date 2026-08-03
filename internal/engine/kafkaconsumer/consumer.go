@@ -313,7 +313,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	action := opToAction(op)
 	if mapping.ActionField != "" {
-		if customAction, ok := payload[mapping.ActionField]; ok && customAction != nil {
+		if customAction, ok := findFieldInsensitive(payload, mapping.ActionField); ok && customAction != nil {
 			action = extractScalarValue(customAction)
 		}
 	}
@@ -325,19 +325,19 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 	if mapping.ResourceField != "" {
-		if customResource, ok := payload[mapping.ResourceField]; ok && customResource != nil {
+		if customResource, ok := findFieldInsensitive(payload, mapping.ResourceField); ok && customResource != nil {
 			resource = extractScalarValue(customResource)
 		}
 	}
 
 	actor := userName
 	if mapping.ActorField != "" {
-		if customActor, ok := payload[mapping.ActorField]; ok && customActor != nil {
+		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
 			actor = extractScalarValue(customActor)
 		}
 	}
 	if actor == "" && mapping.FallbackActorField != "" {
-		if fallbackActor, ok := payload[mapping.FallbackActorField]; ok && fallbackActor != nil {
+		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
 			actor = extractScalarValue(fallbackActor)
 		}
 	}
@@ -462,6 +462,47 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 		return rowID
 	}
 	return "unknown"
+}
+
+func findFieldInsensitive(payload map[string]interface{}, field string) (interface{}, bool) {
+	if field == "" {
+		return nil, false
+	}
+	
+	if val, ok := payload[field]; ok {
+		return val, true
+	}
+	
+	lowerField := strings.ToLower(field)
+	for k, v := range payload {
+		if strings.ToLower(k) == lowerField {
+			return v, true
+		}
+	}
+	
+	if after, ok := payload["after"].(map[string]interface{}); ok {
+		if val, ok := after[field]; ok {
+			return val, true
+		}
+		for k, v := range after {
+			if strings.ToLower(k) == lowerField {
+				return v, true
+			}
+		}
+	}
+	
+	if before, ok := payload["before"].(map[string]interface{}); ok {
+		if val, ok := before[field]; ok {
+			return val, true
+		}
+		for k, v := range before {
+			if strings.ToLower(k) == lowerField {
+				return v, true
+			}
+		}
+	}
+	
+	return nil, false
 }
 
 func extractScalarValue(val interface{}) string {
