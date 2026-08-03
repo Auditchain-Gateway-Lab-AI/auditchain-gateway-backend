@@ -103,6 +103,10 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 		fp := configFingerprint(cfg)
 
 		if existing, running := e.consumers[cfg.ClientID]; running {
+			// Hapus cache mapping & source system agar perubahan di admin panel segera terbaca
+			e.mappingCache.Delete(cfg.ClientID)
+			e.sourceSystemCache.Delete(cfg.ClientID)
+
 			if existing.fingerprint == fp {
 				continue // tidak ada perubahan, biarkan goroutine yang sudah jalan
 			}
@@ -468,18 +472,18 @@ func findFieldInsensitive(payload map[string]interface{}, field string) (interfa
 	if field == "" {
 		return nil, false
 	}
-	
+
 	if val, ok := payload[field]; ok {
 		return val, true
 	}
-	
+
 	lowerField := strings.ToLower(field)
 	for k, v := range payload {
 		if strings.ToLower(k) == lowerField {
 			return v, true
 		}
 	}
-	
+
 	if after, ok := payload["after"].(map[string]interface{}); ok {
 		if val, ok := after[field]; ok {
 			return val, true
@@ -490,7 +494,7 @@ func findFieldInsensitive(payload map[string]interface{}, field string) (interfa
 			}
 		}
 	}
-	
+
 	if before, ok := payload["before"].(map[string]interface{}); ok {
 		if val, ok := before[field]; ok {
 			return val, true
@@ -501,7 +505,7 @@ func findFieldInsensitive(payload map[string]interface{}, field string) (interfa
 			}
 		}
 	}
-	
+
 	return nil, false
 }
 
