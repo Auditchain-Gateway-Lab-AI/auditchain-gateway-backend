@@ -23,13 +23,36 @@ import (
 // setelah unwrap ExtractNewRecordState
 type DebeziumOracleMessage map[string]interface{}
 
+type clientMapping struct {
+	ActorField         string
+	FallbackActorField string
+	ActionField        string
+	ResourceField      string
+}
+
 type Engine struct {
 	DB *gorm.DB
 
 	sourceSystemCache sync.Map
+	mappingCache      sync.Map
 
 	mu        sync.Mutex
 	consumers map[string]*runningConsumer // key: ClientID
+}
+
+func (e *Engine) resolveClientMapping(clientID string) clientMapping {
+	if cached, ok := e.mappingCache.Load(clientID); ok {
+		return cached.(clientMapping)
+	}
+
+	var m clientMapping
+	if err := e.DB.Table("clients").
+		Select("actor_field, fallback_actor_field, action_field, resource_field").
+		Where("id = ?", clientID).
+		Scan(&m).Error; err == nil {
+		e.mappingCache.Store(clientID, m)
+	}
+	return m
 }
 
 type runningConsumer struct {
@@ -286,7 +309,14 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
+	mapping := e.resolveClientMapping(cfg.ClientID)
+
 	action := opToAction(op)
+	if mapping.ActionField != "" {
+		if customAction, ok := payload[mapping.ActionField]; ok && customAction != nil {
+			action = extractScalarValue(customAction)
+		}
+	}
 
 	pkField := cfg.PKField
 	if pkField == "" {
@@ -294,8 +324,23 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
+	if mapping.ResourceField != "" {
+		if customResource, ok := payload[mapping.ResourceField]; ok && customResource != nil {
+			resource = extractScalarValue(customResource)
+		}
+	}
 
 	actor := userName
+	if mapping.ActorField != "" {
+		if customActor, ok := payload[mapping.ActorField]; ok && customActor != nil {
+			actor = extractScalarValue(customActor)
+		}
+	}
+	if actor == "" && mapping.FallbackActorField != "" {
+		if fallbackActor, ok := payload[mapping.FallbackActorField]; ok && fallbackActor != nil {
+			actor = extractScalarValue(fallbackActor)
+		}
+	}
 	if actor == "" {
 		actor = "simrs-system"
 	}
