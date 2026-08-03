@@ -316,14 +316,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	mapping := e.resolveClientMapping(cfg.ClientID)
 
 	action := opToAction(op)
-	if mapping.ActionField != "" {
-		if customAction, ok := findFieldInsensitive(payload, mapping.ActionField); ok && customAction != nil {
-			action = extractScalarValue(customAction)
-		} else {
-			// Jika kolom tidak ditemukan, gunakan teks statisnya
-			action = mapping.ActionField
-		}
-	}
 
 	pkField := cfg.PKField
 	if pkField == "" {
@@ -331,11 +323,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 	resourceID := findPrimaryKey(payload, pkField)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
-	if mapping.ResourceField != "" {
-		if customResource, ok := findFieldInsensitive(payload, mapping.ResourceField); ok && customResource != nil {
-			resource = extractScalarValue(customResource)
-		}
-	}
 
 	actor := userName
 	if mapping.ActorField != "" {
