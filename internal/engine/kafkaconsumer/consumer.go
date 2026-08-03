@@ -348,7 +348,12 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	if actor == "" {
 		payloadBytes, _ := json.Marshal(payload)
 		log.Printf("⚠️ [KafkaConsumer] Peringatan: Actor tidak ditemukan di data Kafka! Sedang mencari kolom '%s'. Isi JSON asli dari Debezium: %s", mapping.ActorField, string(payloadBytes))
-		actor = "simrs-system"
+		
+		if mapping.ActorField != "" {
+			actor = "simrs-system (MISSING:" + mapping.ActorField + ")"
+		} else {
+			actor = "simrs-system (MAPPING_KOSONG)"
+		}
 	}
 
 	var timestamp time.Time
