@@ -106,6 +106,7 @@ fi
 echo -e "\n${BLUE}[3/5] Menyiapkan Folder Konfigurasi Agent & Docker Compose...${NC}"
 mkdir -p /etc/auditchain
 mkdir -p /var/log/auditchain
+mkdir -p /etc/auditchain/jdbc-drivers
 
 cat <<EOF > /etc/auditchain/docker-compose.yml
 version: '3.8'
@@ -127,6 +128,8 @@ services:
       - zookeeper
   debezium:
     image: quay.io/debezium/connect:2.4
+    volumes:
+      - /etc/auditchain/jdbc-drivers:/kafka/connect/debezium-connector-oracle/jdbc
     ports:
       - "8083:8083"
     environment:
@@ -159,6 +162,7 @@ CONNECTOR_SETUP_STATUS="skipped"
 
 HAS_POSTGRES=false
 HAS_MYSQL=false
+HAS_ORACLE=false
 
 if command -v psql &> /dev/null || systemctl is-active --quiet postgresql 2>/dev/null || systemctl is-active --quiet postgres 2>/dev/null; then
     HAS_POSTGRES=true
@@ -168,7 +172,16 @@ if command -v mysql &> /dev/null || systemctl is-active --quiet mysql 2>/dev/nul
     HAS_MYSQL=true
 fi
 
-if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ]; then
+if command -v sqlplus &> /dev/null || systemctl is-active --quiet oracle* 2>/dev/null; then
+    HAS_ORACLE=true
+fi
+
+HAS_MONGODB=false
+if command -v mongosh &> /dev/null || command -v mongo &> /dev/null || systemctl is-active --quiet mongod 2>/dev/null; then
+    HAS_MONGODB=true
+fi
+
+if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ] && [ "$HAS_ORACLE" = false ] && [ "$HAS_MONGODB" = false ]; then
     echo -e "${YELLOW}[NOTE] Tidak ada PostgreSQL/MySQL terdeteksi di port standar.${NC}"
     echo -e "${YELLOW}Pilih opsi:${NC}"
     echo "  [M] Manual Entry (masukkan host, port, dan engine secara manual)"
@@ -193,9 +206,17 @@ if [ "$MANUAL_MODE" = true ]; then
     echo -e "\n${BLUE}📝 Manual Entry — Konfigurasi Database${NC}"
     echo "  [1] PostgreSQL"
     echo "  [2] MySQL / MariaDB"
+    echo "  [3] Oracle Database"
+    echo "  [4] MongoDB"
     read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
     ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-    if [ "$ENGINE_CHOICE" = "2" ]; then
+    if [ "$ENGINE_CHOICE" = "4" ]; then
+        CHOSEN_ENGINE="mongodb"
+        DB_PORT="27017"
+    elif [ "$ENGINE_CHOICE" = "3" ]; then
+        CHOSEN_ENGINE="oracle"
+        DB_PORT="1521"
+    elif [ "$ENGINE_CHOICE" = "2" ]; then
         CHOSEN_ENGINE="mysql"
         DB_PORT="3306"
     else
@@ -204,15 +225,21 @@ if [ "$MANUAL_MODE" = true ]; then
     fi
     read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
     DB_HOST=${INPUT_HOST:-localhost}
-    if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+    if [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+        read -p "Database Port [27017]: " INPUT_PORT < /dev/tty
+        DB_PORT=${INPUT_PORT:-27017}
+    elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
+        read -p "Database Port [1521]: " INPUT_PORT < /dev/tty
+        DB_PORT=${INPUT_PORT:-1521}
+    elif [ "$CHOSEN_ENGINE" = "postgres" ]; then
         read -p "Database Port [5432]: " INPUT_PORT < /dev/tty
         DB_PORT=${INPUT_PORT:-5432}
     else
         read -p "Database Port [3306]: " INPUT_PORT < /dev/tty
         DB_PORT=${INPUT_PORT:-3306}
     fi
-    read -p "Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
-elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
+    read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
+elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = true ] || [ "$HAS_MONGODB" = true ]; then
     if [ "$HAS_POSTGRES" = true ] && [ "$HAS_MYSQL" = true ]; then
         echo -e "\n${YELLOW}Beberapa Engine Database Ditemukan:${NC}"
         echo "  [1] PostgreSQL"
@@ -240,9 +267,17 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
         echo -e "\n${BLUE}📝 Manual Entry — Konfigurasi Database${NC}"
         echo "  [1] PostgreSQL"
         echo "  [2] MySQL / MariaDB"
+        echo "  [3] Oracle Database"
+        echo "  [4] MongoDB"
         read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
         ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-        if [ "$ENGINE_CHOICE" = "2" ]; then
+        if [ "$ENGINE_CHOICE" = "4" ]; then
+            CHOSEN_ENGINE="mongodb"
+            DB_PORT="27017"
+        elif [ "$ENGINE_CHOICE" = "3" ]; then
+            CHOSEN_ENGINE="oracle"
+            DB_PORT="1521"
+        elif [ "$ENGINE_CHOICE" = "2" ]; then
             CHOSEN_ENGINE="mysql"
             DB_PORT="3306"
         else
@@ -251,14 +286,20 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
         fi
         read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
         DB_HOST=${INPUT_HOST:-localhost}
-        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+        if [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+            read -p "Database Port [27017]: " INPUT_PORT < /dev/tty
+            DB_PORT=${INPUT_PORT:-27017}
+        elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
+            read -p "Database Port [1521]: " INPUT_PORT < /dev/tty
+            DB_PORT=${INPUT_PORT:-1521}
+        elif [ "$CHOSEN_ENGINE" = "postgres" ]; then
             read -p "Database Port [5432]: " INPUT_PORT < /dev/tty
             DB_PORT=${INPUT_PORT:-5432}
         else
             read -p "Database Port [3306]: " INPUT_PORT < /dev/tty
             DB_PORT=${INPUT_PORT:-3306}
         fi
-        read -p "Nama Database yang ingin di-audit: " TARGET_DB < /dev/tty
+        read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
     fi
 
     SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
@@ -356,6 +397,28 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
             DB_IDX=${DB_IDX:-1}
             if [[ "$DB_IDX" =~ ^[Mm]$ ]]; then
                 MANUAL_MODE=true
+                echo -e "\n${BLUE}📝 Manual Entry — Konfigurasi Database${NC}"
+                echo "  [1] PostgreSQL"
+                echo "  [2] MySQL / MariaDB"
+                echo "  [3] Oracle Database"
+                echo "  [4] MongoDB"
+                read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
+                ENGINE_CHOICE=${ENGINE_CHOICE:-1}
+                if [ "$ENGINE_CHOICE" = "4" ]; then
+                    CHOSEN_ENGINE="mongodb"
+                    DB_PORT="27017"
+                elif [ "$ENGINE_CHOICE" = "3" ]; then
+                    CHOSEN_ENGINE="oracle"
+                    DB_PORT="1521"
+                elif [ "$ENGINE_CHOICE" = "2" ]; then
+                    CHOSEN_ENGINE="mysql"
+                    DB_PORT="3306"
+                else
+                    CHOSEN_ENGINE="postgres"
+                    DB_PORT="5432"
+                fi
+                SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
+                
                 read -p "Database Hostname [localhost]: " INPUT_HOST < /dev/tty
                 DB_HOST=${INPUT_HOST:-localhost}
                 read -p "Database Port [${DB_PORT}]: " INPUT_PORT < /dev/tty
@@ -398,7 +461,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                     [ -n "$line" ] && TABLE_LIST+=("$line")
                 done <<< "$RAW_TBLS"
             fi
-        else
+        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
             RAW_TBLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW TABLES" 2>/dev/null || true)
             if [ -n "$RAW_TBLS" ]; then
                 while IFS= read -r line; do
@@ -440,7 +503,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                 fi
             fi
         else
-            read -p "Masukkan Nama Tabel yang ingin di-audit (contoh: public.audit_trail): " CHOSEN_TABLES < /dev/tty
+            read -p "Masukkan Nama Tabel/Koleksi yang ingin di-audit (contoh: public.audit_trail atau targetdb.koleksi): " CHOSEN_TABLES < /dev/tty
         fi
 
         SELECTED_TABLES="$CHOSEN_TABLES"
@@ -506,7 +569,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                             echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
                         fi
                     fi
-                else
+                elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
                     TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
                     if [ $? -eq 0 ]; then
                         CONN_OK=true
@@ -517,6 +580,10 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
                             echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
                         fi
                     fi
+                else
+                    # Skip test for Oracle and MongoDB since they require specific clients
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ [Skip Test] Asumsi kredensial ${CHOSEN_ENGINE} valid karena klien native tidak tersedia.${NC}"
                 fi
             done
 
@@ -568,6 +635,19 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
             fi
         fi
 
+        if [ "$CHOSEN_ENGINE" = "oracle" ]; then
+            echo -e "\n${YELLOW}⚠️ PERHATIAN: Oracle Database memerlukan konfigurasi tambahan!${NC}"
+            echo -e "Pastikan database telah berada di mode ARCHIVELOG dan fitur LogMiner diaktifkan."
+            echo -e "Anda WAJIB menyalin file driver JDBC (ojdbc8.jar) ke folder /etc/auditchain/jdbc-drivers/ di server ini,"
+            echo -e "kemudian restart Debezium (docker restart auditchain-debezium) agar konektor bisa berjalan."
+            sleep 3
+        elif [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+            echo -e "\n${YELLOW}⚠️ PERHATIAN: MongoDB memerlukan konfigurasi tambahan!${NC}"
+            echo -e "Debezium MongoDB Connector mewajibkan MongoDB berjalan dalam mode Replica Set (meskipun standalone / 1 node)."
+            echo -e "Pastikan MongoDB dijalankan dengan opsi --replSet dan sudah diinisialisasi (rs.initiate())."
+            sleep 3
+        fi
+
         echo -e "\nMenunggu Debezium Engine siap (maks 30 detik)..."
         DEBEZIUM_READY=false
         for i in $(seq 1 15); do
@@ -606,6 +686,52 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ]; then
     "transforms.unwrap.drop.tombstones": "false",
     "transforms.unwrap.delete.handling.mode": "rewrite",
     "transforms.unwrap.add.fields": "op,table,ts_ms"
+  }
+}
+EOF
+)
+            elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
+                CONNECTOR_PAYLOAD=$(cat <<EOF
+{
+  "name": "${TARGET_DB}-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.oracle.OracleConnector",
+    "tasks.max": "1",
+    "database.hostname": "${DB_HOST}",
+    "database.port": "${DB_PORT}",
+    "database.user": "${AGENT_DB_USER}",
+    "database.password": "${AGENT_DB_PASS}",
+    "database.dbname": "${TARGET_DB}",
+    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
+    "table.include.list": "${CHOSEN_TABLES}",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
+    "log.mining.strategy": "online_catalog",
+    "log.mining.continuous.mine": "true",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.unwrap.add.fields": "op,table,ts_ms"
+  }
+}
+EOF
+)
+            elif [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+                CONNECTOR_PAYLOAD=$(cat <<EOF
+{
+  "name": "${TARGET_DB}-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+    "tasks.max": "1",
+    "mongodb.connection.string": "mongodb://${AGENT_DB_USER}:${AGENT_DB_PASS}@${DB_HOST}:${DB_PORT}/?replicaSet=rs0",
+    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
+    "collection.include.list": "${CHOSEN_TABLES}",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.connector.mongodb.transforms.ExtractNewDocumentState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "drop",
+    "transforms.unwrap.add.fields": "op,collection,ts_ms"
   }
 }
 EOF

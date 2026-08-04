@@ -588,19 +588,27 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 	var agentCfg models.AgentConfig
 	if err := h.DB.Where("client_id = ?", client.ID).First(&agentCfg).Error; err != nil {
 		agentCfg = models.AgentConfig{
-			ClientID:    client.ID,
-			AgentURL:    req.AgentServerURL,
-			TailscaleIP: req.TailscaleIP,
-			Hostname:    req.Hostname,
-			IsActive:    true,
+			ClientID:        client.ID,
+			AgentURL:        req.AgentServerURL,
+			TailscaleIP:     req.TailscaleIP,
+			Hostname:        req.Hostname,
+			DBEngine:        req.DBEngine,
+			DBName:          req.DBName,
+			DBTables:        req.DBTables,
+			ConnectorStatus: req.ConnectorStatus,
+			IsActive:        true,
 		}
 		h.DB.Create(&agentCfg)
 	} else {
 		h.DB.Model(&agentCfg).Updates(map[string]interface{}{
-			"agent_url":    req.AgentServerURL,
-			"tailscale_ip": req.TailscaleIP,
-			"hostname":     req.Hostname,
-			"is_active":    true,
+			"agent_url":        req.AgentServerURL,
+			"tailscale_ip":     req.TailscaleIP,
+			"hostname":         req.Hostname,
+			"db_engine":        req.DBEngine,
+			"db_name":          req.DBName,
+			"db_tables":        req.DBTables,
+			"connector_status": req.ConnectorStatus,
+			"is_active":        true,
 		})
 	}
 
@@ -621,6 +629,7 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			KafkaBrokers: req.KafkaBrokers,
 			TopicPrefix:  topicPrefix,
 			SourceSystem: sourceSys,
+			DBEngine:     req.DBEngine,
 			IsActive:     true,
 		}
 		h.DB.Create(&kafkaCfg)
@@ -629,6 +638,7 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			KafkaBrokers: req.KafkaBrokers,
 			SourceSystem: sourceSys,
 			TopicPrefix:  topicPrefix,
+			DBEngine:     req.DBEngine,
 			IsActive:     true,
 		})
 	}

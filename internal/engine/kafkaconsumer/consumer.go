@@ -306,6 +306,16 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 
 	tableName, _ := payload["__table"].(string)
+	if tableName == "" {
+		tableName, _ = payload["__collection"].(string)
+	}
+	if tableName == "" {
+		tableName, _ = payload["table"].(string)
+	}
+	if tableName == "" {
+		tableName, _ = payload["collection"].(string)
+	}
+
 	userName, _ := payload["__user_name"].(string)
 	tsMs, _ := payload["__ts_ms"].(float64)
 
@@ -566,6 +576,20 @@ func isPrintable(s string) bool {
 	return true
 }
 
+func cleanPayload(p DebeziumOracleMessage) DebeziumOracleMessage {
+	res := make(DebeziumOracleMessage)
+	for k, v := range p {
+		if k == "__op" || k == "__table" || k == "__db" || k == "__schema" || k == "__ts_ms" || k == "__deleted" || k == "__user_name" || k == "__collection" {
+			continue
+		}
+		if k == "op" || k == "table" || k == "db" || k == "schema" || k == "ts_ms" || k == "deleted" || k == "user_name" || k == "collection" {
+			continue
+		}
+		res[k] = v
+	}
+	return res
+}
+
 func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 	skip := map[string]bool{
 		"__op": true, "__table": true, "__db": true, "__schema": true,
@@ -573,6 +597,7 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 		"__scn": true, "__tx_id": true, "__row_id": true,
 		"op": true, "table": true, "db": true, "schema": true,
 		"ts_ms": true, "deleted": true, "user_name": true,
+		"__collection": true, "collection": true,
 	}
 
 	meta := make(map[string]interface{})
