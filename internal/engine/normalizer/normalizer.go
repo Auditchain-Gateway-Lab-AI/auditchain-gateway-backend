@@ -59,19 +59,11 @@ func MapDynamicPayload(dynamicPayload map[string]interface{}, mapping *ClientFie
 
 	// 1. Tentukan kunci berdasarkan mapping klien
 	keyActor := "actor"
-	keyAction := "action"
-	keyResource := "resource"
 	keyFallbackActor := ""
 
 	if mapping != nil {
 		if mapping.ActorField != "" {
 			keyActor = mapping.ActorField
-		}
-		if mapping.ActionField != "" {
-			keyAction = mapping.ActionField
-		}
-		if mapping.ResourceField != "" {
-			keyResource = mapping.ResourceField
 		}
 		keyFallbackActor = mapping.FallbackActorField
 	}
@@ -85,8 +77,8 @@ func MapDynamicPayload(dynamicPayload map[string]interface{}, mapping *ClientFie
 		input.Actor = getString(keyFallbackActor)
 	}
 
-	input.Action = getString(keyAction)
-	input.Resource = getString(keyResource)
+	input.Action = getString("action")
+	input.Resource = getString("resource")
 	input.SourceSystem = getString("source_system")
 	input.LogID = getString("log_id")
 	input.Timestamp = getString("timestamp")
