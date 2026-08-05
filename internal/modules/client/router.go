@@ -20,6 +20,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.PUT("/clients/:id", h.UpdateClient)
 		adminRoutes.GET("/clients/:id/detail", h.GetClientDetail)
 		adminRoutes.DELETE("/clients/:id", h.DeleteClient)
+		adminRoutes.GET("/users", h.ListUsers)
+		adminRoutes.POST("/users", h.CreateUser)
 		adminRoutes.GET("/clients/:id/users", h.GetClientUsers)
 		adminRoutes.POST("/clients/:id/users", h.CreateClientUser)
 		adminRoutes.DELETE("/users/:id", h.DeleteClientUser)

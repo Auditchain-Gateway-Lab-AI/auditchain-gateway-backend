@@ -37,6 +37,12 @@ type CreateClientUserRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
+type CreateAdminUserRequest struct {
+	FullName string `json:"full_name"`
+	Username string `json:"username" binding:"required,min=4"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 type CreateKafkaConfigRequest struct {
 	ClientID     string `json:"client_id" binding:"required"`
 	TopicPrefix  string `json:"topic_prefix" binding:"required"`
@@ -259,6 +265,48 @@ func (h *Handler) GetClientUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
+func (h *Handler) ListUsers(c *gin.Context) {
+	users, err := h.Service.GetUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar pengguna"})
+		return
+	}
+
+	c.JSON(http.StatusOK, users)
+}
+
+func (h *Handler) CreateUser(c *gin.Context) {
+	var req CreateAdminUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.Service.AddUser("", req.Username, req.Password, req.FullName, "admin")
+	if err != nil {
+		switch err.Error() {
+		case "username_already_exists":
+			c.JSON(http.StatusConflict, gin.H{"error": "Username is already taken"})
+		case "invalid_role":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Role must be Admin or Auditor"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan admin: " + err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Pengguna berhasil ditambahkan",
+		"user": map[string]interface{}{
+			"id":        user.ID,
+			"client_id": user.ClientID,
+			"full_name": user.FullName,
+			"username":  user.Username,
+			"role":      user.Role,
+		},
+	})
+}
+
 func (h *Handler) CreateClientUser(c *gin.Context) {
 	clientID := c.Param("id")
 	if clientID == "" {
@@ -297,6 +345,10 @@ func (h *Handler) DeleteClientUser(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID pengguna tidak boleh kosong"})
+		return
+	}
+	if currentUserID, ok := c.Get("user_id"); ok && currentUserID == userID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Admin tidak bisa menghapus akun yang sedang digunakan."})
 		return
 	}
 
@@ -740,4 +792,3 @@ func (h *Handler) ServeInstallScript(c *gin.Context) {
 
 	c.JSON(http.StatusNotFound, gin.H{"error": "File script install.sh tidak ditemukan di server Gateway"})
 }
-
