@@ -181,7 +181,12 @@ if command -v mongosh &> /dev/null || command -v mongo &> /dev/null || systemctl
     HAS_MONGODB=true
 fi
 
-if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ] && [ "$HAS_ORACLE" = false ] && [ "$HAS_MONGODB" = false ]; then
+HAS_SQLSERVER=false
+if command -v sqlcmd &> /dev/null || systemctl is-active --quiet mssql-server 2>/dev/null; then
+    HAS_SQLSERVER=true
+fi
+
+if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ] && [ "$HAS_ORACLE" = false ] && [ "$HAS_MONGODB" = false ] && [ "$HAS_SQLSERVER" = false ]; then
     echo -e "${YELLOW}[NOTE] Tidak ada PostgreSQL/MySQL terdeteksi di port standar.${NC}"
     echo -e "${YELLOW}Pilih opsi:${NC}"
     echo "  [M] Manual Entry (masukkan host, port, dan engine secara manual)"
@@ -208,9 +213,13 @@ if [ "$MANUAL_MODE" = true ]; then
     echo "  [2] MySQL / MariaDB"
     echo "  [3] Oracle Database"
     echo "  [4] MongoDB"
+    echo "  [5] SQL Server"
     read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
     ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-    if [ "$ENGINE_CHOICE" = "4" ]; then
+    if [ "$ENGINE_CHOICE" = "5" ]; then
+        CHOSEN_ENGINE="sqlserver"
+        DB_PORT="1433"
+    elif [ "$ENGINE_CHOICE" = "4" ]; then
         CHOSEN_ENGINE="mongodb"
         DB_PORT="27017"
     elif [ "$ENGINE_CHOICE" = "3" ]; then
@@ -228,6 +237,9 @@ if [ "$MANUAL_MODE" = true ]; then
     if [ "$CHOSEN_ENGINE" = "mongodb" ]; then
         read -p "Database Port [27017]: " INPUT_PORT < /dev/tty
         DB_PORT=${INPUT_PORT:-27017}
+    elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+        read -p "Database Port [1433]: " INPUT_PORT < /dev/tty
+        DB_PORT=${INPUT_PORT:-1433}
     elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
         read -p "Database Port [1521]: " INPUT_PORT < /dev/tty
         DB_PORT=${INPUT_PORT:-1521}
@@ -239,7 +251,7 @@ if [ "$MANUAL_MODE" = true ]; then
         DB_PORT=${INPUT_PORT:-3306}
     fi
     read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
-elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = true ] || [ "$HAS_MONGODB" = true ]; then
+elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = true ] || [ "$HAS_MONGODB" = true ] || [ "$HAS_SQLSERVER" = true ]; then
     if [ "$HAS_POSTGRES" = true ] && [ "$HAS_MYSQL" = true ]; then
         echo -e "\n${YELLOW}Beberapa Engine Database Ditemukan:${NC}"
         echo "  [1] PostgreSQL"
@@ -257,9 +269,16 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
     elif [ "$HAS_POSTGRES" = true ]; then
         echo "  • Engine Terdeteksi: PostgreSQL"
         CHOSEN_ENGINE="postgres"
-    else
+    elif [ "$HAS_MYSQL" = true ]; then
         echo "  • Engine Terdeteksi: MySQL / MariaDB"
         CHOSEN_ENGINE="mysql"
+    elif [ "$HAS_SQLSERVER" = true ]; then
+        echo "  • Engine Terdeteksi: SQL Server"
+        CHOSEN_ENGINE="sqlserver"
+        DB_PORT="1433"
+    else
+        echo "  • Engine Terdeteksi: MongoDB / Oracle (Manual Config Required)"
+        MANUAL_MODE=true
     fi
 
     # Jika user memilih Manual di sini
@@ -269,9 +288,13 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
         echo "  [2] MySQL / MariaDB"
         echo "  [3] Oracle Database"
         echo "  [4] MongoDB"
+        echo "  [5] SQL Server"
         read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
         ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-        if [ "$ENGINE_CHOICE" = "4" ]; then
+        if [ "$ENGINE_CHOICE" = "5" ]; then
+            CHOSEN_ENGINE="sqlserver"
+            DB_PORT="1433"
+        elif [ "$ENGINE_CHOICE" = "4" ]; then
             CHOSEN_ENGINE="mongodb"
             DB_PORT="27017"
         elif [ "$ENGINE_CHOICE" = "3" ]; then
@@ -289,6 +312,9 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
         if [ "$CHOSEN_ENGINE" = "mongodb" ]; then
             read -p "Database Port [27017]: " INPUT_PORT < /dev/tty
             DB_PORT=${INPUT_PORT:-27017}
+        elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+            read -p "Database Port [1433]: " INPUT_PORT < /dev/tty
+            DB_PORT=${INPUT_PORT:-1433}
         elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
             read -p "Database Port [1521]: " INPUT_PORT < /dev/tty
             DB_PORT=${INPUT_PORT:-1521}
@@ -346,7 +372,7 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
                 fi
             fi
 
-        else
+        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
             # --- 1. Native MySQL Scan ---
             for port in 3306 3307 3308; do
                 RAW_DBS=$(mysql --no-defaults -P "$port" -N -e "SHOW DATABASES" 2>/dev/null | grep -vE "^(information_schema|performance_schema|mysql|sys)$" || true)
@@ -382,6 +408,76 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
                     done <<< "$DOCKER_CONTAINERS"
                 fi
             fi
+
+        elif [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+            # --- 1. Native MongoDB Scan ---
+            RAW_DBS=$(mongosh --quiet --eval "db.getMongo().getDBNames().join('\n')" 2>/dev/null || mongo --quiet --eval "db.getMongo().getDBNames().join('\n')" 2>/dev/null | grep -vE "^(admin|config|local)$" || true)
+            if [ -n "$RAW_DBS" ]; then
+                while IFS= read -r line; do
+                    if [ -n "$line" ]; then
+                        DB_LIST+=("$line")
+                        PORT_LIST+=("27017")
+                        LABEL_LIST+=("Native")
+                    fi
+                done <<< "$RAW_DBS"
+            fi
+            
+            # --- 2. Docker MongoDB Scan ---
+            if command -v docker >/dev/null 2>&1; then
+                DOCKER_CONTAINERS=$(docker ps --filter "ancestor=mongo" --format "{{.ID}}|{{.Names}}" 2>/dev/null || true)
+                if [ -n "$DOCKER_CONTAINERS" ]; then
+                    while IFS='|' read -r c_id c_name; do
+                        RAW_DBS=$(docker exec "$c_id" mongosh --quiet --eval "db.getMongo().getDBNames().join('\n')" 2>/dev/null || docker exec "$c_id" mongo --quiet --eval "db.getMongo().getDBNames().join('\n')" 2>/dev/null | grep -vE "^(admin|config|local)$" || true)
+                        if [ -n "$RAW_DBS" ]; then
+                            MAPPED_PORT=$(docker port "$c_id" 27017 2>/dev/null | grep -oP ':\K\d+' | head -n 1)
+                            MAPPED_PORT=${MAPPED_PORT:-"?"}
+                            while IFS= read -r line; do
+                                if [ -n "$line" ]; then
+                                    DB_LIST+=("$line")
+                                    PORT_LIST+=("$MAPPED_PORT")
+                                    LABEL_LIST+=("Docker: $c_name")
+                                fi
+                            done <<< "$RAW_DBS"
+                        fi
+                    done <<< "$DOCKER_CONTAINERS"
+                fi
+            fi
+
+        elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+            # Hanya deteksi instance (port), karena otentikasi wajib untuk baca DB list
+            if command -v docker >/dev/null 2>&1; then
+                DOCKER_CONTAINERS=$(docker ps --format "{{.ID}}|{{.Names}}|{{.Image}}" 2>/dev/null | grep -iE "mssql|sqlserver" || true)
+                if [ -n "$DOCKER_CONTAINERS" ]; then
+                    while IFS='|' read -r c_id c_name c_img; do
+                        MAPPED_PORT=$(docker port "$c_id" 1433 2>/dev/null | grep -oP ':\K\d+' | head -n 1)
+                        MAPPED_PORT=${MAPPED_PORT:-"1433"}
+                        DB_LIST+=("<INPUT_MANUAL>")
+                        PORT_LIST+=("$MAPPED_PORT")
+                        LABEL_LIST+=("Docker: $c_name")
+                    done <<< "$DOCKER_CONTAINERS"
+                fi
+            fi
+            # Native fallback jika sqlcmd ada dan bukan docker
+            if [ ${#DB_LIST[@]} -eq 0 ] && command -v sqlcmd &> /dev/null; then
+                DB_LIST+=("<INPUT_MANUAL>")
+                PORT_LIST+=("1433")
+                LABEL_LIST+=("Native")
+            fi
+
+        elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
+            # Sama seperti SQL Server, deteksi instance docker
+            if command -v docker >/dev/null 2>&1; then
+                DOCKER_CONTAINERS=$(docker ps --format "{{.ID}}|{{.Names}}|{{.Image}}" 2>/dev/null | grep -i "oracle" || true)
+                if [ -n "$DOCKER_CONTAINERS" ]; then
+                    while IFS='|' read -r c_id c_name c_img; do
+                        MAPPED_PORT=$(docker port "$c_id" 1521 2>/dev/null | grep -oP ':\K\d+' | head -n 1)
+                        MAPPED_PORT=${MAPPED_PORT:-"1521"}
+                        DB_LIST+=("<INPUT_MANUAL>")
+                        PORT_LIST+=("$MAPPED_PORT")
+                        LABEL_LIST+=("Docker: $c_name")
+                    done <<< "$DOCKER_CONTAINERS"
+                fi
+            fi
         fi
 
         TARGET_DB=""
@@ -389,7 +485,11 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
             echo -e "\n${BLUE}📂 Daftar Database Terdeteksi:${NC}"
             echo "--------------------------------------"
             for idx in "${!DB_LIST[@]}"; do
-                echo "  [$((idx+1))] ${DB_LIST[$idx]} (Port: ${PORT_LIST[$idx]} | ${LABEL_LIST[$idx]})"
+                if [ "${DB_LIST[$idx]}" = "<INPUT_MANUAL>" ]; then
+                    echo "  [$((idx+1))] [Input Nama Database Manual] (Port: ${PORT_LIST[$idx]} | ${LABEL_LIST[$idx]})"
+                else
+                    echo "  [$((idx+1))] ${DB_LIST[$idx]} (Port: ${PORT_LIST[$idx]} | ${LABEL_LIST[$idx]})"
+                fi
             done
             echo "  [M] Manual Entry (database lain / port custom)"
             echo "--------------------------------------"
@@ -402,9 +502,13 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
                 echo "  [2] MySQL / MariaDB"
                 echo "  [3] Oracle Database"
                 echo "  [4] MongoDB"
+                echo "  [5] SQL Server"
                 read -p "Pilih Engine Database [1]: " ENGINE_CHOICE < /dev/tty
                 ENGINE_CHOICE=${ENGINE_CHOICE:-1}
-                if [ "$ENGINE_CHOICE" = "4" ]; then
+                if [ "$ENGINE_CHOICE" = "5" ]; then
+                    CHOSEN_ENGINE="sqlserver"
+                    DB_PORT="1433"
+                elif [ "$ENGINE_CHOICE" = "4" ]; then
                     CHOSEN_ENGINE="mongodb"
                     DB_PORT="27017"
                 elif [ "$ENGINE_CHOICE" = "3" ]; then
@@ -427,10 +531,18 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
             else
                 ARRAY_IDX=$((DB_IDX-1))
                 if [ $ARRAY_IDX -ge 0 ] && [ $ARRAY_IDX -lt ${#DB_LIST[@]} ]; then
-                    TARGET_DB="${DB_LIST[$ARRAY_IDX]}"
+                    if [ "${DB_LIST[$ARRAY_IDX]}" = "<INPUT_MANUAL>" ]; then
+                        read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
+                    else
+                        TARGET_DB="${DB_LIST[$ARRAY_IDX]}"
+                    fi
                     DB_PORT="${PORT_LIST[$ARRAY_IDX]}"
                 else
-                    TARGET_DB="${DB_LIST[0]}"
+                    if [ "${DB_LIST[0]}" = "<INPUT_MANUAL>" ]; then
+                        read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
+                    else
+                        TARGET_DB="${DB_LIST[0]}"
+                    fi
                     DB_PORT="${PORT_LIST[0]}"
                 fi
 
@@ -515,6 +627,9 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
         if [ "$MANUAL_MODE" = false ]; then
             DB_PORT="5432"
             [ "$CHOSEN_ENGINE" = "mysql" ] && DB_PORT="3306"
+            [ "$CHOSEN_ENGINE" = "sqlserver" ] && DB_PORT="1433"
+            [ "$CHOSEN_ENGINE" = "mongodb" ] && DB_PORT="27017"
+            [ "$CHOSEN_ENGINE" = "oracle" ] && DB_PORT="1521"
         fi
 
         USER_CREATED=false
@@ -572,6 +687,17 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
                 elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
                     TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
                     if [ $? -eq 0 ]; then
+                        CONN_OK=true
+                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
+                    else
+                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
+                        fi
+                    fi
+                elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+                    TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1)
+                    if echo "$TEST_RESULT" | grep -q "^1$"; then
                         CONN_OK=true
                         echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
                     else
@@ -646,6 +772,14 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
             echo -e "Debezium MongoDB Connector mewajibkan MongoDB berjalan dalam mode Replica Set (meskipun standalone / 1 node)."
             echo -e "Pastikan MongoDB dijalankan dengan opsi --replSet dan sudah diinisialisasi (rs.initiate())."
             sleep 3
+        elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+            echo -e "\n${YELLOW}⚠️ PERHATIAN: SQL Server memerlukan konfigurasi tambahan!${NC}"
+            echo -e "Debezium SQL Server Connector mewajibkan fitur CDC diaktifkan pada database dan tabel target."
+            echo -e "Jalankan perintah berikut di SSMS atau sqlcmd:"
+            echo -e "  ${BLUE}USE ${TARGET_DB}; EXEC sys.sp_cdc_enable_db;${NC}"
+            echo -e "  ${BLUE}EXEC sys.sp_cdc_enable_table @source_schema='dbo', @source_name='<nama_tabel>', @role_name=NULL;${NC}"
+            echo -e "Pastikan SQL Server Agent service juga berjalan (diperlukan untuk CDC job)."
+            sleep 3
         fi
 
         echo -e "\nMenunggu Debezium Engine siap (maks 30 detik)..."
@@ -708,6 +842,33 @@ EOF
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "log.mining.strategy": "online_catalog",
     "log.mining.continuous.mine": "true",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.unwrap.add.fields": "op,table,ts_ms"
+  }
+}
+EOF
+)
+            elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+                CONNECTOR_PAYLOAD=$(cat <<EOF
+{
+  "name": "${TARGET_DB}-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "tasks.max": "1",
+    "database.hostname": "${DB_HOST}",
+    "database.port": "${DB_PORT}",
+    "database.user": "${AGENT_DB_USER}",
+    "database.password": "${AGENT_DB_PASS}",
+    "database.names": "${TARGET_DB}",
+    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
+    "table.include.list": "${CHOSEN_TABLES}",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
+    "database.encrypt": "false",
+    "database.trustServerCertificate": "true",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
