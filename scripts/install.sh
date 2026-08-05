@@ -327,8 +327,9 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
         fi
         read -p "Nama Database (SID/Service Name/DB Name) yang ingin di-audit: " TARGET_DB < /dev/tty
     fi
+fi
 
-    SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
+SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
     # Auto-discovery database list (hanya jika bukan manual mode)
     if [ "$MANUAL_MODE" = false ]; then
@@ -952,7 +953,6 @@ EOF
             CONNECTOR_SETUP_STATUS="debezium_not_ready"
         fi
     fi
-fi
 
 # ------------------------------------------------------------------------------
 # 6. DETEKSI ENDPOINT NETWORK & TELEMETRI
