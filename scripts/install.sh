@@ -108,6 +108,9 @@ mkdir -p /etc/auditchain
 mkdir -p /var/log/auditchain
 mkdir -p /etc/auditchain/jdbc-drivers
 
+echo "Mengunduh driver JDBC yang dibutuhkan..."
+curl -fsSL "https://repo1.maven.org/maven2/com/oracle/database/jdbc/ojdbc8/21.1.0.0/ojdbc8-21.1.0.0.jar" -o /etc/auditchain/jdbc-drivers/ojdbc8.jar 2>/dev/null || true
+
 cat <<EOF > /etc/auditchain/docker-compose.yml
 version: '3.8'
 services:
