@@ -460,7 +460,7 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 	candidates := []string{pkField, "ID", "id", "ogc_fid", "_id", "fid"}
 
 	for _, key := range candidates {
-		val, ok := payload[key]
+		val, ok := findFieldInsensitive(payload, key)
 		if !ok || val == nil {
 			continue
 		}
