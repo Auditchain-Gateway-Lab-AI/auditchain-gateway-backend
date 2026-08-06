@@ -164,30 +164,30 @@ HAS_POSTGRES=false
 HAS_MYSQL=false
 HAS_ORACLE=false
 
-if command -v psql &> /dev/null || systemctl is-active --quiet postgresql 2>/dev/null || systemctl is-active --quiet postgres 2>/dev/null; then
+if command -v psql &> /dev/null || systemctl is-active --quiet postgresql 2>/dev/null || systemctl is-active --quiet postgres 2>/dev/null || [ -n "$(docker ps --filter "ancestor=postgres" -q 2>/dev/null)" ]; then
     HAS_POSTGRES=true
 fi
 
-if command -v mysql &> /dev/null || systemctl is-active --quiet mysql 2>/dev/null || systemctl is-active --quiet mysqld 2>/dev/null || systemctl is-active --quiet mariadb 2>/dev/null; then
+if command -v mysql &> /dev/null || systemctl is-active --quiet mysql 2>/dev/null || systemctl is-active --quiet mysqld 2>/dev/null || systemctl is-active --quiet mariadb 2>/dev/null || [ -n "$(docker ps --filter "ancestor=mysql" -q 2>/dev/null)" ]; then
     HAS_MYSQL=true
 fi
 
-if command -v sqlplus &> /dev/null || systemctl is-active --quiet oracle* 2>/dev/null; then
+if command -v sqlplus &> /dev/null || systemctl is-active --quiet oracle* 2>/dev/null || [ -n "$(docker ps --format '{{.Image}}' 2>/dev/null | grep -i oracle)" ]; then
     HAS_ORACLE=true
 fi
 
 HAS_MONGODB=false
-if command -v mongosh &> /dev/null || command -v mongo &> /dev/null || systemctl is-active --quiet mongod 2>/dev/null; then
+if command -v mongosh &> /dev/null || command -v mongo &> /dev/null || systemctl is-active --quiet mongod 2>/dev/null || [ -n "$(docker ps --filter "ancestor=mongo" -q 2>/dev/null)" ]; then
     HAS_MONGODB=true
 fi
 
 HAS_SQLSERVER=false
-if command -v sqlcmd &> /dev/null || systemctl is-active --quiet mssql-server 2>/dev/null; then
+if command -v sqlcmd &> /dev/null || systemctl is-active --quiet mssql-server 2>/dev/null || [ -n "$(docker ps --format '{{.Image}}' 2>/dev/null | grep -iE 'mssql|sqlserver')" ]; then
     HAS_SQLSERVER=true
 fi
 
 if [ "$HAS_POSTGRES" = false ] && [ "$HAS_MYSQL" = false ] && [ "$HAS_ORACLE" = false ] && [ "$HAS_MONGODB" = false ] && [ "$HAS_SQLSERVER" = false ]; then
-    echo -e "${YELLOW}[NOTE] Tidak ada PostgreSQL/MySQL terdeteksi di port standar.${NC}"
+    echo -e "${YELLOW}[NOTE] Tidak ada Database Engine terdeteksi di server ini.${NC}"
     echo -e "${YELLOW}Pilih opsi:${NC}"
     echo "  [M] Manual Entry (masukkan host, port, dan engine secara manual)"
     echo "  [S] Skip (konfigurasi nanti via Dashboard Admin)"
