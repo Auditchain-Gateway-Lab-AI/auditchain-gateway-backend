@@ -575,9 +575,23 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
     fi
 
     SELECTED_DB_NAME="$TARGET_DB"
+    ORACLE_PDB=""
+
+    if [ "$CHOSEN_ENGINE" = "oracle" ]; then
+        echo -e "\n${YELLOW}ℹ️  Oracle versi baru (19c+) menggunakan arsitektur CDB/PDB.${NC}"
+        read -p "Apakah tabel aplikasi Anda berada di dalam Pluggable Database (PDB) misal XEPDB1? (y/N): " USE_PDB < /dev/tty
+        if [[ "$USE_PDB" =~ ^[Yy]$ ]]; then
+            read -p "Masukkan nama Pluggable Database (PDB): " ORACLE_PDB < /dev/tty
+        fi
+    fi
 
     if [ -n "$TARGET_DB" ]; then
         echo -e "${GREEN}✓ Database Terpilih: ${TARGET_DB}${NC}"
+        if [ -n "$ORACLE_PDB" ]; then
+            echo -e "${GREEN}✓ PDB Terpilih: ${ORACLE_PDB}${NC}"
+            # Kirim telemetry PDB as TARGET_DB so Gateway registers the PDB name correctly
+            SELECTED_DB_NAME="$ORACLE_PDB"
+        fi
 
         TABLE_LIST=()
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
@@ -839,6 +853,13 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 EOF
 )
             elif [ "$CHOSEN_ENGINE" = "oracle" ]; then
+                PDB_CONFIG=""
+                if [ -n "$ORACLE_PDB" ]; then
+                    PDB_CONFIG="\"database.pdb.name\": \"${ORACLE_PDB}\","
+                fi
+                # User is highly likely uppercase in Oracle
+                UPPER_USER=$(echo "$AGENT_DB_USER" | tr '[:lower:]' '[:upper:]')
+                
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
   "name": "${TARGET_DB}-connector",
@@ -850,10 +871,13 @@ EOF
     "database.user": "${AGENT_DB_USER}",
     "database.password": "${AGENT_DB_PASS}",
     "database.dbname": "${TARGET_DB}",
-    "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
+    ${PDB_CONFIG}
+    "topic.prefix": "${HOSTNAME}_${SELECTED_DB_NAME}",
+    "schema.include.list": "${UPPER_USER},${AGENT_DB_USER}",
     "table.include.list": "${CHOSEN_TABLES}",
+    "database.tablename.case.insensitive": "false",
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-    "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
+    "schema.history.internal.kafka.topic": "schema-changes.${SELECTED_DB_NAME}",
     "log.mining.strategy": "online_catalog",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
