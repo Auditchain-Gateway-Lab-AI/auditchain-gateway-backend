@@ -284,8 +284,12 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	var rawMap map[string]interface{}
 	if err := json.Unmarshal(msg.Value, &rawMap); err != nil {
-		return fmt.Errorf("gagal parse JSON: %w", err)
+		log.Printf("⚠️  [KafkaConsumer] Gagal decode JSON: %v", err)
+		return nil
 	}
+
+	// DEBUG: Tampilkan payload raw jika dibutuhkan
+	log.Printf("🔍 [KafkaConsumer DEBUG] Topik: %s | Menerima payload: %v", msg.Topic, string(msg.Value))
 
 	var payload DebeziumOracleMessage
 	if innerPayload, exists := rawMap["payload"]; exists {
