@@ -276,8 +276,18 @@ elif [ "$HAS_POSTGRES" = true ] || [ "$HAS_MYSQL" = true ] || [ "$HAS_ORACLE" = 
         echo "  • Engine Terdeteksi: SQL Server"
         CHOSEN_ENGINE="sqlserver"
         DB_PORT="1433"
+    elif [ "$HAS_ORACLE" = true ]; then
+        echo "  • Engine Terdeteksi: Oracle Database (Membutuhkan Konfigurasi Manual untuk SID/Service Name)"
+        CHOSEN_ENGINE="oracle"
+        DB_PORT="1521"
+        MANUAL_MODE=true
+    elif [ "$HAS_MONGODB" = true ]; then
+        echo "  • Engine Terdeteksi: MongoDB (Membutuhkan Konfigurasi Manual)"
+        CHOSEN_ENGINE="mongodb"
+        DB_PORT="27017"
+        MANUAL_MODE=true
     else
-        echo "  • Engine Terdeteksi: MongoDB / Oracle (Manual Config Required)"
+        echo "  • Engine Terdeteksi: Tidak Diketahui"
         MANUAL_MODE=true
     fi
 
