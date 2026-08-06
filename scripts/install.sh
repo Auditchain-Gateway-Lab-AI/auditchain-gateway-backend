@@ -132,7 +132,7 @@ services:
   debezium:
     image: quay.io/debezium/connect:2.4
     volumes:
-      - /etc/auditchain/jdbc-drivers:/kafka/connect/debezium-connector-oracle/jdbc
+      - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
       - "8083:8083"
     environment:
