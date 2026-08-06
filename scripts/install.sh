@@ -855,7 +855,6 @@ EOF
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "log.mining.strategy": "online_catalog",
-    "log.mining.continuous.mine": "true",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
