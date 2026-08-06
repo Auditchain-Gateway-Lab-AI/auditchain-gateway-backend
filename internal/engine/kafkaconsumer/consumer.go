@@ -437,8 +437,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
 	}
 
-	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
-		action, resource, cfg.ClientID, sourceSystem)
+	log.Printf("✅ [KafkaConsumer] Tersimpan → engine=%-10s action=%-8s resource=%s client=%s source_system=%s",
+		cfg.DBEngine, action, resource, cfg.ClientID, sourceSystem)
 
 	return nil
 }
@@ -589,10 +589,11 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 
 	meta := make(map[string]interface{})
 	for k, v := range payload {
-		if skip[k] {
+		lowerK := strings.ToLower(k)
+		if skip[lowerK] || skip[k] {
 			continue
 		}
-		meta[k] = normalizeFieldValue(v)
+		meta[lowerK] = normalizeFieldValue(v)
 	}
 	return meta
 }
