@@ -54,6 +54,7 @@ type PaginationMeta struct {
 type RecentLogItem struct {
 	models.AuditLog
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | unreachable | pending
+	DBEngine        string `json:"db_engine"`
 }
 
 // RecentLogsResult adalah bentuk response baru GetRecentLogs:
@@ -73,7 +74,7 @@ type Service interface {
 	// GetRecentLogsPaginated menggantikan GetRecentLogs lama sebagai entry
 	// point handler dashboard. limit hardcoded 500 di versi lama diganti
 	// page/pageSize. integrityStatus kosong berarti tanpa filter.
-	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable string, fromTime, toTime *time.Time) (*RecentLogsResult, error)
+	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable, dbEngine string, fromTime, toTime *time.Time) (*RecentLogsResult, error)
 
 	GetResourceInventory(clientID string) (interface{}, error)
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
@@ -90,12 +91,12 @@ type auditService struct {
 
 type ResourceLogVerification struct {
 	LogID           string `json:"log_id"`
-	Resource        string `json:"resource"`         // Menyimpan nama/id resource
+	Resource        string `json:"resource"` // Menyimpan nama/id resource
 	Action          string `json:"action"`
-	LastAction      string `json:"last_action"`      // Alias untuk kompabilitas frontend
+	LastAction      string `json:"last_action"` // Alias untuk kompabilitas frontend
 	Actor           string `json:"actor"`
 	Timestamp       string `json:"timestamp"`
-	LastUpdatedAt   string `json:"last_updated_at"`  // Alias untuk kompabilitas frontend
+	LastUpdatedAt   string `json:"last_updated_at"` // Alias untuk kompabilitas frontend
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
 	ChainStatus     string `json:"chain_status"`     // Alias untuk kompabilitas frontend
@@ -175,6 +176,23 @@ func formatFabricTimestamp(raw string) string {
 		return raw
 	}
 	return formatPgTimestamp(t)
+}
+
+func normalizeDBEngine(engine string) string {
+	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "mongo", "mongodb":
+		return "mongodb"
+	case "mysql", "mariadb":
+		return "mysql"
+	case "sqlserver", "sql_server", "mssql", "sql server":
+		return "sqlserver"
+	case "oracle":
+		return "oracle"
+	default:
+		return ""
+	}
 }
 
 type RangeItemResult struct {
@@ -563,7 +581,7 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 //     filter ini butuh full-scan + verifikasi semua log ANCHORED pada
 //     setiap request, yang mahal. Field "note" memberi tahu API consumer
 //     secara eksplisit.
-func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable string, fromTime, toTime *time.Time) (*RecentLogsResult, error) {
+func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable, dbEngine string, fromTime, toTime *time.Time) (*RecentLogsResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -575,6 +593,36 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	}
 
 	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true}
+	clientDBEngine, err := s.repo.GetClientDBEngine(clientID)
+	if err != nil {
+		return nil, err
+	}
+	normalizedClientDBEngine := normalizeDBEngine(clientDBEngine)
+	normalizedFilterDBEngine := normalizeDBEngine(dbEngine)
+
+	if strings.TrimSpace(dbEngine) != "" && normalizedFilterDBEngine == "" {
+		return &RecentLogsResult{
+			Data: []RecentLogItem{},
+			Pagination: PaginationMeta{
+				Page:       page,
+				PageSize:   pageSize,
+				TotalItems: 0,
+				TotalPages: 1,
+			},
+		}, nil
+	}
+
+	if normalizedFilterDBEngine != "" && normalizedClientDBEngine != normalizedFilterDBEngine {
+		return &RecentLogsResult{
+			Data: []RecentLogItem{},
+			Pagination: PaginationMeta{
+				Page:       page,
+				PageSize:   pageSize,
+				TotalItems: 0,
+				TotalPages: 1,
+			},
+		}, nil
+	}
 
 	// GetRecentLogsPaginated menggantikan limit-500 lama dengan pagination
 	// sesungguhnya (page/page_size), plus filter opsional integrity_status.
@@ -605,6 +653,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 			items = append(items, RecentLogItem{
 				AuditLog:        l,
 				IntegrityStatus: "not_checked",
+				DBEngine:        normalizedClientDBEngine,
 			})
 		}
 

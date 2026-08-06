@@ -1,11 +1,11 @@
 package audit
 
-import "strings"
-
 import (
-	"go-blockchain-api/internal/models"
-
+	"errors"
+	"strings"
 	"time"
+
+	"go-blockchain-api/internal/models"
 
 	"gorm.io/gorm"
 )
@@ -17,6 +17,7 @@ type AuditRepository interface {
 	GetProofsByHash(hash string) ([]models.MerkleProof, error)
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
+	GetClientDBEngine(clientID string) (string, error)
 
 	GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string, fromTime, toTime *time.Time) ([]models.AuditLog, int64, error)
 	CountAnchoredLogs(clientID string) (int64, error)
@@ -106,6 +107,28 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
 		Order("timestamp desc").First(&log).Error
 	return &log, err
+}
+
+func (r *auditRepoImpl) GetClientDBEngine(clientID string) (string, error) {
+	var kafkaCfg models.ClientKafkaConfig
+	err := r.db.Where("client_id = ?", clientID).First(&kafkaCfg).Error
+	if err == nil && strings.TrimSpace(kafkaCfg.DBEngine) != "" {
+		return kafkaCfg.DBEngine, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	var agentCfg models.AgentConfig
+	err = r.db.Where("client_id = ?", clientID).First(&agentCfg).Error
+	if err == nil && strings.TrimSpace(agentCfg.DBEngine) != "" {
+		return agentCfg.DBEngine, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	return "", nil
 }
 
 // GetRecentLogsPage mengembalikan satu halaman log terbaru (tanpa filter
