@@ -82,7 +82,7 @@ services:
       zookeeper:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/kafka/9092'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -235,7 +235,7 @@ services:
       zookeeper:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/kafka/9092'"]
       interval: 10s
       timeout: 5s
       retries: 10
