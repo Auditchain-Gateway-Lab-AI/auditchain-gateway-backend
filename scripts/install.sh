@@ -85,8 +85,8 @@ services:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 45s
   debezium:
     image: quay.io/debezium/connect:2.4
     restart: always
@@ -107,8 +107,15 @@ UPDATEEOF
 
     echo -e "${GREEN}✓ docker-compose.yml berhasil diperbarui!${NC}"
 
-    echo -e "\n${YELLOW}🔄 Menerapkan perubahan (recreate container)...${NC}"
+    echo -e "\n${YELLOW}🧹 Membersihkan container lama...${NC}"
     cd /etc/auditchain
+    if command -v docker-compose &> /dev/null; then
+        docker-compose down --remove-orphans 2>/dev/null || true
+    else
+        docker compose down --remove-orphans 2>/dev/null || true
+    fi
+
+    echo -e "\n${YELLOW}🔄 Menjalankan ulang container dari awal...${NC}"
     if command -v docker-compose &> /dev/null; then
         docker-compose up -d
     else
@@ -231,8 +238,8 @@ services:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 45s
   debezium:
     image: quay.io/debezium/connect:2.4
     restart: always
