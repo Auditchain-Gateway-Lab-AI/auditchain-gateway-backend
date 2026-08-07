@@ -801,6 +801,10 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         USER_CREATED=false
+        echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
+        echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Docker/Remote."
+        read -p "(y/N): " AUTO_USER < /dev/tty
+        if [[ "$AUTO_USER" =~ ^[Yy]$ ]]; then
 
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
@@ -814,12 +818,14 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "Membuat Publication CDC untuk Debezium..."
             sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
             sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null || true
-        else
+        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
             echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
+            if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
+               mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
                 USER_CREATED=true
                 echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
             fi
+        fi
         fi
 
         if [ "$USER_CREATED" = false ]; then
