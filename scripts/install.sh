@@ -65,7 +65,7 @@ services:
       - "2888:2888"
       - "3888:3888"
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/2181'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -211,7 +211,7 @@ services:
       - "2888:2888"
       - "3888:3888"
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/2181'"]
       interval: 10s
       timeout: 5s
       retries: 5
