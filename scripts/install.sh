@@ -943,9 +943,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             sleep 3
         elif [ "$CHOSEN_ENGINE" = "mongodb" ]; then
             echo -e "\n${YELLOW}⚠️ PERHATIAN: MongoDB memerlukan konfigurasi tambahan!${NC}"
-            echo -e "Debezium MongoDB Connector mewajibkan MongoDB berjalan dalam mode Replica Set (meskipun standalone / 1 node)."
-            echo -e "Pastikan MongoDB dijalankan dengan opsi --replSet dan sudah diinisialisasi (rs.initiate())."
-            sleep 3
+            echo -e "1. Debezium mewajibkan MongoDB berjalan dalam mode Replica Set (meskipun 1 node)."
+            echo -e "2. Jika MongoDB berjalan di Docker, Anda WAJIB mengubah host Replica Set ke IP Tailscale Anda (${DB_HOST})."
+            echo -e "   Jalankan di mongosh: rs.reconfig({_id: 'rs0', members: [{_id: 0, host: '${DB_HOST}:${DB_PORT}'}]}, {force: true})"
+            echo -e "3. Pastikan Anda memberikan akun ROOT / SuperAdmin agar Debezium memiliki hak 'clusterMonitor'."
+            sleep 6
         elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
             echo -e "\n${YELLOW}⚠️ PERHATIAN: SQL Server memerlukan konfigurasi tambahan!${NC}"
             echo -e "Debezium SQL Server Connector mewajibkan fitur CDC diaktifkan pada database dan tabel target."
@@ -1062,15 +1064,20 @@ EOF
 EOF
 )
             elif [ "$CHOSEN_ENGINE" = "mongodb" ]; then
+                # Debezium membutuhkan Regex Namespace lengkap: database\.koleksi (misal: nextjs-crud\.products,nextjs-crud\.users)
+                # Kita ubah input user (products,users) menjadi (nextjs-crud\.products,nextjs-crud\.users)
+                MONGO_COLLECTIONS=$(echo "$CHOSEN_TABLES" | sed 's/ //g' | sed "s/,/,${TARGET_DB}\\\\\\\\./g")
+                MONGO_COLLECTIONS="${TARGET_DB}\\\\.${MONGO_COLLECTIONS}"
+
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
   "name": "${TARGET_DB}-connector",
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
     "tasks.max": "1",
-    "mongodb.connection.string": "mongodb://${AGENT_DB_USER}:${AGENT_DB_PASS}@${DB_HOST}:${DB_PORT}/?replicaSet=rs0",
+    "mongodb.connection.string": "mongodb://${AGENT_DB_USER}:${AGENT_DB_PASS}@${DB_HOST}:${DB_PORT}/?authSource=admin&replicaSet=rs0",
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
-    "collection.include.list": "${CHOSEN_TABLES}",
+    "collection.include.list": "${MONGO_COLLECTIONS}",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.connector.mongodb.transforms.ExtractNewDocumentState",
     "transforms.unwrap.drop.tombstones": "false",
