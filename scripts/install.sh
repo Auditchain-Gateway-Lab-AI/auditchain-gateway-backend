@@ -35,6 +35,95 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+# ==============================================================================
+# MODE --update: Pembaruan Ringan untuk Klien yang Sudah Terinstall
+# ==============================================================================
+if [ "$1" = "--update" ] || [ "${UPDATE_MODE}" = "true" ]; then
+    echo -e "\n${BLUE}======================================================================${NC}"
+    echo -e "${BLUE}         🔄 AUDITCHAIN AGENT UPDATE MODE                            ${NC}"
+    echo -e "${BLUE}======================================================================${NC}\n"
+
+    if [ ! -f /etc/auditchain/docker-compose.yml ]; then
+        echo -e "${RED}[ERROR] Auditchain Agent belum terinstall di server ini!${NC}"
+        echo -e "Jalankan installer penuh terlebih dahulu (tanpa --update)."
+        exit 1
+    fi
+
+    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || hostname -I | awk '{print $1}')
+    echo -e "${GREEN}✓ Tailscale IP: ${TAILSCALE_IP}${NC}"
+
+    echo -e "\n${YELLOW}📦 Memperbarui Docker Compose (restart policy + healthcheck)...${NC}"
+
+    cat <<UPDATEEOF > /etc/auditchain/docker-compose.yml
+version: '3.8'
+services:
+  zookeeper:
+    image: quay.io/debezium/zookeeper:2.4
+    restart: always
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  kafka:
+    image: quay.io/debezium/kafka:2.4
+    restart: always
+    ports:
+      - "9092:9092"
+    environment:
+      - ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  debezium:
+    image: quay.io/debezium/connect:2.4
+    restart: always
+    volumes:
+      - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
+    ports:
+      - "8083:8083"
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=my_connect_configs
+      - OFFSET_STORAGE_TOPIC=my_connect_offsets
+      - STATUS_STORAGE_TOPIC=my_connect_statuses
+    depends_on:
+      kafka:
+        condition: service_healthy
+UPDATEEOF
+
+    echo -e "${GREEN}✓ docker-compose.yml berhasil diperbarui!${NC}"
+
+    echo -e "\n${YELLOW}🔄 Menerapkan perubahan (recreate container)...${NC}"
+    cd /etc/auditchain
+    if command -v docker-compose &> /dev/null; then
+        docker-compose up -d
+    else
+        docker compose up -d
+    fi
+
+    echo -e "\n${GREEN}======================================================================${NC}"
+    echo -e "${GREEN}  ✅ UPDATE BERHASIL! Container sekarang Tahan Mati Lampu.           ${NC}"
+    echo -e "${GREEN}======================================================================${NC}"
+    echo -e "  • restart: always  → Container otomatis hidup saat server boot"
+    echo -e "  • healthcheck      → Urutan nyala dijaga: Zookeeper → Kafka → Debezium"
+    echo -e "  • Data CDC         → Tidak hilang (offset tersimpan di Kafka)\n"
+    exit 0
+fi
+
 GATEWAY_URL=${GATEWAY_URL:-${1:-"https://api.auditchain.id"}}
 GATEWAY_URL=$(echo "$GATEWAY_URL" | sed -E 's|/api/?$||' | sed -E 's|/$||')
 CLIENT_KEY=${CLIENT_KEY:-$2}
@@ -116,21 +205,37 @@ version: '3.8'
 services:
   zookeeper:
     image: quay.io/debezium/zookeeper:2.4
+    restart: always
     ports:
       - "2181:2181"
       - "2888:2888"
       - "3888:3888"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
   kafka:
     image: quay.io/debezium/kafka:2.4
+    restart: always
     ports:
       - "9092:9092"
     environment:
       - ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
   debezium:
     image: quay.io/debezium/connect:2.4
+    restart: always
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -142,7 +247,8 @@ services:
       - OFFSET_STORAGE_TOPIC=my_connect_offsets
       - STATUS_STORAGE_TOPIC=my_connect_statuses
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 EOF
 
 echo -e "\n${BLUE}[4/7] Menjalankan Engine Database CDC (Zookeeper, Kafka, Debezium)...${NC}"
