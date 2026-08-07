@@ -141,6 +141,13 @@ UPDATEEOF
     exit 0
 fi
 
+if [ -f /etc/auditchain/agent.env ]; then
+    echo -e "${YELLOW}ℹ️ Memuat konfigurasi sebelumnya dari /etc/auditchain/agent.env...${NC}"
+    source /etc/auditchain/agent.env
+    GATEWAY_URL=${GATEWAY_URL:-${AUDITCHAIN_GATEWAY_URL}}
+    CLIENT_KEY=${CLIENT_KEY:-${AUDITCHAIN_API_KEY}}
+fi
+
 GATEWAY_URL=${GATEWAY_URL:-${1:-"https://api.auditchain.id"}}
 GATEWAY_URL=$(echo "$GATEWAY_URL" | sed -E 's|/api/?$||' | sed -E 's|/$||')
 CLIENT_KEY=${CLIENT_KEY:-$2}
