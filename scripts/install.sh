@@ -64,6 +64,9 @@ services:
       - "2181:2181"
       - "2888:2888"
       - "3888:3888"
+    volumes:
+      - zookeeper_data:/zookeeper/data
+      - zookeeper_txns:/zookeeper/txns
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/2181'"]
       interval: 10s
@@ -75,6 +78,8 @@ services:
     restart: always
     ports:
       - "9092:9092"
+    volumes:
+      - kafka_data:/kafka/data
     environment:
       - ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
@@ -103,6 +108,11 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+
+volumes:
+  zookeeper_data:
+  zookeeper_txns:
+  kafka_data:
 UPDATEEOF
 
     echo -e "${GREEN}✓ docker-compose.yml berhasil diperbarui!${NC}"
@@ -217,6 +227,9 @@ services:
       - "2181:2181"
       - "2888:2888"
       - "3888:3888"
+    volumes:
+      - zookeeper_data:/zookeeper/data
+      - zookeeper_txns:/zookeeper/txns
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/2181'"]
       interval: 10s
@@ -228,6 +241,8 @@ services:
     restart: always
     ports:
       - "9092:9092"
+    volumes:
+      - kafka_data:/kafka/data
     environment:
       - ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
@@ -256,6 +271,11 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+
+volumes:
+  zookeeper_data:
+  zookeeper_txns:
+  kafka_data:
 EOF
 
 echo -e "\n${BLUE}[4/7] Menjalankan Engine Database CDC (Zookeeper, Kafka, Debezium)...${NC}"
