@@ -30,6 +30,10 @@ func SetupRouter(
 
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// Sajikan install.sh agar klien bisa mengunduh via:
+	// curl -fsSL https://semeru.tailfe278a.ts.net/scripts/install.sh | sudo bash
+	router.StaticFile("/scripts/install.sh", "./scripts/install.sh")
+
 	apiGroup := router.Group("/api")
 
 	auth.RegisterRoutes(apiGroup, authHandler)
