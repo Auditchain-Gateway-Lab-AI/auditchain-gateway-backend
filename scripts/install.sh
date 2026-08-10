@@ -752,35 +752,70 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
         CHOSEN_TABLES=""
         if [ ${#TABLE_LIST[@]} -gt 0 ]; then
-            echo -e "\n${BLUE}📋 Tabel Terdeteksi di '$TARGET_DB':${NC}"
-            echo "--------------------------------------"
-            for idx in "${!TABLE_LIST[@]}"; do
-                echo "  [$((idx+1))] ${TABLE_LIST[$idx]}"
-            done
-            echo "  [A] Semua Tabel (Monitor Semua)"
-            echo "--------------------------------------"
-            read -p "Pilih tabel (pisahkan koma contoh 1,2 atau 'A' untuk semua) [A]: " TBL_INPUT < /dev/tty
-            TBL_INPUT=${TBL_INPUT:-A}
-
-            if [ "$TBL_INPUT" = "A" ] || [ "$TBL_INPUT" = "a" ]; then
-                CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
-            else
-                SELECTED_TBL_ARRAY=()
-                IFS=',' read -ra ADDR <<< "$TBL_INPUT"
-                for item in "${ADDR[@]}"; do
-                    item=$(echo "$item" | xargs)
-                    if [[ "$item" =~ ^[0-9]+$ ]]; then
-                        T_IDX=$((item-1))
-                        if [ $T_IDX -ge 0 ] && [ $T_IDX -lt ${#TABLE_LIST[@]} ]; then
-                            SELECTED_TBL_ARRAY+=("${TABLE_LIST[$T_IDX]}")
-                        fi
-                    fi
+            if command -v whiptail >/dev/null 2>&1; then
+                WT_ARGS=()
+                for tbl in "${TABLE_LIST[@]}"; do
+                    WT_ARGS+=("$tbl" "" "OFF")
                 done
-                if [ ${#SELECTED_TBL_ARRAY[@]} -gt 0 ]; then
-                    CHOSEN_TABLES=$(IFS=,; echo "${SELECTED_TBL_ARRAY[*]}")
+                SELECTED_WT=$(whiptail --title "Pilih Tabel - $TARGET_DB" \
+                    --checklist "Pilih tabel yang ingin diaudit.\nNavigasi: ↑/↓   Centang: SPASI   Selesai: ENTER\nPencarian: Ketik huruf awal tabel." \
+                    20 70 10 "${WT_ARGS[@]}" 3>&1 1>&2 2>&3)
+                if [ $? -eq 0 ]; then
+                    CHOSEN_TABLES=$(echo "$SELECTED_WT" | tr -d '"' | tr ' ' ',')
                 else
+                    echo -e "${YELLOW}Pemilihan dibatalkan, memilih semua tabel secara default.${NC}"
                     CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
                 fi
+            elif command -v dialog >/dev/null 2>&1; then
+                DLG_ARGS=()
+                for tbl in "${TABLE_LIST[@]}"; do
+                    DLG_ARGS+=("$tbl" "" "off")
+                done
+                SELECTED_DLG=$(dialog --clear --title "Pilih Tabel - $TARGET_DB" \
+                    --checklist "Pilih tabel yang ingin diaudit.\nNavigasi: ↑/↓   Centang: SPASI   Selesai: ENTER\nPencarian: Ketik huruf awal tabel." \
+                    20 70 10 "${DLG_ARGS[@]}" 2>&1 >/dev/tty)
+                if [ $? -eq 0 ]; then
+                    CHOSEN_TABLES=$(echo "$SELECTED_DLG" | tr ' ' ',')
+                else
+                    echo -e "${YELLOW}Pemilihan dibatalkan, memilih semua tabel secara default.${NC}"
+                    CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
+                fi
+            else
+                echo -e "\n${BLUE}📋 Tabel Terdeteksi di '$TARGET_DB':${NC}"
+                echo "--------------------------------------"
+                for idx in "${!TABLE_LIST[@]}"; do
+                    echo "  [$((idx+1))] ${TABLE_LIST[$idx]}"
+                done
+                echo "  [A] Semua Tabel (Monitor Semua)"
+                echo "--------------------------------------"
+                read -p "Pilih tabel (pisahkan koma contoh 1,2 atau 'A' untuk semua) [A]: " TBL_INPUT < /dev/tty
+                TBL_INPUT=${TBL_INPUT:-A}
+
+                if [ "$TBL_INPUT" = "A" ] || [ "$TBL_INPUT" = "a" ]; then
+                    CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
+                else
+                    SELECTED_TBL_ARRAY=()
+                    IFS=',' read -ra ADDR <<< "$TBL_INPUT"
+                    for item in "${ADDR[@]}"; do
+                        item=$(echo "$item" | xargs)
+                        if [[ "$item" =~ ^[0-9]+$ ]]; then
+                            T_IDX=$((item-1))
+                            if [ $T_IDX -ge 0 ] && [ $T_IDX -lt ${#TABLE_LIST[@]} ]; then
+                                SELECTED_TBL_ARRAY+=("${TABLE_LIST[$T_IDX]}")
+                            fi
+                        fi
+                    done
+                    if [ ${#SELECTED_TBL_ARRAY[@]} -gt 0 ]; then
+                        CHOSEN_TABLES=$(IFS=,; echo "${SELECTED_TBL_ARRAY[*]}")
+                    else
+                        CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
+                    fi
+                fi
+            fi
+
+            if [ -z "$CHOSEN_TABLES" ]; then
+                echo -e "${YELLOW}Tidak ada tabel yang dicentang. Memilih semua tabel secara otomatis.${NC}"
+                CHOSEN_TABLES=$(IFS=,; echo "${TABLE_LIST[*]}")
             fi
         else
             read -p "Masukkan Nama Tabel/Koleksi yang ingin di-audit (contoh: public.audit_trail atau targetdb.koleksi): " CHOSEN_TABLES < /dev/tty
