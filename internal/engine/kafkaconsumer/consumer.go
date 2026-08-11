@@ -23,13 +23,36 @@ import (
 // setelah unwrap ExtractNewRecordState
 type DebeziumOracleMessage map[string]interface{}
 
+type clientMapping struct {
+	ActorField         string
+	FallbackActorField string
+	ActionField        string
+	ResourceField      string
+}
+
 type Engine struct {
 	DB *gorm.DB
 
 	sourceSystemCache sync.Map
+	mappingCache      sync.Map
 
 	mu        sync.Mutex
 	consumers map[string]*runningConsumer // key: ClientID
+}
+
+func (e *Engine) resolveClientMapping(clientID string) clientMapping {
+	if cached, ok := e.mappingCache.Load(clientID); ok {
+		return cached.(clientMapping)
+	}
+
+	var m clientMapping
+	if err := e.DB.Table("clients").
+		Select("actor_field, fallback_actor_field, action_field, resource_field").
+		Where("id = ?", clientID).
+		Scan(&m).Error; err == nil {
+		e.mappingCache.Store(clientID, m)
+	}
+	return m
 }
 
 type runningConsumer struct {
@@ -80,6 +103,10 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 		fp := configFingerprint(cfg)
 
 		if existing, running := e.consumers[cfg.ClientID]; running {
+			// Hapus cache mapping & source system agar perubahan di admin panel segera terbaca
+			e.mappingCache.Delete(cfg.ClientID)
+			e.sourceSystemCache.Delete(cfg.ClientID)
+
 			if existing.fingerprint == fp {
 				continue // tidak ada perubahan, biarkan goroutine yang sudah jalan
 			}
@@ -257,8 +284,12 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	var rawMap map[string]interface{}
 	if err := json.Unmarshal(msg.Value, &rawMap); err != nil {
-		return fmt.Errorf("gagal parse JSON: %w", err)
+		log.Printf("⚠️  [KafkaConsumer] Gagal decode JSON: %v", err)
+		return nil
 	}
+
+	// DEBUG: Tampilkan payload raw jika dibutuhkan
+	log.Printf("🔍 [KafkaConsumer DEBUG] Topik: %s | Menerima payload: %v", msg.Topic, string(msg.Value))
 
 	var payload DebeziumOracleMessage
 	if innerPayload, exists := rawMap["payload"]; exists {
@@ -279,12 +310,24 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 
 	tableName, _ := payload["__table"].(string)
+	if tableName == "" {
+		tableName, _ = payload["__collection"].(string)
+	}
+	if tableName == "" {
+		tableName, _ = payload["table"].(string)
+	}
+	if tableName == "" {
+		tableName, _ = payload["collection"].(string)
+	}
+
 	userName, _ := payload["__user_name"].(string)
 	tsMs, _ := payload["__ts_ms"].(float64)
 
 	if tableName == "" {
 		return nil
 	}
+
+	mapping := e.resolveClientMapping(cfg.ClientID)
 
 	action := opToAction(op)
 
@@ -296,6 +339,21 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
 	actor := userName
+	if mapping.ActorField != "" {
+		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
+			actor = extractScalarValue(customActor)
+		} else {
+			// Jika kolom tidak ditemukan di tabel, langsung tempel teks statis yang diketik Admin
+			actor = mapping.ActorField
+		}
+	}
+	if actor == "" && mapping.FallbackActorField != "" {
+		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
+			actor = extractScalarValue(fallbackActor)
+		} else {
+			actor = mapping.FallbackActorField
+		}
+	}
 	if actor == "" {
 		actor = "simrs-system"
 	}
@@ -383,8 +441,8 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
 	}
 
-	log.Printf("✅ [KafkaConsumer] Tersimpan → action=%-8s resource=%s client=%s source_system=%s",
-		action, resource, cfg.ClientID, sourceSystem)
+	log.Printf("✅ [KafkaConsumer] Tersimpan → engine=%-10s action=%-8s resource=%s client=%s source_system=%s",
+		cfg.DBEngine, action, resource, cfg.ClientID, sourceSystem)
 
 	return nil
 }
@@ -406,7 +464,7 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 	candidates := []string{pkField, "ID", "id", "ogc_fid", "_id", "fid"}
 
 	for _, key := range candidates {
-		val, ok := payload[key]
+		val, ok := findFieldInsensitive(payload, key)
 		if !ok || val == nil {
 			continue
 		}
@@ -417,6 +475,47 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 		return rowID
 	}
 	return "unknown"
+}
+
+func findFieldInsensitive(payload map[string]interface{}, field string) (interface{}, bool) {
+	if field == "" {
+		return nil, false
+	}
+
+	if val, ok := payload[field]; ok {
+		return val, true
+	}
+
+	lowerField := strings.ToLower(field)
+	for k, v := range payload {
+		if strings.ToLower(k) == lowerField {
+			return v, true
+		}
+	}
+
+	if after, ok := payload["after"].(map[string]interface{}); ok {
+		if val, ok := after[field]; ok {
+			return val, true
+		}
+		for k, v := range after {
+			if strings.ToLower(k) == lowerField {
+				return v, true
+			}
+		}
+	}
+
+	if before, ok := payload["before"].(map[string]interface{}); ok {
+		if val, ok := before[field]; ok {
+			return val, true
+		}
+		for k, v := range before {
+			if strings.ToLower(k) == lowerField {
+				return v, true
+			}
+		}
+	}
+
+	return nil, false
 }
 
 func extractScalarValue(val interface{}) string {
@@ -468,6 +567,20 @@ func isPrintable(s string) bool {
 	return true
 }
 
+func cleanPayload(p DebeziumOracleMessage) DebeziumOracleMessage {
+	res := make(DebeziumOracleMessage)
+	for k, v := range p {
+		if k == "__op" || k == "__table" || k == "__db" || k == "__schema" || k == "__ts_ms" || k == "__deleted" || k == "__user_name" || k == "__collection" {
+			continue
+		}
+		if k == "op" || k == "table" || k == "db" || k == "schema" || k == "ts_ms" || k == "deleted" || k == "user_name" || k == "collection" {
+			continue
+		}
+		res[k] = v
+	}
+	return res
+}
+
 func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 	skip := map[string]bool{
 		"__op": true, "__table": true, "__db": true, "__schema": true,
@@ -475,14 +588,16 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 		"__scn": true, "__tx_id": true, "__row_id": true,
 		"op": true, "table": true, "db": true, "schema": true,
 		"ts_ms": true, "deleted": true, "user_name": true,
+		"__collection": true, "collection": true,
 	}
 
 	meta := make(map[string]interface{})
 	for k, v := range payload {
-		if skip[k] {
+		lowerK := strings.ToLower(k)
+		if skip[lowerK] || skip[k] {
 			continue
 		}
-		meta[k] = normalizeFieldValue(v)
+		meta[lowerK] = normalizeFieldValue(v)
 	}
 	return meta
 }

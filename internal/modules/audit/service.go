@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -18,15 +17,17 @@ import (
 )
 
 type VerificationResult struct {
-	Status       string  `json:"status"`
-	Message      string  `json:"message"`
-	IsValid      bool    `json:"is_valid"`
-	ExpectedHash string  `json:"expected_hash"`
-	ActualHash   string  `json:"actual_hash"`
-	DBRoot       string  `json:"db_root"`
-	ChainRoot    string  `json:"chain_root"`
-	LogID        string  `json:"log_id"`
-	TxID         *string `json:"blockchain_tx_id,omitempty"`
+	Status             string                      `json:"status"`
+	Message            string                      `json:"message"`
+	IsValid            bool                        `json:"is_valid"`
+	ExpectedHash       string                      `json:"expected_hash"`
+	ActualHash         string                      `json:"actual_hash"`
+	DBRoot             string                      `json:"db_root"`
+	ChainRoot          string                      `json:"chain_root"`
+	LogID              string                      `json:"log_id"`
+	TxID               *string                     `json:"blockchain_tx_id,omitempty"`
+	AgentStatus        string                      `json:"agent_status,omitempty"`
+	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
 type DataVerificationResult struct {
@@ -53,6 +54,7 @@ type PaginationMeta struct {
 type RecentLogItem struct {
 	models.AuditLog
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | unreachable | pending
+	DBEngine        string `json:"db_engine"`
 }
 
 // RecentLogsResult adalah bentuk response baru GetRecentLogs:
@@ -72,11 +74,12 @@ type Service interface {
 	// GetRecentLogsPaginated menggantikan GetRecentLogs lama sebagai entry
 	// point handler dashboard. limit hardcoded 500 di versi lama diganti
 	// page/pageSize. integrityStatus kosong berarti tanpa filter.
-	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error)
+	GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable, dbEngine string, fromTime, toTime *time.Time) (*RecentLogsResult, error)
 
 	GetResourceInventory(clientID string) (interface{}, error)
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error)
 	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
 }
 
@@ -88,11 +91,15 @@ type auditService struct {
 
 type ResourceLogVerification struct {
 	LogID           string `json:"log_id"`
+	Resource        string `json:"resource"` // Menyimpan nama/id resource
 	Action          string `json:"action"`
+	LastAction      string `json:"last_action"` // Alias untuk kompabilitas frontend
 	Actor           string `json:"actor"`
 	Timestamp       string `json:"timestamp"`
+	LastUpdatedAt   string `json:"last_updated_at"` // Alias untuk kompabilitas frontend
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
+	ChainStatus     string `json:"chain_status"`     // Alias untuk kompabilitas frontend
 	IsLatest        bool   `json:"is_latest"`
 
 	// AgentStatus HANYA relevan untuk log_id = log terbaru pada resource ini
@@ -171,10 +178,29 @@ func formatFabricTimestamp(raw string) string {
 	return formatPgTimestamp(t)
 }
 
+func normalizeDBEngine(engine string) string {
+	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "mongo", "mongodb":
+		return "mongodb"
+	case "mysql", "mariadb":
+		return "mysql"
+	case "sqlserver", "sql_server", "mssql", "sql server":
+		return "sqlserver"
+	case "oracle":
+		return "oracle"
+	default:
+		return ""
+	}
+}
+
 type RangeItemResult struct {
-	LogID        string `json:"log_id"`
-	VerifyStatus string `json:"verify_status"`
-	Message      string `json:"message,omitempty"`
+	LogID              string                      `json:"log_id"`
+	VerifyStatus       string                      `json:"verify_status"`
+	Message            string                      `json:"message,omitempty"`
+	AgentStatus        string                      `json:"agent_status,omitempty"`
+	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
 // Implementasi
@@ -204,6 +230,8 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 		} else {
 			item.VerifyStatus = verifyResult.Status
 			item.Message = verifyResult.Message
+			item.AgentStatus = verifyResult.AgentStatus
+			item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
 		}
 
 		switch item.VerifyStatus {
@@ -374,14 +402,35 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		successMsg += " (diverifikasi via metode lama — log ini di-anchor sebelum perbaikan Merkle proof)"
 	}
 
+	agentStatus := "skipped_historical"
+	var agentDiscrepancies []agentverifier.Discrepancy
+
+	latestLog, latestErr := s.repo.GetLatestLogByResource(auditLog.Resource, clientID)
+	if latestErr == nil && latestLog != nil && latestLog.LogID == auditLog.LogID {
+		agentStatus = "not_configured"
+		agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+		if agentErr != nil {
+			agentStatus = "unreachable"
+		} else if agentResult.AgentUsed {
+			if agentResult.IsMatch {
+				agentStatus = "matched"
+			} else {
+				agentStatus = "mismatch"
+				agentDiscrepancies = agentResult.Discrepancies
+			}
+		}
+	}
+
 	return &VerificationResult{
-		Status:       "success",
-		Message:      successMsg,
-		IsValid:      true,
-		LogID:        auditLog.LogID,
-		ExpectedHash: auditLog.HashValue,
-		DBRoot:       reconstructedRoot,
-		TxID:         auditLog.BlockchainTxID,
+		Status:             "success",
+		Message:            successMsg,
+		IsValid:            true,
+		LogID:              auditLog.LogID,
+		ExpectedHash:       auditLog.HashValue,
+		DBRoot:             reconstructedRoot,
+		TxID:               auditLog.BlockchainTxID,
+		AgentStatus:        agentStatus,
+		AgentDiscrepancies: agentDiscrepancies,
 	}, nil
 }
 
@@ -532,7 +581,7 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 //     filter ini butuh full-scan + verifikasi semua log ANCHORED pada
 //     setiap request, yang mahal. Field "note" memberi tahu API consumer
 //     secara eksplisit.
-func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus string) (*RecentLogsResult, error) {
+func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize int, integrityStatus, sortOrder, sourceTable, dbEngine string, fromTime, toTime *time.Time) (*RecentLogsResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -544,6 +593,36 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	}
 
 	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true}
+	clientDBEngine, err := s.repo.GetClientDBEngine(clientID)
+	if err != nil {
+		return nil, err
+	}
+	normalizedClientDBEngine := normalizeDBEngine(clientDBEngine)
+	normalizedFilterDBEngine := normalizeDBEngine(dbEngine)
+
+	if strings.TrimSpace(dbEngine) != "" && normalizedFilterDBEngine == "" {
+		return &RecentLogsResult{
+			Data: []RecentLogItem{},
+			Pagination: PaginationMeta{
+				Page:       page,
+				PageSize:   pageSize,
+				TotalItems: 0,
+				TotalPages: 1,
+			},
+		}, nil
+	}
+
+	if normalizedFilterDBEngine != "" && normalizedClientDBEngine != normalizedFilterDBEngine {
+		return &RecentLogsResult{
+			Data: []RecentLogItem{},
+			Pagination: PaginationMeta{
+				Page:       page,
+				PageSize:   pageSize,
+				TotalItems: 0,
+				TotalPages: 1,
+			},
+		}, nil
+	}
 
 	// GetRecentLogsPaginated menggantikan limit-500 lama dengan pagination
 	// sesungguhnya (page/page_size), plus filter opsional integrity_status.
@@ -564,7 +643,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 	// difilter. (Catatan: implementasi loop filter saat ini masih dinonaktifkan/
 	// commented — di luar scope perubahan ini.)
 	if integrityStatus == "" {
-		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize)
+		logs, total, err := s.repo.GetRecentLogsPage(clientID, page, pageSize, sortOrder, sourceTable, fromTime, toTime)
 		if err != nil {
 			return nil, err
 		}
@@ -574,6 +653,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 			items = append(items, RecentLogItem{
 				AuditLog:        l,
 				IntegrityStatus: "not_checked",
+				DBEngine:        normalizedClientDBEngine,
 			})
 		}
 
@@ -726,6 +806,21 @@ func (s *auditService) GetLogsByResource(resource, clientID string) ([]models.Au
 	return s.repo.GetLogsByResource(resource, clientID)
 }
 
+func (s *auditService) GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error) {
+	logs, err := s.repo.GetTableResources(tableName, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]ResourceLogVerification, 0, len(logs))
+	for _, auditLog := range logs {
+		item := s.classifyResourceLog(auditLog, false)
+		results = append(results, item)
+	}
+
+	return results, nil
+}
+
 func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 	result := make([]crypto.MerkleProofData, 0, len(proofs))
 	for _, p := range proofs {
@@ -749,11 +844,15 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 
 	item := ResourceLogVerification{
 		LogID:           auditLog.LogID,
+		Resource:        auditLog.Resource,
 		Action:          auditLog.Action,
+		LastAction:      auditLog.Action,
 		Actor:           auditLog.Actor,
 		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
+		LastUpdatedAt:   formatPgTimestamp(auditLog.Timestamp),
 		HashValue:       auditLog.HashValue,
 		IntegrityStatus: baseStatus,
+		ChainStatus:     baseStatus,
 		IsLatest:        isLatest,
 		AgentStatus:     "skipped_historical",
 	}
@@ -780,12 +879,16 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 	switch {
 	case baseStatus == "tampered":
 		item.IntegrityStatus = "tampered"
+		item.ChainStatus = "tampered"
 	case baseStatus == "unreachable" || item.AgentStatus == "unreachable":
 		item.IntegrityStatus = "unreachable"
+		item.ChainStatus = "unreachable"
 	case baseStatus == "pending":
 		item.IntegrityStatus = "pending"
+		item.ChainStatus = "pending"
 	default:
 		item.IntegrityStatus = "valid"
+		item.ChainStatus = "valid"
 	}
 
 	return item

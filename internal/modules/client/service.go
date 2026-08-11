@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 
 	"go-blockchain-api/internal/models"
 	"golang.org/x/crypto/bcrypt"
@@ -17,8 +18,10 @@ type Service interface {
 	GetDashboardSummary() (DashboardSummary, error)
 	ToggleClientStatus(id string) (*models.Client, error)
 	DeleteClient(id string) error
+	GetUsers() ([]AdminUserWithClient, error)
 	GetUsersByClient(clientID string) ([]models.User, error)
 	AddUserToClient(clientID string, username, password string) (*models.User, error)
+	AddUser(clientID, username, password, fullName, role string) (*models.User, error)
 	RemoveUser(userID string) error
 }
 
@@ -28,8 +31,14 @@ type KafkaConfigWithClient struct {
 }
 
 type DashboardSummary struct {
-	TotalClients  int64 `json:"total_clients"`
-	ActiveStreams int64 `json:"active_streams"`
+	TotalClients      int64 `json:"total_clients"`
+	ActiveClients     int64 `json:"active_clients"`
+	InactiveClients   int64 `json:"inactive_clients"`
+	PendingClients    int64 `json:"pending_clients"`
+	ConfiguredClients int64 `json:"configured_clients"`
+	TotalUsers        int64 `json:"total_users"`
+	TotalStreams      int64 `json:"total_streams"`
+	ActiveStreams     int64 `json:"active_streams"`
 }
 
 type clientService struct {
@@ -122,15 +131,42 @@ func (s *clientService) GetDashboardSummary() (DashboardSummary, error) {
 	}
 
 	var activeStreams int64
+	configuredClientIDs := make(map[string]bool)
 	for _, cfg := range configs {
 		if cfg.IsActive {
 			activeStreams++
 		}
+		configuredClientIDs[cfg.ClientID] = true
+	}
+
+	var activeClients int64
+	var inactiveClients int64
+	var pendingClients int64
+	for _, client := range clients {
+		switch client.Status {
+		case "active":
+			activeClients++
+		case "pending_setup":
+			pendingClients++
+		default:
+			inactiveClients++
+		}
+	}
+
+	totalUsers, err := s.repo.CountUsers()
+	if err != nil {
+		return DashboardSummary{}, err
 	}
 
 	return DashboardSummary{
-		TotalClients:  int64(len(clients)),
-		ActiveStreams: activeStreams,
+		TotalClients:      int64(len(clients)),
+		ActiveClients:     activeClients,
+		InactiveClients:   inactiveClients,
+		PendingClients:    pendingClients,
+		ConfiguredClients: int64(len(configuredClientIDs)),
+		TotalUsers:        totalUsers,
+		TotalStreams:      int64(len(configs)),
+		ActiveStreams:     activeStreams,
 	}, nil
 }
 
@@ -157,6 +193,10 @@ func (s *clientService) DeleteClient(id string) error {
 	return s.repo.DeleteClient(id)
 }
 
+func (s *clientService) GetUsers() ([]AdminUserWithClient, error) {
+	return s.repo.GetUsers()
+}
+
 func (s *clientService) GetUsersByClient(clientID string) ([]models.User, error) {
 	_, err := s.repo.GetClientByID(clientID)
 	if err != nil {
@@ -166,9 +206,39 @@ func (s *clientService) GetUsersByClient(clientID string) ([]models.User, error)
 }
 
 func (s *clientService) AddUserToClient(clientID string, username, password string) (*models.User, error) {
-	_, err := s.repo.GetClientByID(clientID)
-	if err != nil {
-		return nil, err
+	return s.AddUser(clientID, username, password, "", "Auditor")
+}
+
+func (s *clientService) AddUser(clientID, username, password, fullName, role string) (*models.User, error) {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		role = "Auditor"
+	}
+	if !strings.EqualFold(role, "admin") && !strings.EqualFold(role, "auditor") {
+		return nil, errors.New("invalid_role")
+	}
+	if strings.EqualFold(role, "admin") {
+		role = "admin"
+	} else {
+		role = "Auditor"
+	}
+
+	clientID = strings.TrimSpace(clientID)
+	if role == "Auditor" {
+		if clientID == "" {
+			return nil, errors.New("client_required")
+		}
+		_, err := s.repo.GetClientByID(clientID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		clientID = ""
+	}
+
+	var userClientID *string
+	if clientID != "" {
+		userClientID = &clientID
 	}
 
 	exists, err := s.repo.CheckUsernameExists(username)
@@ -185,10 +255,11 @@ func (s *clientService) AddUserToClient(clientID string, username, password stri
 	}
 
 	newUser := &models.User{
-		ClientID: clientID,
+		ClientID: userClientID,
+		FullName: fullName,
 		Username: username,
 		Password: string(hashedPassword),
-		Role:     "Auditor",
+		Role:     role,
 	}
 
 	if err := s.repo.CreateUser(newUser); err != nil {

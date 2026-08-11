@@ -17,7 +17,11 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.GET("/summary", h.GetDashboardSummary)
 		adminRoutes.DELETE("/kafka-config/:id", h.DeleteKafkaConfig)
 		adminRoutes.PATCH("/clients/:id/toggle", h.ToggleClientStatus)
+		adminRoutes.PUT("/clients/:id", h.UpdateClient)
+		adminRoutes.GET("/clients/:id/detail", h.GetClientDetail)
 		adminRoutes.DELETE("/clients/:id", h.DeleteClient)
+		adminRoutes.GET("/users", h.ListUsers)
+		adminRoutes.POST("/users", h.CreateUser)
 		adminRoutes.GET("/clients/:id/users", h.GetClientUsers)
 		adminRoutes.POST("/clients/:id/users", h.CreateClientUser)
 		adminRoutes.DELETE("/users/:id", h.DeleteClientUser)
@@ -28,5 +32,9 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.DELETE("/clients/:id/agent-config", h.DeleteAgentConfig)
 		adminRoutes.GET("/clients/:id/agent-ping", h.PingAgentConfig)
 	}
-}
 
+	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)
+	routerGroup.POST("/agent/telemetry", h.ProcessTelemetry)
+	routerGroup.POST("/agent/tailscale-key", h.GenerateTailscaleKey)
+	routerGroup.GET("/install.sh", h.ServeInstallScript)
+}

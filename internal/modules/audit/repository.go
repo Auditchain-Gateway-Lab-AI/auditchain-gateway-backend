@@ -1,11 +1,11 @@
 package audit
 
-import "strings"
-
 import (
-	"go-blockchain-api/internal/models"
-
+	"errors"
+	"strings"
 	"time"
+
+	"go-blockchain-api/internal/models"
 
 	"gorm.io/gorm"
 )
@@ -17,8 +17,9 @@ type AuditRepository interface {
 	GetProofsByHash(hash string) ([]models.MerkleProof, error)
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
+	GetClientDBEngine(clientID string) (string, error)
 
-	GetRecentLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, int64, error)
+	GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string, fromTime, toTime *time.Time) ([]models.AuditLog, int64, error)
 	CountAnchoredLogs(clientID string) (int64, error)
 	GetAnchoredLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, error)
 
@@ -26,6 +27,7 @@ type AuditRepository interface {
 	GetClientTables(clientID string) ([]models.ClientTable, error)
 	UpsertClientTable(clientID, tableName, action, actor string, ts time.Time) error
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
+	GetTableResources(tableName, clientID string) ([]models.AuditLog, error)
 	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
 }
 
@@ -107,20 +109,73 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 	return &log, err
 }
 
+func (r *auditRepoImpl) GetClientDBEngine(clientID string) (string, error) {
+	var kafkaCfg models.ClientKafkaConfig
+	err := r.db.Where("client_id = ?", clientID).First(&kafkaCfg).Error
+	if err == nil && strings.TrimSpace(kafkaCfg.DBEngine) != "" {
+		return kafkaCfg.DBEngine, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	var agentCfg models.AgentConfig
+	err = r.db.Where("client_id = ?", clientID).First(&agentCfg).Error
+	if err == nil && strings.TrimSpace(agentCfg.DBEngine) != "" {
+		return agentCfg.DBEngine, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+
+	return "", nil
+}
+
 // GetRecentLogsPage mengembalikan satu halaman log terbaru (tanpa filter
 // integrity_status) beserta total count untuk keperluan pagination di
-// dashboard.
-func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, int64, error) {
+// dashboard. Mendukung sortOrder (asc/desc), filter sourceTable, serta rentang dari/ke.
+func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string, fromTime, toTime *time.Time) ([]models.AuditLog, int64, error) {
 	var logs []models.AuditLog
 	var total int64
 
-	if err := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID).Count(&total).Error; err != nil {
+	countQuery := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID)
+	if sourceTable != "" {
+		countQuery = countQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
+	}
+	if fromTime != nil && toTime != nil {
+		f := *fromTime
+		t := *toTime
+		if f.After(t) {
+			f, t = t, f
+		}
+		countQuery = countQuery.Where("timestamp >= ? AND timestamp <= ?", f, t)
+	}
+
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
+	orderClause := "timestamp desc"
+	if sortOrder == "asc" {
+		orderClause = "timestamp asc"
+	}
+
 	offset := (page - 1) * pageSize
-	err := r.db.Where("client_id = ?", clientID).
-		Order("timestamp desc").
+	dataQuery := r.db.Where("client_id = ?", clientID)
+	if sourceTable != "" {
+		dataQuery = dataQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
+	}
+	if fromTime != nil && toTime != nil {
+		f := *fromTime
+		t := *toTime
+		if f.After(t) {
+			f, t = t, f
+		}
+		dataQuery = dataQuery.Where("timestamp >= ? AND timestamp <= ?", f, t)
+	}
+
+	err := dataQuery.
+		Order(orderClause).
 		Limit(pageSize).
 		Offset(offset).
 		Find(&logs).Error
@@ -167,6 +222,18 @@ func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.A
 	var logs []models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
 		Order("timestamp asc").Find(&logs).Error
+	return logs, err
+}
+
+func (r *auditRepoImpl) GetTableResources(tableName, clientID string) ([]models.AuditLog, error) {
+	var logs []models.AuditLog
+	// Fetch the latest log for each resource in the table
+	err := r.db.Raw(`
+		SELECT DISTINCT ON (resource) * 
+		FROM audit_logs 
+		WHERE client_id = ? AND (resource = ? OR resource LIKE ?) 
+		ORDER BY resource, timestamp DESC
+	`, clientID, tableName, tableName+":%").Scan(&logs).Error
 	return logs, err
 }
 

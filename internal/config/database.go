@@ -36,5 +36,9 @@ func ConnectDB() *gorm.DB {
 	}
 
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
+	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {
+		log.Printf("Gagal mengubah kolom users.client_id menjadi nullable: %v", err)
+	}
+
 	return db
 }

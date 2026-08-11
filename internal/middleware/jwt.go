@@ -51,19 +51,33 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
+		roleVal, hasRole := claims["role"]
+		roleStr, okRole := roleVal.(string)
+		isAdmin := hasRole && okRole && strings.EqualFold(roleStr, "admin")
+
 		clientIDVal, ok := claims["client_id"]
 		clientID, okString := clientIDVal.(string)
-		if !ok || !okString || clientID == "" {
+		if (!ok || !okString || clientID == "") && !isAdmin {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token tidak memiliki identitas client yang valid."})
 			c.Abort()
 			return
 		}
 
-		c.Set("client_id", clientID)
-		if roleVal, hasRole := claims["role"]; hasRole {
-			if roleStr, okRole := roleVal.(string); okRole {
-				c.Set("role", roleStr)
+		if clientID != "" {
+			c.Set("client_id", clientID)
+		}
+		if userIDVal, hasUserID := claims["user_id"]; hasUserID {
+			if userIDStr, okUserID := userIDVal.(string); okUserID {
+				c.Set("user_id", userIDStr)
 			}
+		}
+		if usernameVal, hasUsername := claims["username"]; hasUsername {
+			if usernameStr, okUsername := usernameVal.(string); okUsername {
+				c.Set("username", usernameStr)
+			}
+		}
+		if hasRole && okRole {
+			c.Set("role", roleStr)
 		}
 		c.Next()
 	}
@@ -125,6 +139,16 @@ func AdminAuth() gin.HandlerFunc {
 			c.Set("client_id", clientID)
 		}
 
+		if userIDVal, hasUserID := claims["user_id"]; hasUserID {
+			if userIDStr, okUserID := userIDVal.(string); okUserID {
+				c.Set("user_id", userIDStr)
+			}
+		}
+		if usernameVal, hasUsername := claims["username"]; hasUsername {
+			if usernameStr, okUsername := usernameVal.(string); okUsername {
+				c.Set("username", usernameStr)
+			}
+		}
 		c.Set("role", roleStr)
 		c.Next()
 	}

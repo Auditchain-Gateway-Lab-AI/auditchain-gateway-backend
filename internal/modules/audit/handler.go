@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -121,12 +122,14 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
 			"data": gin.H{
-				"log_id":           result.LogID,
-				"hash_value":       result.ExpectedHash,
-				"merkle_root":      result.DBRoot,
-				"blockchain_tx_id": result.TxID,
-				"is_valid":         result.IsValid,
-				"message":          result.Message,
+				"log_id":              result.LogID,
+				"hash_value":          result.ExpectedHash,
+				"merkle_root":         result.DBRoot,
+				"blockchain_tx_id":    result.TxID,
+				"is_valid":            result.IsValid,
+				"message":             result.Message,
+				"agent_status":        result.AgentStatus,
+				"agent_discrepancies": result.AgentDiscrepancies,
 			},
 		})
 	}
@@ -209,8 +212,28 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 	}
 
 	integrityStatus := strings.TrimSpace(c.Query("integrity_status"))
+	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+	sourceTable := strings.TrimSpace(c.Query("source_table"))
+	dbEngine := strings.TrimSpace(c.Query("db_engine"))
+	fromStr := strings.TrimSpace(c.Query("from"))
+	toStr := strings.TrimSpace(c.Query("to"))
 
-	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus)
+	var fromTime, toTime *time.Time
+	if fromStr != "" {
+		if t, err := parseTimeRobust(fromStr); err == nil {
+			fromTime = &t
+		}
+	}
+	if toStr != "" {
+		if t, err := parseTimeRobust(toStr); err == nil {
+			toTime = &t
+		}
+	}
+
+	result, err := h.Service.GetRecentLogsPaginated(clientID, page, pageSize, integrityStatus, sortOrder, sourceTable, dbEngine, fromTime, toTime)
 	if err != nil {
 		if err.Error() == "invalid_integrity_status" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -242,7 +265,56 @@ func (h *Handler) VerifyResourceHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.Service.VerifyResourceHistory(c.Param("resource"), clientID)
+
+	resourceParam := c.Param("resource")
+
+	// Deteksi jika param adalah nama tabel (tidak mengandung ':')
+	if !strings.Contains(resourceParam, ":") {
+		// Ambil semua resource (baris terbaru) di dalam tabel ini
+		resources, err := h.Service.GetTableResources(resourceParam, clientID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data baris tabel."})
+			return
+		}
+
+		// Agregasi status tabel
+		hasTampered := false
+		hasUnreachable := false
+		hasPending := false
+		for _, res := range resources {
+			switch res.ChainStatus {
+			case "tampered":
+				hasTampered = true
+			case "unreachable":
+				hasUnreachable = true
+			case "pending":
+				hasPending = true
+			}
+		}
+
+		chainStatus := "valid"
+		switch {
+		case hasTampered:
+			chainStatus = "tampered"
+		case hasUnreachable:
+			chainStatus = "unreachable"
+		case hasPending:
+			chainStatus = "pending"
+		}
+
+		result := &ResourceChainResult{
+			Resource:    resourceParam,
+			ChainStatus: chainStatus,
+			TotalLogs:   len(resources),
+			Logs:        resources,
+		}
+
+		// Gunakan HTTP 200 karena ini adalah tampilan daftar, kecuali jika semuanya conflict
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	result, err := h.Service.VerifyResourceHistory(resourceParam, clientID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Riwayat resource tidak ditemukan."})
 		return
@@ -272,21 +344,39 @@ func (h *Handler) GetLogsByResource(c *gin.Context) {
 }
 
 func parseTimeRobust(timeStr string) (time.Time, error) {
-	if len(timeStr) > 10 {
-		if timeStr[10] == ' ' {
-			timeStr = timeStr[:10] + "T" + timeStr[11:]
+	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return time.Time{}, fmt.Errorf("empty time string")
+	}
+
+	if len(timeStr) > 10 && timeStr[10] == ' ' {
+		timeStr = timeStr[:10] + "T" + timeStr[11:]
+	}
+
+	// Double space/plus replacement
+	normalized := strings.ReplaceAll(timeStr, " ", "+")
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02T15:04:05.999999999Z07",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, l := range layouts {
+		if t, err := time.Parse(l, normalized); err == nil {
+			return t, nil
+		}
+		if t, err := time.Parse(l, timeStr); err == nil {
+			return t, nil
 		}
 	}
-
-	timeStr = strings.ReplaceAll(timeStr, " ", "+")
-
-	t, err := time.Parse(time.RFC3339, timeStr)
-	if err == nil {
-		return t, nil
-	}
-
-	customLayout := "2006-01-02T15:04:05.999999999Z07"
-	return time.Parse(customLayout, timeStr)
+	return time.Time{}, fmt.Errorf("cannot parse time: %s", timeStr)
 }
 
 func (h *Handler) VerifyLogRange(c *gin.Context) {
