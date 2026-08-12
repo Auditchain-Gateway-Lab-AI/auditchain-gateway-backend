@@ -345,23 +345,24 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
 	actor := userName
+	actorFound := false
+
 	if mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
 			actor = extractScalarValue(customActor)
-		} else {
-			// Jika kolom tidak ditemukan di tabel, langsung tempel teks statis yang diketik Admin
-			actor = mapping.ActorField
+			actorFound = true
 		}
 	}
-	if actor == "" && mapping.FallbackActorField != "" {
+
+	if !actorFound && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
 			actor = extractScalarValue(fallbackActor)
-		} else {
-			actor = mapping.FallbackActorField
+			actorFound = true
 		}
 	}
-	if actor == "" {
-		actor = "simrs-system"
+
+	if !actorFound && actor == "" {
+		actor = "Unknown"
 	}
 
 	var timestamp time.Time
