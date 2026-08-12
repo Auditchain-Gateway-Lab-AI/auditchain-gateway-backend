@@ -35,6 +35,12 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.GET("/clients/:id/agent-ping", h.PingAgentConfig)
 	}
 
+	// Dashboard Routes (Untuk Client yang login)
+	dashRoutes := routerGroup.Group("/dashboard", middleware.JWTAuth())
+	{
+		dashRoutes.GET("/my-users", h.GetMyUsersCDC)
+	}
+
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)
 	routerGroup.POST("/agent/telemetry", h.ProcessTelemetry)
 	routerGroup.POST("/agent/tailscale-key", h.GenerateTailscaleKey)

@@ -851,6 +851,48 @@ func (h *Handler) GetClientUsersCDC(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *Handler) GetMyUsersCDC(c *gin.Context) {
+	clientIDVal, exists := c.Get("client_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client tidak ditemukan pada token."})
+		return
+	}
+	clientID, ok := clientIDVal.(string)
+	if !ok || clientID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client pada token tidak valid."})
+		return
+	}
+
+	var users []models.ClientUser
+	if err := h.DB.Where("client_id = ?", clientID).Order("last_seen_at desc").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data user Anda"})
+		return
+	}
+
+	type UserResponse struct {
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		FullName   string    `json:"full_name"`
+		LastSeenAt time.Time `json:"last_seen_at"`
+	}
+
+	var response []UserResponse
+	for _, u := range users {
+		response = append(response, UserResponse{
+			Username:   u.Username,
+			Email:      u.Email,
+			FullName:   u.FullName,
+			LastSeenAt: u.LastSeenAt,
+		})
+	}
+
+	// Tangani array kosong agar return [] bukan null
+	if response == nil {
+		response = []UserResponse{}
+	}
+
+	c.JSON(http.StatusOK, response)
+}
 type UpdateUserTableRequest struct {
 	UserTableName  string `json:"user_table_name" binding:"required"`
 	UserColumnName string `json:"user_column_name" binding:"required"`
