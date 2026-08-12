@@ -24,7 +24,9 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.POST("/users", h.CreateUser)
 		adminRoutes.GET("/clients/:id/users", h.GetClientUsers)
 		adminRoutes.POST("/clients/:id/users", h.CreateClientUser)
+		adminRoutes.PUT("/clients/:id/user-table-config", h.UpdateUserTableConfig)
 		adminRoutes.DELETE("/users/:id", h.DeleteClientUser)
+		adminRoutes.GET("/client-cdc-users", h.GetClientUsersCDC)
 
 		// Agent Config Routes
 		adminRoutes.POST("/clients/:id/agent-config", h.CreateAgentConfig)

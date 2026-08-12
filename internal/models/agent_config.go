@@ -28,6 +28,10 @@ type AgentConfig struct {
 	DBTables        string `gorm:"type:text" json:"db_tables"`                // Daftar tabel yang dimonitor (comma-separated)
 	ConnectorStatus string `gorm:"type:varchar(50)" json:"connector_status"`  // running, skipped, failed_xxx
 
+	// Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)
+	UserTableName  string `gorm:"type:varchar(100)" json:"user_table_name"`
+	UserColumnName string `gorm:"type:varchar(100)" json:"user_column_name"`
+
 	// Bearer token untuk autentikasi — harus cocok dengan AGENT_VERIFY_TOKEN di Agent.
 	VerifyToken string `gorm:"type:varchar(255)" json:"-"`
 

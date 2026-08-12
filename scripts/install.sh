@@ -750,6 +750,58 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             fi
         fi
 
+        fi
+        
+        # ------------------------------------------------------------------------------
+        # 5.5. DETEKSI TABEL USER
+        # ------------------------------------------------------------------------------
+        echo -e "\n${BLUE}🔍 Mencoba mendeteksi tabel user untuk sinkronisasi otomatis...${NC}"
+        DETECTED_USER_TABLE=""
+        DETECTED_USER_COL=""
+
+        if [ ${#TABLE_LIST[@]} -gt 0 ]; then
+            for tbl in "${TABLE_LIST[@]}"; do
+                if echo "$tbl" | grep -qiE "user|account|akun|pengguna|member"; then
+                    DETECTED_USER_TABLE="$tbl"
+                    break
+                fi
+            done
+        fi
+
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            echo -e "${GREEN}✓ Tabel user terdeteksi: ${DETECTED_USER_TABLE}${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
+                if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
+                RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                while IFS= read -r col; do
+                    if echo "$col" | grep -qiE "username|email|nama|login|name"; then
+                        DETECTED_USER_COL="$col"
+                        break
+                    fi
+                done <<< "$RAW_COLS"
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
+                if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
+                RAW_COLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW COLUMNS FROM ${TBL_BARE}" 2>/dev/null | awk '{print $1}')
+                while IFS= read -r col; do
+                    if echo "$col" | grep -qiE "username|email|nama|login|name"; then
+                        DETECTED_USER_COL="$col"
+                        break
+                    fi
+                done <<< "$RAW_COLS"
+            fi
+
+            if [ -n "$DETECTED_USER_COL" ]; then
+                echo -e "${GREEN}✓ Kolom username terdeteksi: ${DETECTED_USER_COL}${NC}"
+            else
+                echo -e "${YELLOW}Kolom username tidak ditemukan otomatis, set default ke 'username'${NC}"
+                DETECTED_USER_COL="username"
+            fi
+        else
+            echo -e "${YELLOW}Tidak ditemukan tabel user secara otomatis.${NC}"
+        fi
+
         CHOSEN_TABLES=""
         if [ ${#TABLE_LIST[@]} -gt 0 ]; then
             if command -v whiptail >/dev/null 2>&1; then
@@ -819,6 +871,15 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             fi
         else
             read -p "Masukkan Nama Tabel/Koleksi yang ingin di-audit (contoh: public.audit_trail atau targetdb.koleksi): " CHOSEN_TABLES < /dev/tty
+        fi
+
+        # Otomatis sertakan tabel user ke dalam CHOSEN_TABLES agar disedot Debezium
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
+                CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
+                CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
+                echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
+            fi
         fi
 
         SELECTED_TABLES="$CHOSEN_TABLES"
@@ -1223,7 +1284,9 @@ PAYLOAD=$(cat <<EOF
   "db_engine": "${SELECTED_DB_ENGINE}",
   "db_name": "${SELECTED_DB_NAME}",
   "db_tables": "${SELECTED_TABLES}",
-  "connector_status": "${CONNECTOR_SETUP_STATUS}"
+  "connector_status": "${CONNECTOR_SETUP_STATUS}",
+  "user_table_name": "${DETECTED_USER_TABLE}",
+  "user_column_name": "${DETECTED_USER_COL}"
 }
 EOF
 )

@@ -327,6 +327,12 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		return nil
 	}
 
+	var agentCfg models.AgentConfig
+	e.DB.Where("client_id = ?", cfg.ClientID).First(&agentCfg)
+	if agentCfg.UserTableName != "" && strings.Contains(tableName, agentCfg.UserTableName) {
+		e.processClientUserCDC(payload, cfg, tableName, agentCfg)
+	}
+
 	mapping := e.resolveClientMapping(cfg.ClientID)
 
 	action := opToAction(op)
@@ -658,5 +664,67 @@ func getDialer(cfg models.ClientKafkaConfig) *kafka.Dialer {
 		Resolver: &mapResolver{
 			overrides: overrides,
 		},
+	}
+}
+
+func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.ClientKafkaConfig, tableName string, agentCfg models.AgentConfig) {
+	if agentCfg.UserColumnName == "" {
+		return
+	}
+
+	// Ambil username
+	usernameRaw, ok := findFieldInsensitive(payload, agentCfg.UserColumnName)
+	if !ok || usernameRaw == nil {
+		return
+	}
+	username := extractScalarValue(usernameRaw)
+	if username == "" {
+		return
+	}
+
+	// Coba cari email dan fullname jika ada
+	email := ""
+	if emailRaw, ok := findFieldInsensitive(payload, "email"); ok {
+		email = extractScalarValue(emailRaw)
+	}
+	
+	fullName := ""
+	if fullNameRaw, ok := findFieldInsensitive(payload, "name"); ok {
+		fullName = extractScalarValue(fullNameRaw)
+	} else if fullNameRaw, ok := findFieldInsensitive(payload, "nama"); ok {
+		fullName = extractScalarValue(fullNameRaw)
+	} else if fullNameRaw, ok := findFieldInsensitive(payload, "full_name"); ok {
+		fullName = extractScalarValue(fullNameRaw)
+	}
+
+	rawJSON, _ := json.Marshal(payload)
+
+	var clientUser models.ClientUser
+	err := e.DB.Where("client_id = ? AND username = ?", cfg.ClientID, username).First(&clientUser).Error
+	if err != nil {
+		// Insert
+		newUser := models.ClientUser{
+			ClientID:    cfg.ClientID,
+			Username:    username,
+			Email:       email,
+			FullName:    fullName,
+			SourceTable: tableName,
+			RawData:     string(rawJSON),
+			LastSeenAt:  time.Now(),
+		}
+		e.DB.Create(&newUser)
+	} else {
+		// Update
+		updates := map[string]interface{}{
+			"last_seen_at": time.Now(),
+			"raw_data":     string(rawJSON),
+		}
+		if email != "" {
+			updates["email"] = email
+		}
+		if fullName != "" {
+			updates["full_name"] = fullName
+		}
+		e.DB.Model(&clientUser).Updates(updates)
 	}
 }
