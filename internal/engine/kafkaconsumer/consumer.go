@@ -361,6 +361,18 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		}
 	}
 
+	// Auto-detect common actor columns jika admin tidak mensettingnya
+	if !actorFound {
+		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author"}
+		for _, field := range commonFields {
+			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
+				actor = extractScalarValue(autoActor)
+				actorFound = true
+				break
+			}
+		}
+	}
+
 	if !actorFound && actor == "" {
 		actor = "Unknown"
 	}
