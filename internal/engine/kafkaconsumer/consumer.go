@@ -595,6 +595,14 @@ func cleanPayload(p DebeziumOracleMessage) DebeziumOracleMessage {
 		if k == "op" || k == "table" || k == "db" || k == "schema" || k == "ts_ms" || k == "deleted" || k == "user_name" || k == "collection" {
 			continue
 		}
+		
+		// Redact sensitive fields
+		lowerK := strings.ToLower(k)
+		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
+			res[k] = "[REDACTED]"
+			continue
+		}
+
 		res[k] = v
 	}
 	return res
@@ -616,6 +624,13 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 		if skip[lowerK] || skip[k] {
 			continue
 		}
+
+		// Redact sensitive fields
+		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
+			meta[lowerK] = "[REDACTED]"
+			continue
+		}
+
 		meta[lowerK] = normalizeFieldValue(v)
 	}
 	return meta
