@@ -741,17 +741,14 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                     [ -n "$line" ] && TABLE_LIST+=("$line")
                 done <<< "$RAW_TBLS"
             fi
-        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-            RAW_TBLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW TABLES" 2>/dev/null || true)
-            if [ -n "$RAW_TBLS" ]; then
-                while IFS= read -r line; do
-                    [ -n "$line" ] && TABLE_LIST+=("${TARGET_DB}.${line}")
-                done <<< "$RAW_TBLS"
-            fi
-        fi
-
-        fi
-        
+		elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+			RAW_TBLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW TABLES" 2>/dev/null || true)
+			if [ -n "$RAW_TBLS" ]; then
+				while IFS= read -r line; do
+					[ -n "$line" ] && TABLE_LIST+=("${TARGET_DB}.${line}")
+				done <<< "$RAW_TBLS"
+			fi
+		fi
         # ------------------------------------------------------------------------------
         # 5.5. DETEKSI TABEL USER
         # ------------------------------------------------------------------------------
