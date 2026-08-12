@@ -810,10 +810,11 @@ func (h *Handler) GetClientUsersCDC(c *gin.Context) {
 
 	// Kelompokkan per client
 	type UserResponse struct {
-		Username   string    `json:"username"`
-		Email      string    `json:"email"`
-		FullName   string    `json:"full_name"`
-		LastSeenAt time.Time `json:"last_seen_at"`
+		Username    string    `json:"username"`
+		Email       string    `json:"email"`
+		FullName    string    `json:"full_name"`
+		SourceTable string    `json:"source_table"`
+		LastSeenAt  time.Time `json:"last_seen_at"`
 	}
 	type ClientUsersResponse struct {
 		ClientID    string         `json:"client_id"`
@@ -834,10 +835,11 @@ func (h *Handler) GetClientUsersCDC(c *gin.Context) {
 			}
 		}
 		clientMap[u.ClientID].Users = append(clientMap[u.ClientID].Users, UserResponse{
-			Username:   u.Username,
-			Email:      u.Email,
-			FullName:   u.FullName,
-			LastSeenAt: u.LastSeenAt,
+			Username:    u.Username,
+			Email:       u.Email,
+			FullName:    u.FullName,
+			SourceTable: u.SourceTable,
+			LastSeenAt:  u.LastSeenAt,
 		})
 	}
 
