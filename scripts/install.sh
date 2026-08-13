@@ -927,9 +927,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
                 if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
                     echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
-                    echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
+                    echo "# AuditChain - Allow Debezium Docker container & Host Scripts" >> "$PG_HBA"
                     echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
-                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (172.16.0.0/12 - semua subnet Docker).${NC}"
+                    echo "host    all    all    10.0.0.0/8       md5" >> "$PG_HBA"
+                    echo "host    all    all    192.168.0.0/16   md5" >> "$PG_HBA"
+                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (Private Subnets).${NC}"
                     NEEDS_PG_RESTART=true
                 fi
             fi
