@@ -1029,7 +1029,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1)
+                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
                 if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
                     echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
@@ -1037,15 +1037,15 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                     echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
                 fi
             elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-                TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
-                if [ $? -eq 0 ]; then
+                TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -N -e "SELECT 1;" 2>&1 || true)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
                     echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
                 else
                     echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
                 fi
             elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
-                TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1)
+                TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1 || true)
                 if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
                     echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
