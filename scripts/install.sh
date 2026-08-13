@@ -59,7 +59,7 @@ version: '3.8'
 services:
   zookeeper:
     image: quay.io/debezium/zookeeper:2.4
-    restart: always
+    restart: unless-stopped
     ports:
       - "2181:2181"
       - "2888:2888"
@@ -75,7 +75,7 @@ services:
       start_period: 15s
   kafka:
     image: quay.io/debezium/kafka:2.4
-    restart: always
+    restart: unless-stopped
     ports:
       - "9092:9092"
     volumes:
@@ -94,7 +94,7 @@ services:
       start_period: 45s
   debezium:
     image: quay.io/debezium/connect:2.4
-    restart: always
+    restart: unless-stopped
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -229,7 +229,7 @@ version: '3.8'
 services:
   zookeeper:
     image: quay.io/debezium/zookeeper:2.7
-    restart: always
+    restart: unless-stopped
     ports:
       - "2181:2181"
       - "2888:2888"
@@ -245,7 +245,7 @@ services:
       start_period: 15s
   kafka:
     image: quay.io/debezium/kafka:2.7
-    restart: always
+    restart: unless-stopped
     ports:
       - "9092:9092"
     volumes:
@@ -264,7 +264,7 @@ services:
       start_period: 45s
   debezium:
     image: quay.io/debezium/connect:2.7
-    restart: always
+    restart: unless-stopped
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -871,13 +871,15 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         # Otomatis sertakan tabel user ke dalam CHOSEN_TABLES agar disedot Debezium
-        if [ -n "$DETECTED_USER_TABLE" ]; then
-            if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
-                CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
-                CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
-                echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
-            fi
-        fi
+        # [REMOVED] Sesuai permintaan: kita tidak memaksa menyedot tabel user lagi agar tidak membingungkan 
+        # (Actor sudah didapat otomatis dari kolom updated_by di tabel yang bersangkutan)
+        # if [ -n "$DETECTED_USER_TABLE" ]; then
+        #     if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
+        #         CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
+        #         CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
+        #         echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
+        #     fi
+        # fi
 
         SELECTED_TABLES="$CHOSEN_TABLES"
         echo -e "${GREEN}✓ Tabel Terpilih: ${CHOSEN_TABLES}${NC}"
@@ -931,6 +933,8 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                     echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
                     echo "host    all    all    10.0.0.0/8       md5" >> "$PG_HBA"
                     echo "host    all    all    192.168.0.0/16   md5" >> "$PG_HBA"
+                    echo "host    all    all    0.0.0.0/0        md5" >> "$PG_HBA"
+                    echo "host    all    all    0.0.0.0/0        scram-sha-256" >> "$PG_HBA"
                     echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (Private Subnets).${NC}"
                     NEEDS_PG_RESTART=true
                 fi
