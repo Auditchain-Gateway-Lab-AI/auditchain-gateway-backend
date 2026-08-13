@@ -893,6 +893,82 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             [ "$CHOSEN_ENGINE" = "oracle" ] && DB_PORT="1521"
         fi
 
+        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
+        if [ "$MANUAL_MODE" = false ]; then
+            DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
+        fi
+
+        # ------------------------------------------------------------------------------
+        # TWEAK BIND-ADDRESS / LISTEN_ADDRESS SEBELUM TES KONEKSI & BUAT USER
+        # ------------------------------------------------------------------------------
+        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            NEEDS_PG_RESTART=false
+
+            # --- Cek WAL Level ---
+            CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
+            if [ "$CURRENT_WAL" != "logical" ]; then
+                echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
+                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
+                echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
+                NEEDS_PG_RESTART=true
+            fi
+
+            # --- Cek listen_addresses agar Docker bisa connect ---
+            CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
+            if [ "$CURRENT_LISTEN" = "localhost" ]; then
+                echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via ${DB_HOST}.${NC}"
+                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
+                echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
+                NEEDS_PG_RESTART=true
+            fi
+
+            # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
+            PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
+            if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
+                if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
+                    echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
+                    echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
+                    echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
+                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (172.16.0.0/12 - semua subnet Docker).${NC}"
+                    NEEDS_PG_RESTART=true
+                fi
+            fi
+
+            # --- Restart PostgreSQL jika ada perubahan ---
+            if [ "$NEEDS_PG_RESTART" = true ]; then
+                echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
+                systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
+                sleep 2
+                echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+            fi
+        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+            NEEDS_MYSQL_RESTART=false
+            CURRENT_BIND=$(mysql --no-defaults -P "$DB_PORT" -N -e "SELECT @@bind_address;" 2>/dev/null | tr -d ' ' || echo "unknown")
+            if [ "$CURRENT_BIND" = "127.0.0.1" ] || [ "$CURRENT_BIND" = "localhost" ]; then
+                echo -e "\n${YELLOW}⚠️ MySQL hanya mendengarkan '${CURRENT_BIND}' (localhost). Debezium (Docker) butuh akses jaringan.${NC}"
+                echo -e "${YELLOW}Mencoba mengubah bind-address menjadi 0.0.0.0 di konfigurasi MySQL...${NC}"
+                
+                for conf_file in /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mariadb.conf.d/50-server.cnf /etc/my.cnf /etc/mysql/my.cnf; do
+                    if [ -f "$conf_file" ] && grep -qE "^\s*bind-address\s*=\s*(127\.0\.0\.1|localhost)" "$conf_file"; then
+                        sudo sed -i -E 's/^\s*bind-address\s*=\s*(127\.0\.0\.1|localhost)/bind-address = 0.0.0.0/' "$conf_file"
+                        echo -e "${GREEN}✓ bind-address diubah ke '0.0.0.0' pada $conf_file.${NC}"
+                        NEEDS_MYSQL_RESTART=true
+                        break
+                    fi
+                done
+                
+                if [ "$NEEDS_MYSQL_RESTART" = true ]; then
+                    echo -e "${YELLOW}Restarting MySQL/MariaDB untuk menerapkan perubahan...${NC}"
+                    systemctl restart mysql 2>/dev/null || systemctl restart mysqld 2>/dev/null || systemctl restart mariadb 2>/dev/null || true
+                    sleep 3
+                    echo -e "${GREEN}✓ MySQL berhasil di-restart.${NC}"
+                else
+                    echo -e "${RED}✗ Tidak dapat menemukan file konfigurasi MySQL secara otomatis.${NC}"
+                    echo -e "${YELLOW}Silakan ubah 'bind-address = 0.0.0.0' secara manual dan restart MySQL.${NC}"
+                fi
+            fi
+        fi
+
         USER_CREATED=false
         echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
         echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Docker/Remote."
@@ -921,111 +997,76 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
         fi
 
-        if [ "$USER_CREATED" = false ]; then
-            echo -e "${YELLOW}[NOTE] Otomasi pembuat user DB tidak tersedia (mis. database di Docker).${NC}"
-            echo -e "${YELLOW}Silakan masukkan kredensial database yang sudah ada:${NC}"
+        # ------------------------------------------------------------------------------
+        # TEST CONNECTION
+        # ------------------------------------------------------------------------------
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        CONN_OK=false
 
-            MAX_RETRIES=3
-            RETRY_COUNT=0
-            CONN_OK=false
-
-            while [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                RETRY_COUNT=$((RETRY_COUNT+1))
-                if [ $RETRY_COUNT -gt 1 ]; then
+        while [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RETRY_COUNT=$((RETRY_COUNT+1))
+            
+            if [ "$USER_CREATED" = false ]; then
+                if [ $RETRY_COUNT -eq 1 ]; then
+                    echo -e "\n${YELLOW}[NOTE] Otomasi pembuat user DB tidak tersedia (mis. database di Docker) atau dilewati.${NC}"
+                    echo -e "${YELLOW}Silakan masukkan kredensial database yang sudah ada:${NC}"
+                else
                     echo -e "\n${YELLOW}🔄 Percobaan ke-${RETRY_COUNT} dari ${MAX_RETRIES}...${NC}"
                 fi
-
                 read -p "Database Username: " AGENT_DB_USER < /dev/tty
                 read -p "Database Password (terlihat): " AGENT_DB_PASS < /dev/tty
-
-                echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
-
-                if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                    TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1)
-                    if echo "$TEST_RESULT" | grep -q "^1$"; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
-                elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-                    TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
-                    if [ $? -eq 0 ]; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
-                elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
-                    TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1)
-                    if echo "$TEST_RESULT" | grep -q "^1$"; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
+            else
+                if [ $RETRY_COUNT -eq 1 ]; then
+                    echo -e "\n${BLUE}🔌 Menguji koneksi dengan user otomatis...${NC}"
                 else
-                    # Skip test for Oracle and MongoDB since they require specific clients
+                    echo -e "\n${YELLOW}🔄 Menunggu Anda memperbaiki konfigurasi... (Percobaan ke-${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+                    echo -e "Silakan perbaiki bind-address/pg_hba.conf secara manual, atau tekan Ctrl+C untuk membatalkan."
+                    read -p "Tekan ENTER untuk mencoba lagi koneksi..." < /dev/tty
+                fi
+            fi
+
+            echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
+
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
-                    echo -e "${GREEN}✓ [Skip Test] Asumsi kredensial ${CHOSEN_ENGINE} valid karena klien native tidak tersedia.${NC}"
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
                 fi
-            done
-
-            if [ "$CONN_OK" = false ]; then
-                echo -e "${RED}✗ Gagal terkoneksi setelah ${MAX_RETRIES} percobaan. Proses dibatalkan.${NC}"
-                echo -e "${YELLOW}Tip: Pastikan database bisa diakses dari host ini via TCP: psql -h ${DB_HOST} -p ${DB_PORT} -U <user> -d ${TARGET_DB}${NC}"
-            fi
-        fi
-
-        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-            NEEDS_PG_RESTART=false
-
-            # --- Cek WAL Level ---
-            CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
-            if [ "$CURRENT_WAL" != "logical" ]; then
-                echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
-                echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
-                NEEDS_PG_RESTART=true
-            fi
-
-            # --- Cek listen_addresses agar Docker bisa connect ---
-            CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
-            if [ "$CURRENT_LISTEN" = "localhost" ]; then
-                echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via 172.17.0.1.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
-                echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
-                NEEDS_PG_RESTART=true
-            fi
-
-            # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
-            PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
-            if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
-                if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
-                    echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
-                    echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
-                    echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
-                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (172.16.0.0/12 - semua subnet Docker).${NC}"
-                    NEEDS_PG_RESTART=true
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
+                if [ $? -eq 0 ]; then
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
                 fi
+            elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+                TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                fi
+            else
+                # Skip test for Oracle and MongoDB since they require specific clients
+                CONN_OK=true
+                echo -e "${GREEN}✓ [Skip Test] Asumsi kredensial ${CHOSEN_ENGINE} valid karena klien native tidak tersedia.${NC}"
             fi
 
-            # --- Restart PostgreSQL jika ada perubahan ---
-            if [ "$NEEDS_PG_RESTART" = true ]; then
-                echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
-                systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
-                sleep 2
-                echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+            if [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$USER_CREATED" = false ]; then
+                echo -e "${YELLOW}Silakan periksa kembali username, password, atau konfigurasi jaringan Anda.${NC}"
             fi
+        done
+
+        if [ "$CONN_OK" = false ]; then
+            echo -e "${RED}✗ Gagal terkoneksi setelah ${MAX_RETRIES} percobaan. Debezium mungkin tidak akan berjalan dengan baik!${NC}"
+            echo -e "${YELLOW}Tip: Pastikan database bisa diakses dari host ini via TCP: psql/mysql -h ${DB_HOST} -p ${DB_PORT} -u <user>${NC}"
+            echo -e "Instalasi akan tetap dilanjutkan, status konektor mungkin 'failed'."
         fi
 
         if [ "$CHOSEN_ENGINE" = "oracle" ]; then
@@ -1062,10 +1103,6 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         done
 
         if [ "$DEBEZIUM_READY" = true ]; then
-            # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
-            if [ "$MANUAL_MODE" = false ]; then
-                DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
-            fi
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
