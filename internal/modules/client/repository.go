@@ -67,7 +67,32 @@ func (r *clientRepository) UpdateClient(client *models.Client) error {
 }
 
 func (r *clientRepository) DeleteClient(id string) error {
-	return r.db.Delete(&models.Client{}, "id = ?", id).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&models.User{}, "client_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.ClientUser{}, "client_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.AgentConfig{}, "client_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.ClientKafkaConfig{}, "client_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("client_id = ?", id).Delete(&models.ClientTable{}).Error; err != nil {
+			return err
+		}
+
+		result := tx.Delete(&models.Client{}, "id = ?", id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (r *clientRepository) GetClientByID(id string) (*models.Client, error) {

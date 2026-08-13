@@ -241,6 +241,10 @@ func (h *Handler) DeleteClient(c *gin.Context) {
 	}
 
 	if err := h.Service.DeleteClient(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan atau sudah dihapus"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus klien"})
 		return
 	}
@@ -893,6 +897,7 @@ func (h *Handler) GetMyUsersCDC(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
 type UpdateUserTableRequest struct {
 	UserTableName  string `json:"user_table_name" binding:"required"`
 	UserColumnName string `json:"user_column_name" binding:"required"`
