@@ -1123,6 +1123,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
     "plugin.name": "pgoutput",
     "publication.autocreate.mode": "disabled",
     "publication.name": "dbz_publication",
+    "slot.name": "dbz_${TARGET_DB//-/_}_${RANDOM}",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
