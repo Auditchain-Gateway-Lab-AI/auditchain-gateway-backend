@@ -228,7 +228,7 @@ cat <<EOF > /etc/auditchain/docker-compose.yml
 version: '3.8'
 services:
   zookeeper:
-    image: quay.io/debezium/zookeeper:2.4
+    image: quay.io/debezium/zookeeper:2.7
     restart: always
     ports:
       - "2181:2181"
@@ -244,7 +244,7 @@ services:
       retries: 5
       start_period: 15s
   kafka:
-    image: quay.io/debezium/kafka:2.4
+    image: quay.io/debezium/kafka:2.7
     restart: always
     ports:
       - "9092:9092"
@@ -263,7 +263,7 @@ services:
       retries: 10
       start_period: 45s
   debezium:
-    image: quay.io/debezium/connect:2.4
+    image: quay.io/debezium/connect:2.7
     restart: always
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
