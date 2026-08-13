@@ -988,7 +988,19 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             # Buat Publication untuk Debezium (membutuhkan superuser)
             echo -e "Membuat Publication CDC untuk Debezium..."
             sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
-            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null || true
+            if ! sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
+                echo -e "${RED}[ERROR] Gagal membuat publication 'dbz_publication'!${NC}"
+                echo -e "${YELLOW}Pastikan user yang menjalankan script punya akses SUPERUSER ke PostgreSQL.${NC}"
+                echo -e "${YELLOW}Atau buat manual: CREATE PUBLICATION dbz_publication FOR TABLE ...;${NC}"
+            fi
+
+            # Verifikasi publication terbentuk
+            PUB_CHECK=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
+            if [ "$PUB_CHECK" -eq 0 ]; then
+                echo -e "${RED}⚠️  Publication 'dbz_publication' TIDAK DITEMUKAN setelah pembuatan!${NC}"
+            else
+                echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
+            fi
         elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
             echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
             if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
