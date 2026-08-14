@@ -176,8 +176,22 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 	}
 
 	if len(topicSet) == 0 {
-		log.Printf("⚠️  [KafkaConsumer] Belum ada topic prefix=%s", cfg.TopicPrefix)
-		time.Sleep(10 * time.Second)
+		// Debug: tampilkan semua topic yang tersedia di broker agar mudah diagnosa mismatch prefix
+		allTopics := make([]string, 0)
+		for _, p := range partitions {
+			found := false
+			for _, at := range allTopics {
+				if at == p.Topic {
+					found = true
+					break
+				}
+			}
+			if !found {
+				allTopics = append(allTopics, p.Topic)
+			}
+		}
+		log.Printf("⚠️  [KafkaConsumer] Belum ada topic prefix=%s (tersedia di Kafka: %v)", cfg.TopicPrefix, allTopics)
+		time.Sleep(30 * time.Second)
 		return nil
 	}
 

@@ -1111,6 +1111,8 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         echo -e "\nMenunggu Debezium Engine siap (maks 30 detik)..."
+        # Set HOSTNAME sekarang agar topic.prefix di Debezium & telemetri Gateway konsisten
+        HOSTNAME=$(hostname)
         DEBEZIUM_READY=false
         for i in $(seq 1 15); do
             if curl -s http://localhost:8083/ > /dev/null 2>&1; then
@@ -1274,8 +1276,69 @@ EOF
                 -d "${CONNECTOR_PAYLOAD}" || echo "000")
 
             if [ "$DBZ_RESP" -eq 201 ] || [ "$DBZ_RESP" -eq 200 ] || [ "$DBZ_RESP" -eq 409 ]; then
-                echo -e "${GREEN}✓ Konektor Database Debezium BERHASIL didaftarkan! Data mulai disedot.${NC}"
-                CONNECTOR_SETUP_STATUS="running"
+                echo -e "${GREEN}✓ Konektor Debezium didaftarkan (HTTP ${DBZ_RESP}). Memverifikasi status task...${NC}"
+                
+                # ---------------------------------------------------------------
+                # VERIFIKASI: Cek apakah TASK konektor benar-benar RUNNING
+                # Konektor bisa status "RUNNING" tapi TASK-nya "FAILED"
+                # ---------------------------------------------------------------
+                CONNECTOR_NAME="${TARGET_DB}-connector"
+                TASK_OK=false
+                for i in $(seq 1 12); do
+                    sleep 5
+                    TASK_STATUS=$(curl -s "http://localhost:8083/connectors/${CONNECTOR_NAME}/status" 2>/dev/null || echo "{}")
+                    
+                    # Cek status connector
+                    CONN_STATE=$(echo "$TASK_STATUS" | grep -oP '"state"\s*:\s*"[^"]*"' | head -1 | grep -oP '"[^"]*"$' | tr -d '"')
+                    # Cek status task[0]
+                    TASK_STATE=$(echo "$TASK_STATUS" | grep -oP '"tasks"\s*:\s*\[.*?\]' | grep -oP '"state"\s*:\s*"[^"]*"' | head -1 | grep -oP '"[^"]*"$' | tr -d '"')
+                    
+                    echo -e "  [${i}/12] Connector: ${CONN_STATE:-?} | Task: ${TASK_STATE:-belum ada}..."
+                    
+                    if [ "$TASK_STATE" = "RUNNING" ]; then
+                        TASK_OK=true
+                        echo -e "${GREEN}✓ Task konektor Debezium RUNNING! CDC aktif.${NC}"
+                        break
+                    elif [ "$TASK_STATE" = "FAILED" ]; then
+                        echo -e "${RED}✗ Task konektor FAILED! Detail:${NC}"
+                        echo "$TASK_STATUS" | grep -oP '"trace"\s*:\s*"[^"]*"' | head -1 | sed 's/"trace".*"//;s/"$//' || true
+                        CONNECTOR_SETUP_STATUS="task_failed"
+                        break
+                    fi
+                done
+                
+                if [ "$TASK_OK" = true ]; then
+                    CONNECTOR_SETUP_STATUS="running"
+                    
+                    # ---------------------------------------------------------------
+                    # TUNGGU TOPIC: Beri waktu Debezium membuat topic di Kafka
+                    # Gateway akan gagal jika topic belum ada saat mulai consume
+                    # ---------------------------------------------------------------
+                    echo -e "${BLUE}⏳ Menunggu Debezium membuat topic di Kafka (max 30s)...${NC}"
+                    EXPECTED_PREFIX="${HOSTNAME}_${TARGET_DB}"
+                    [ "$CHOSEN_ENGINE" = "oracle" ] && [ -n "$ORACLE_PDB" ] && EXPECTED_PREFIX="${HOSTNAME}_${SELECTED_DB_NAME}"
+                    
+                    TOPIC_FOUND=false
+                    for j in $(seq 1 6); do
+                        sleep 5
+                        # List semua topic di Kafka via Debezium REST API (Kafka Connect)
+                        TOPICS=$(docker exec $(docker ps -qf "ancestor=quay.io/debezium/kafka:2.7" 2>/dev/null || docker ps -qf "ancestor=quay.io/debezium/kafka:2.4" 2>/dev/null) /kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null || echo "")
+                        MATCHING=$(echo "$TOPICS" | grep -c "^${EXPECTED_PREFIX}" 2>/dev/null || echo "0")
+                        echo -e "  [${j}/6] Ditemukan ${MATCHING} topic dengan prefix '${EXPECTED_PREFIX}'"
+                        if [ "$MATCHING" -gt 0 ]; then
+                            TOPIC_FOUND=true
+                            echo -e "${GREEN}✓ Topic Kafka berhasil dibuat oleh Debezium!${NC}"
+                            break
+                        fi
+                    done
+                    
+                    if [ "$TOPIC_FOUND" = false ]; then
+                        echo -e "${YELLOW}⚠️  Topic belum terdeteksi, tapi konektor RUNNING. Topic mungkin butuh waktu lebih lama (initial snapshot).${NC}"
+                    fi
+                elif [ "$CONNECTOR_SETUP_STATUS" != "task_failed" ]; then
+                    echo -e "${YELLOW}⚠️  Task konektor belum RUNNING setelah 60 detik. Cek manual: curl localhost:8083/connectors/${CONNECTOR_NAME}/status${NC}"
+                    CONNECTOR_SETUP_STATUS="task_pending"
+                fi
             else
                 echo -e "${YELLOW}[NOTE] Respon Debezium (HTTP Status: ${DBZ_RESP}).${NC}"
                 if [ -f "${DBZ_BODY_FILE}" ]; then
