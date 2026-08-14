@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type Engine struct {
 
 	sourceSystemCache sync.Map
 	mappingCache      sync.Map
+	actorCache        sync.Map // key: "clientID:actorID" → resolved name
 
 	mu        sync.Mutex
 	consumers map[string]*runningConsumer // key: ClientID
@@ -389,6 +391,15 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	if !actorFound && actor == "" {
 		actor = "Unknown"
+	}
+
+	// Resolusi CUID/UUID → Nama Manusia
+	// Jika actor terlihat seperti ID acak (Prisma CUID, UUID, dll),
+	// coba cari nama aslinya di tabel client_users
+	if actor != "" && actor != "Unknown" && looksLikeGeneratedID(actor) {
+		if resolved := e.resolveActorName(cfg.ClientID, actor); resolved != "" {
+			actor = resolved
+		}
 	}
 
 	var timestamp time.Time
@@ -769,4 +780,55 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 		}
 		e.DB.Model(&clientUser).Updates(updates)
 	}
+}
+
+// looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
+// sehingga perlu di-resolve ke nama manusia.
+var (
+	cuidPattern = regexp.MustCompile(`^c[a-z0-9]{20,30}$`)                                                          // Prisma CUID: cmsrsfohw000a6jjxh4jgty6d
+	uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)             // UUID v4
+	hexIDPattern = regexp.MustCompile(`^[0-9a-f]{24,}$`)                                                            // MongoDB ObjectId dll
+)
+
+func looksLikeGeneratedID(val string) bool {
+	if len(val) < 16 {
+		return false // Terlalu pendek, kemungkinan bukan generated ID
+	}
+	lower := strings.ToLower(val)
+	return cuidPattern.MatchString(lower) || uuidPattern.MatchString(lower) || hexIDPattern.MatchString(lower)
+}
+
+// resolveActorName menerjemahkan ID acak (CUID/UUID) menjadi nama manusia
+// dengan mencari di tabel client_users. Hasilnya di-cache agar tidak query DB berulang.
+func (e *Engine) resolveActorName(clientID, actorID string) string {
+	cacheKey := clientID + ":" + actorID
+
+	// Cek cache dulu
+	if cached, ok := e.actorCache.Load(cacheKey); ok {
+		return cached.(string)
+	}
+
+	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi CUID dari Prisma)
+	var user models.ClientUser
+	err := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).First(&user).Error
+	if err != nil {
+		// Tidak ditemukan, cache sebagai "" agar tidak query ulang
+		e.actorCache.Store(cacheKey, "")
+		return ""
+	}
+
+	// Prioritas: FullName > Email > Username (tetap CUID)
+	resolved := ""
+	if user.FullName != "" {
+		resolved = user.FullName
+	} else if user.Email != "" {
+		resolved = user.Email
+	}
+
+	e.actorCache.Store(cacheKey, resolved)
+
+	if resolved != "" {
+		log.Printf("🔍 [KafkaConsumer] Resolved actor: %s → %s", actorID, resolved)
+	}
+	return resolved
 }
