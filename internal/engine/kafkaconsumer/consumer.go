@@ -345,7 +345,22 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	var agentCfg models.AgentConfig
 	e.DB.Where("client_id = ?", cfg.ClientID).First(&agentCfg)
-	if agentCfg.UserTableName != "" && strings.Contains(tableName, agentCfg.UserTableName) {
+
+	// Proses CDC tabel user: jika admin sudah konfigurasi UserTableName, gunakan itu.
+	// Jika belum, auto-detect berdasarkan nama tabel (user, account, member, dll)
+	isUserTable := false
+	if agentCfg.UserTableName != "" {
+		isUserTable = strings.Contains(tableName, agentCfg.UserTableName)
+	} else {
+		lowerTable := strings.ToLower(tableName)
+		for _, keyword := range []string{"user", "account", "akun", "pengguna", "member", "employee", "karyawan"} {
+			if strings.Contains(lowerTable, keyword) {
+				isUserTable = true
+				break
+			}
+		}
+	}
+	if isUserTable {
 		e.processClientUserCDC(payload, cfg, tableName, agentCfg)
 	}
 
@@ -721,44 +736,81 @@ func getDialer(cfg models.ClientKafkaConfig) *kafka.Dialer {
 }
 
 func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.ClientKafkaConfig, tableName string, agentCfg models.AgentConfig) {
-	if agentCfg.UserColumnName == "" {
+	// Tentukan kolom identifier user — dari config admin, atau auto-detect
+	userCol := agentCfg.UserColumnName
+	if userCol == "" {
+		// Auto-detect: cari kolom yang kemungkinan besar berisi identifier user
+		candidates := []string{"username", "email", "login", "name", "nama", "user_name"}
+		for _, c := range candidates {
+			if raw, ok := findFieldInsensitive(payload, c); ok && raw != nil {
+				userCol = c
+				break
+			}
+		}
+	}
+
+	// Ambil user ID (primary key) — ini yang akan dipakai untuk mencocokkan actor
+	userID := ""
+	idCandidates := []string{"id", "user_id", "userid", "uid"}
+	for _, idc := range idCandidates {
+		if idRaw, ok := findFieldInsensitive(payload, idc); ok && idRaw != nil {
+			userID = extractScalarValue(idRaw)
+			if userID != "" {
+				break
+			}
+		}
+	}
+
+	// Ambil username/identifier dari kolom yang terdeteksi
+	username := ""
+	if userCol != "" {
+		if usernameRaw, ok := findFieldInsensitive(payload, userCol); ok && usernameRaw != nil {
+			username = extractScalarValue(usernameRaw)
+		}
+	}
+
+	// Jika tidak ada ID maupun username, skip
+	if userID == "" && username == "" {
 		return
 	}
 
-	// Ambil username
-	usernameRaw, ok := findFieldInsensitive(payload, agentCfg.UserColumnName)
-	if !ok || usernameRaw == nil {
-		return
-	}
-	username := extractScalarValue(usernameRaw)
-	if username == "" {
-		return
+	// Gunakan userID sebagai key utama (karena ini yang muncul di kolom actor tabel lain)
+	// Fallback ke username jika tidak ada ID
+	lookupKey := userID
+	if lookupKey == "" {
+		lookupKey = username
 	}
 
-	// Coba cari email dan fullname jika ada
+	// Coba cari email dan fullname
 	email := ""
 	if emailRaw, ok := findFieldInsensitive(payload, "email"); ok {
 		email = extractScalarValue(emailRaw)
 	}
 	
 	fullName := ""
-	if fullNameRaw, ok := findFieldInsensitive(payload, "name"); ok {
-		fullName = extractScalarValue(fullNameRaw)
-	} else if fullNameRaw, ok := findFieldInsensitive(payload, "nama"); ok {
-		fullName = extractScalarValue(fullNameRaw)
-	} else if fullNameRaw, ok := findFieldInsensitive(payload, "full_name"); ok {
-		fullName = extractScalarValue(fullNameRaw)
+	for _, nameField := range []string{"name", "nama", "full_name", "fullname", "display_name"} {
+		if nameRaw, ok := findFieldInsensitive(payload, nameField); ok {
+			fullName = extractScalarValue(nameRaw)
+			if fullName != "" {
+				break
+			}
+		}
+	}
+
+	// Jika fullName kosong tapi username ada dan bukan UUID/CUID, pakai username sebagai nama
+	if fullName == "" && username != "" && !looksLikeGeneratedID(username) {
+		fullName = username
 	}
 
 	rawJSON, _ := json.Marshal(payload)
 
 	var clientUser models.ClientUser
-	err := e.DB.Where("client_id = ? AND username = ?", cfg.ClientID, username).First(&clientUser).Error
+	err := e.DB.Where("client_id = ? AND username = ?", cfg.ClientID, lookupKey).First(&clientUser).Error
 	if err != nil {
 		// Insert
 		newUser := models.ClientUser{
 			ClientID:    cfg.ClientID,
-			Username:    username,
+			Username:    lookupKey, // Simpan ID (UUID/CUID) agar bisa di-resolve nanti
 			Email:       email,
 			FullName:    fullName,
 			SourceTable: tableName,
@@ -766,6 +818,7 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 			LastSeenAt:  time.Now(),
 		}
 		e.DB.Create(&newUser)
+		log.Printf("👤 [KafkaConsumer] User baru disimpan: id=%s name=%s email=%s", lookupKey, fullName, email)
 	} else {
 		// Update
 		updates := map[string]interface{}{
@@ -780,6 +833,9 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 		}
 		e.DB.Model(&clientUser).Updates(updates)
 	}
+
+	// Invalidate actor cache agar resolusi langsung pakai data terbaru
+	e.actorCache.Delete(cfg.ClientID + ":" + lookupKey)
 }
 
 // looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
