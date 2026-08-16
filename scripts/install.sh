@@ -871,15 +871,15 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         # Otomatis sertakan tabel user ke dalam CHOSEN_TABLES agar disedot Debezium
-        # [REMOVED] Sesuai permintaan: kita tidak memaksa menyedot tabel user lagi agar tidak membingungkan 
-        # (Actor sudah didapat otomatis dari kolom updated_by di tabel yang bersangkutan)
-        # if [ -n "$DETECTED_USER_TABLE" ]; then
-        #     if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
-        #         CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
-        #         CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
-        #         echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
-        #     fi
-        # fi
+        # Kita WAJIB menyedot tabel user untuk mengatasi masalah CUID/UUID dari Prisma,
+        # agar Gateway bisa mencocokkan UUID dari kolom updated_by ke nama aslinya.
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
+                CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
+                CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
+                echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
+            fi
+        fi
 
         SELECTED_TABLES="$CHOSEN_TABLES"
         echo -e "${GREEN}✓ Tabel Terpilih: ${CHOSEN_TABLES}${NC}"
@@ -905,47 +905,185 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         # ------------------------------------------------------------------------------
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             NEEDS_PG_RESTART=false
+            PG_IS_DOCKER=false
+            PG_DOCKER_CONTAINER=""
 
-            # --- Cek WAL Level ---
-            CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
-            if [ "$CURRENT_WAL" != "logical" ]; then
-                echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
-                echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
-                NEEDS_PG_RESTART=true
-            fi
-
-            # --- Cek listen_addresses agar Docker bisa connect ---
-            CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
-            if [ "$CURRENT_LISTEN" = "localhost" ]; then
-                echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via ${DB_HOST}.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
-                echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
-                NEEDS_PG_RESTART=true
-            fi
-
-            # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
-            PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
-            if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
-                if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
-                    echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
-                    echo "# AuditChain - Allow Debezium Docker container & Host Scripts" >> "$PG_HBA"
-                    echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
-                    echo "host    all    all    10.0.0.0/8       md5" >> "$PG_HBA"
-                    echo "host    all    all    192.168.0.0/16   md5" >> "$PG_HBA"
-                    echo "host    all    all    0.0.0.0/0        md5" >> "$PG_HBA"
-                    echo "host    all    all    0.0.0.0/0        scram-sha-256" >> "$PG_HBA"
-                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (Private Subnets).${NC}"
-                    NEEDS_PG_RESTART=true
+            # -------------------------------------------------------------------
+            # AUTO-INSTALL postgresql-client jika psql belum ada
+            # -------------------------------------------------------------------
+            if ! command -v psql &>/dev/null; then
+                echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
+                apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+                if command -v psql &>/dev/null; then
+                    echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis. Mencoba deteksi Docker...${NC}"
                 fi
             fi
 
-            # --- Restart PostgreSQL jika ada perubahan ---
-            if [ "$NEEDS_PG_RESTART" = true ]; then
-                echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
-                systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
-                sleep 2
-                echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+            # -------------------------------------------------------------------
+            # DETEKSI: Apakah PostgreSQL berjalan di Docker?
+            # -------------------------------------------------------------------
+            if command -v docker &>/dev/null; then
+                # Cari container PostgreSQL yang sedang berjalan
+                PG_DOCKER_CONTAINER=$(docker ps --filter "ancestor=postgres" --format "{{.Names}}" 2>/dev/null | head -n 1)
+                if [ -z "$PG_DOCKER_CONTAINER" ]; then
+                    # Coba cari berdasarkan image name yang mengandung "postgres"
+                    PG_DOCKER_CONTAINER=$(docker ps --format "{{.Names}} {{.Image}}" 2>/dev/null | grep -i "postgres" | awk '{print $1}' | head -n 1)
+                fi
+                if [ -n "$PG_DOCKER_CONTAINER" ]; then
+                    PG_IS_DOCKER=true
+                    echo -e "${BLUE}🐳 PostgreSQL terdeteksi berjalan di Docker container: '${PG_DOCKER_CONTAINER}'${NC}"
+                fi
+            fi
+
+            # Fungsi helper: jalankan psql di environment yang tepat
+            run_psql() {
+                local db_name="${1:-postgres}"
+                shift
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    docker exec -i "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER_FALLBACK" -d "$db_name" "$@" 2>/dev/null
+                else
+                    sudo -u postgres psql -p "$DB_PORT" -d "$db_name" "$@" 2>/dev/null
+                fi
+            }
+            # Simpan username superuser yang ada di container/native (biasanya 'postgres')
+            AGENT_DB_USER_FALLBACK="postgres"
+
+            # -------------------------------------------------------------------
+            # DOCKER MODE: Konfigurasi wal_level via Docker
+            # -------------------------------------------------------------------
+            if [ "$PG_IS_DOCKER" = true ]; then
+                echo -e "\n${BLUE}🐳 [Docker Mode] Mengkonfigurasi PostgreSQL di dalam Docker...${NC}"
+
+                # Cek wal_level saat ini
+                CURRENT_WAL=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                CURRENT_WAL=$(echo "$CURRENT_WAL" | tr -d '[:space:]')
+
+                if [ "$CURRENT_WAL" != "logical" ]; then
+                    echo -e "${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
+                    echo -e "${YELLOW}   Untuk Docker, wal_level HARUS diset permanen via docker-compose.yml.${NC}"
+
+                    # Cari docker-compose.yml milik container PostgreSQL
+                    PG_COMPOSE_DIR=""
+                    # Coba ambil dari label Docker Compose
+                    PG_COMPOSE_DIR=$(docker inspect "$PG_DOCKER_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || echo "")
+
+                    if [ -n "$PG_COMPOSE_DIR" ] && [ -d "$PG_COMPOSE_DIR" ]; then
+                        COMPOSE_FILE=""
+                        for cf in "$PG_COMPOSE_DIR/docker-compose.yml" "$PG_COMPOSE_DIR/docker-compose.yaml" "$PG_COMPOSE_DIR/compose.yml" "$PG_COMPOSE_DIR/compose.yaml"; do
+                            if [ -f "$cf" ]; then
+                                COMPOSE_FILE="$cf"
+                                break
+                            fi
+                        done
+
+                        if [ -n "$COMPOSE_FILE" ]; then
+                            echo -e "${BLUE}   Ditemukan: ${COMPOSE_FILE}${NC}"
+
+                            # Ambil nama service PostgreSQL di compose
+                            PG_SERVICE=$(docker inspect "$PG_DOCKER_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || echo "")
+
+                            if [ -n "$PG_SERVICE" ]; then
+                                # Cek apakah sudah ada command wal_level=logical
+                                if grep -q "wal_level=logical" "$COMPOSE_FILE" 2>/dev/null; then
+                                    echo -e "${GREEN}✓ wal_level=logical sudah dikonfigurasi di docker-compose.yml.${NC}"
+                                else
+                                    echo -e "${YELLOW}   Menambahkan 'command: [\"postgres\", \"-c\", \"wal_level=logical\"]' ke service '${PG_SERVICE}'...${NC}"
+                                    # Backup dulu
+                                    cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak.auditchain"
+
+                                    # Tambahkan command setelah baris image postgres
+                                    # Gunakan sed untuk menyisipkan baris command setelah image: postgres
+                                    if grep -qE "^\\s+image:.*postgres" "$COMPOSE_FILE"; then
+                                        sed -i "/image:.*postgres/a\\    command: [\"postgres\", \"-c\", \"wal_level=logical\", \"-c\", \"max_replication_slots=4\", \"-c\", \"max_wal_senders=4\"]" "$COMPOSE_FILE"
+                                        echo -e "${GREEN}✓ docker-compose.yml berhasil dimodifikasi.${NC}"
+                                    else
+                                        echo -e "${YELLOW}⚠️ Tidak dapat menemukan baris 'image: postgres' di compose file.${NC}"
+                                        echo -e "${YELLOW}   Silakan tambahkan manual di service PostgreSQL:${NC}"
+                                        echo -e "${YELLOW}   command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                                    fi
+
+                                    # Restart container PostgreSQL via compose
+                                    echo -e "${YELLOW}   Me-restart PostgreSQL container...${NC}"
+                                    (cd "$PG_COMPOSE_DIR" && docker compose restart "$PG_SERVICE" 2>/dev/null || docker-compose restart "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
+                                    sleep 5
+
+                                    # Verifikasi
+                                    NEW_WAL=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                                    NEW_WAL=$(echo "$NEW_WAL" | tr -d '[:space:]')
+                                    if [ "$NEW_WAL" = "logical" ]; then
+                                        echo -e "${GREEN}✓ wal_level berhasil diubah ke 'logical' secara permanen!${NC}"
+                                    else
+                                        echo -e "${RED}⚠️ wal_level masih '${NEW_WAL}'. Mungkin perlu recreate container:${NC}"
+                                        echo -e "${YELLOW}   cd $PG_COMPOSE_DIR && docker compose up -d ${PG_SERVICE}${NC}"
+                                    fi
+                                fi
+                            fi
+                        else
+                            echo -e "${YELLOW}⚠️ Tidak dapat menemukan docker-compose.yml di ${PG_COMPOSE_DIR}.${NC}"
+                            echo -e "${YELLOW}   Silakan tambahkan manual: command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                        fi
+                    else
+                        echo -e "${YELLOW}⚠️ Tidak dapat menemukan folder docker-compose PostgreSQL.${NC}"
+                        echo -e "${YELLOW}   Silakan tambahkan manual ke docker-compose.yml Anda:${NC}"
+                        echo -e "${YELLOW}   command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                        echo -e "${YELLOW}   Lalu jalankan: docker compose up -d${NC}"
+                    fi
+                else
+                    echo -e "${GREEN}✓ WAL Level sudah 'logical'. Siap untuk CDC.${NC}"
+                fi
+
+                # Docker: pg_hba.conf biasanya sudah mengizinkan semua koneksi (trust/md5)
+                echo -e "${GREEN}✓ [Docker Mode] pg_hba.conf biasanya sudah permisif di container Docker.${NC}"
+
+            # -------------------------------------------------------------------
+            # NATIVE MODE: Konfigurasi wal_level via systemctl (cara lama)
+            # -------------------------------------------------------------------
+            else
+                echo -e "\n${BLUE}[Native Mode] Mengkonfigurasi PostgreSQL native...${NC}"
+
+                # --- Cek WAL Level ---
+                CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                if [ "$CURRENT_WAL" != "logical" ]; then
+                    echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
+                    sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
+                    echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
+                    NEEDS_PG_RESTART=true
+                fi
+
+                # --- Cek listen_addresses agar Docker bisa connect ---
+                CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
+                if [ "$CURRENT_LISTEN" = "localhost" ]; then
+                    echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via ${DB_HOST}.${NC}"
+                    sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
+                    echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
+                    NEEDS_PG_RESTART=true
+                fi
+
+                # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
+                PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
+                if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
+                    if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
+                        echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
+                        echo "# AuditChain - Allow Debezium Docker container & Host Scripts" >> "$PG_HBA"
+                        echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
+                        echo "host    all    all    10.0.0.0/8       md5" >> "$PG_HBA"
+                        echo "host    all    all    192.168.0.0/16   md5" >> "$PG_HBA"
+                        echo "host    all    all    0.0.0.0/0        md5" >> "$PG_HBA"
+                        echo "host    all    all    0.0.0.0/0        scram-sha-256" >> "$PG_HBA"
+                        echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (Private Subnets).${NC}"
+                        NEEDS_PG_RESTART=true
+                    fi
+                fi
+
+                # --- Restart PostgreSQL jika ada perubahan ---
+                if [ "$NEEDS_PG_RESTART" = true ]; then
+                    echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
+                    systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
+                    sleep 2
+                    echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+                fi
             fi
         elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
             NEEDS_MYSQL_RESTART=false
@@ -976,43 +1114,76 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         USER_CREATED=false
-        echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
-        echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Docker/Remote."
-        read -p "(y/N): " AUTO_USER < /dev/tty
-        if [[ "$AUTO_USER" =~ ^[Yy]$ ]]; then
 
-        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-            echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if sudo -u postgres psql -p "$DB_PORT" -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || sudo -u postgres psql -p "$DB_PORT" -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
-                sudo -u postgres psql -p "$DB_PORT" -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
-                sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
-                USER_CREATED=true
-                echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
-            fi
-            # Buat Publication untuk Debezium (membutuhkan superuser)
+        # Untuk Docker, kita bisa membuat user otomatis tanpa perlu tanya
+        if [ "$PG_IS_DOCKER" = true ] && [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            echo -e "\n${BLUE}🐳 [Docker Mode] Membuat user database otomatis via Docker...${NC}"
+            echo -e "Membuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+
+            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || \
+            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || true
+
+            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+            USER_CREATED=true
+            echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat via Docker!${NC}"
+
+            # Buat Publication untuk Debezium
             echo -e "Membuat Publication CDC untuk Debezium..."
-            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
-            if ! sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
+            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
+            if ! docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
                 echo -e "${RED}[ERROR] Gagal membuat publication 'dbz_publication'!${NC}"
-                echo -e "${YELLOW}Pastikan user yang menjalankan script punya akses SUPERUSER ke PostgreSQL.${NC}"
-                echo -e "${YELLOW}Atau buat manual: CREATE PUBLICATION dbz_publication FOR TABLE ...;${NC}"
+                echo -e "${YELLOW}Buat manual: docker exec -it ${PG_DOCKER_CONTAINER} psql -U postgres -d ${TARGET_DB} -c \"CREATE PUBLICATION dbz_publication FOR TABLE ...;\"${NC}"
             fi
 
-            # Verifikasi publication terbentuk
-            PUB_CHECK=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
-            if [ "$PUB_CHECK" -eq 0 ]; then
+            # Verifikasi publication
+            PUB_CHECK=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
+            PUB_CHECK=$(echo "$PUB_CHECK" | tr -d '[:space:]')
+            if [ "$PUB_CHECK" -eq 0 ] 2>/dev/null; then
                 echo -e "${RED}⚠️  Publication 'dbz_publication' TIDAK DITEMUKAN setelah pembuatan!${NC}"
             else
                 echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
             fi
-        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-            echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
-               mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
-                USER_CREATED=true
-                echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
+        else
+            # Non-Docker: tanya user apakah mau buat otomatis
+            echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
+            echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Remote."
+            read -p "(y/N): " AUTO_USER < /dev/tty
+            if [[ "$AUTO_USER" =~ ^[Yy]$ ]]; then
+
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+                if sudo -u postgres psql -p "$DB_PORT" -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || sudo -u postgres psql -p "$DB_PORT" -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
+                    sudo -u postgres psql -p "$DB_PORT" -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+                    USER_CREATED=true
+                    echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
+                fi
+                # Buat Publication untuk Debezium (membutuhkan superuser)
+                echo -e "Membuat Publication CDC untuk Debezium..."
+                sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
+                if ! sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
+                    echo -e "${RED}[ERROR] Gagal membuat publication 'dbz_publication'!${NC}"
+                    echo -e "${YELLOW}Pastikan user yang menjalankan script punya akses SUPERUSER ke PostgreSQL.${NC}"
+                    echo -e "${YELLOW}Atau buat manual: CREATE PUBLICATION dbz_publication FOR TABLE ...;${NC}"
+                fi
+
+                # Verifikasi publication terbentuk
+                PUB_CHECK=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
+                if [ "$PUB_CHECK" -eq 0 ]; then
+                    echo -e "${RED}⚠️  Publication 'dbz_publication' TIDAK DITEMUKAN setelah pembuatan!${NC}"
+                else
+                    echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+                if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
+                   mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
+                    USER_CREATED=true
+                    echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
+                fi
             fi
-        fi
+            fi
         fi
 
         # ------------------------------------------------------------------------------
