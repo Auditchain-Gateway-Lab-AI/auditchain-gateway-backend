@@ -1494,7 +1494,7 @@ EOF
                         sleep 5
                         # List semua topic di Kafka via Debezium REST API (Kafka Connect)
                         TOPICS=$(docker exec $(docker ps -qf "ancestor=quay.io/debezium/kafka:2.7" 2>/dev/null || docker ps -qf "ancestor=quay.io/debezium/kafka:2.4" 2>/dev/null) /kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null || echo "")
-                        MATCHING=$(echo "$TOPICS" | grep -c "^${EXPECTED_PREFIX}" 2>/dev/null || echo "0")
+                        MATCHING=$(echo "$TOPICS" | grep -c "^${EXPECTED_PREFIX}" 2>/dev/null || true)
                         echo -e "  [${j}/6] Ditemukan ${MATCHING} topic dengan prefix '${EXPECTED_PREFIX}'"
                         if [ "$MATCHING" -gt 0 ]; then
                             TOPIC_FOUND=true
