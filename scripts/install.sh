@@ -252,7 +252,10 @@ services:
       - kafka_data:/kafka/data
     environment:
       - ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
+      - KAFKA_LISTENERS=INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://${TAILSCALE_IP}:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -270,7 +273,7 @@ services:
     ports:
       - "8083:8083"
     environment:
-      - BOOTSTRAP_SERVERS=kafka:9092
+      - BOOTSTRAP_SERVERS=kafka:29092
       - GROUP_ID=1
       - CONFIG_STORAGE_TOPIC=my_connect_configs
       - OFFSET_STORAGE_TOPIC=my_connect_offsets
@@ -1349,7 +1352,7 @@ EOF
     "schema.include.list": "${UPPER_USER},${AGENT_DB_USER}",
     "table.include.list": "${CHOSEN_TABLES}",
     "database.tablename.case.insensitive": "false",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${SELECTED_DB_NAME}",
     "log.mining.strategy": "online_catalog",
     "transforms": "unwrap",
@@ -1375,7 +1378,7 @@ EOF
     "database.names": "${TARGET_DB}",
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "database.encrypt": "false",
     "database.trustServerCertificate": "true",
@@ -1427,7 +1430,7 @@ EOF
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "database.include.list": "${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
