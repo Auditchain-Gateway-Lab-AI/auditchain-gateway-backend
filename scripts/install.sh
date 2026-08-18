@@ -1126,24 +1126,16 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
             docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
             USER_CREATED=true
-            echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat via Docker!${NC}"
-
-            # Buat Publication untuk Debezium
-            echo -e "Membuat Publication CDC untuk Debezium..."
-            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
-            if ! docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
-                echo -e "${RED}[ERROR] Gagal membuat publication 'dbz_publication'!${NC}"
-                echo -e "${YELLOW}Buat manual: docker exec -it ${PG_DOCKER_CONTAINER} psql -U postgres -d ${TARGET_DB} -c \"CREATE PUBLICATION dbz_publication FOR TABLE ...;\"${NC}"
-            fi
-
-            # Verifikasi publication
-            PUB_CHECK=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
-            PUB_CHECK=$(echo "$PUB_CHECK" | tr -d '[:space:]')
-            if [ "$PUB_CHECK" -eq 0 ] 2>/dev/null; then
-                echo -e "${RED}⚠️  Publication 'dbz_publication' TIDAK DITEMUKAN setelah pembuatan!${NC}"
-            else
-                echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
-            fi
+               echo -e "  - Mengecek dan menghapus replication slot yang menggantung..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE active = false;" >/dev/null 2>&1 || true
+            
+            echo -e "  - Membersihkan publication lama (jika ada)..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" >/dev/null 2>&1 || true
+            
+            echo -e "  - Membuat publication khusus tabel terpilih..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" >/dev/null 2>&1 || true
+            
+            echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
         else
             # Non-Docker: tanya user apakah mau buat otomatis
             echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
@@ -1284,6 +1276,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         echo -e "\nMenunggu Debezium Engine siap (maks 30 detik)..."
         # Set HOSTNAME sekarang agar topic.prefix di Debezium & telemetri Gateway konsisten
         HOSTNAME=$(hostname)
+        CONNECTOR_NAME="${TARGET_DB}-connector-$(date +%s)"
         DEBEZIUM_READY=false
         for i in $(seq 1 15); do
             if curl -s http://localhost:8083/ > /dev/null 2>&1; then
@@ -1298,9 +1291,9 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "name": "'"${CONNECTOR_NAME}"'",
+        "config": {
+            "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
     "database.hostname": "${DB_HOST}",
     "database.port": "${DB_PORT}",

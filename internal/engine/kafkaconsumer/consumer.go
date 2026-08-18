@@ -211,7 +211,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		MinBytes:       1,
 		MaxBytes:       10e6,
 		CommitInterval: time.Second,
-		StartOffset:    kafka.LastOffset,
+		StartOffset:    kafka.FirstOffset,
 		Dialer:         dialer,
 	})
 	defer reader.Close()
@@ -321,9 +321,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	if op == "" {
 		op, _ = payload["op"].(string)
 	}
-	if op == "r" {
-		return nil // Skip snapshot read
-	}
 
 	tableName, _ := payload["__table"].(string)
 	if tableName == "" {
@@ -336,9 +333,13 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		tableName, _ = payload["collection"].(string)
 	}
 
-	userName, _ := payload["__user_name"].(string)
-	tsMs, _ := payload["__ts_ms"].(float64)
-
+	if tableName == "" {
+		// Fallback parse dari topic name: "client_topic_prefix.schema.table"
+		parts := strings.Split(msg.Topic, ".")
+		if len(parts) > 0 {
+			tableName = parts[len(parts)-1]
+		}
+	}
 	if tableName == "" {
 		return nil
 	}
@@ -360,9 +361,20 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 			}
 		}
 	}
+
+	// Untuk tabel user, kita WAJIB memproses operasi "r" (snapshot read)
+	// agar memori identitas Gateway terisi dengan user yang sudah ada.
 	if isUserTable {
 		e.processClientUserCDC(payload, cfg, tableName, agentCfg)
 	}
+
+	// Untuk tabel non-user, skip operasi "r" (jangan catat snapshot awal sebagai audit log)
+	if op == "r" {
+		return nil
+	}
+
+	userName, _ := payload["__user_name"].(string)
+	tsMs, _ := payload["__ts_ms"].(float64)
 
 	mapping := e.resolveClientMapping(cfg.ClientID)
 
