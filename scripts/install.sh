@@ -939,14 +939,10 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         # ------------------------------------------------------------------------------
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             NEEDS_PG_RESTART=false
-            PG_IS_DOCKER=false
-            PG_DOCKER_CONTAINER=""
 
+            # PG_IS_DOCKER dan PG_DOCKER_CONTAINER sudah dideteksi di bagian table detection di atas.
+            # JANGAN di-reset di sini!
 
-
-            # -------------------------------------------------------------------
-            # PEMBERITAHUAN DOCKER (sudah dideteksi di atas)
-            # -------------------------------------------------------------------
             if [ "$PG_IS_DOCKER" = true ]; then
                 echo -e "${BLUE}🐳 PostgreSQL terdeteksi berjalan di Docker container: '${PG_DOCKER_CONTAINER}'${NC}"
             fi
