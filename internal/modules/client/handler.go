@@ -2,6 +2,8 @@ package client
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -630,17 +632,21 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			if req.DBName != "" {
 				companyName = "Auto Registered (" + req.Hostname + " - " + req.DBName + ")"
 			}
+			hash := sha256.Sum256([]byte(req.APIKeyPrefix))
+			apiKeyHash := hex.EncodeToString(hash[:])
+
 			client = models.Client{
 				CompanyName:  companyName,
-				APIKeyPrefix: req.APIKeyPrefix,
+				APIKeyPrefix: searchPrefix,
+				APIKeyHash:   apiKeyHash,
 				Status:       "active",
 			}
 			if err := h.DB.Create(&client).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan klien baru"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan klien baru: " + err.Error()})
 				return
 			}
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error: " + err.Error()})
 			return
 		}
 	}
