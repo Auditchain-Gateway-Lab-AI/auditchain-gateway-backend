@@ -736,19 +736,40 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         TABLE_LIST=()
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             # -------------------------------------------------------------------
-            # AUTO-INSTALL postgresql-client jika psql belum ada
+            # DETEKSI: Apakah PostgreSQL berjalan di Docker?
             # -------------------------------------------------------------------
-            if ! command -v psql &>/dev/null; then
-                echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
-                apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
-                if command -v psql &>/dev/null; then
-                    echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
-                else
-                    echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis. Mencoba deteksi Docker...${NC}"
+            PG_IS_DOCKER=false
+            PG_DOCKER_CONTAINER=""
+            if command -v docker &>/dev/null; then
+                PG_DOCKER_CONTAINER=$(docker ps --filter "ancestor=postgres" --format "{{.Names}}" 2>/dev/null | head -n 1)
+                if [ -z "$PG_DOCKER_CONTAINER" ]; then
+                    PG_DOCKER_CONTAINER=$(docker ps --format "{{.Names}} {{.Image}}" 2>/dev/null | grep -i "postgres" | awk '{print $1}' | head -n 1)
+                fi
+                if [ -n "$PG_DOCKER_CONTAINER" ]; then
+                    PG_IS_DOCKER=true
                 fi
             fi
 
-            RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            # -------------------------------------------------------------------
+            # AUTO-INSTALL postgresql-client jika psql belum ada
+            # -------------------------------------------------------------------
+            if ! command -v psql &>/dev/null; then
+                if [ "$PG_IS_DOCKER" = false ]; then
+                    echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
+                    apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+                    if command -v psql &>/dev/null; then
+                        echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
+                    else
+                        echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis.${NC}"
+                    fi
+                fi
+            fi
+
+            if [ "$PG_IS_DOCKER" = true ]; then
+                RAW_TBLS=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            else
+                RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            fi
             if [ -n "$RAW_TBLS" ]; then
                 while IFS= read -r line; do
                     [ -n "$line" ] && TABLE_LIST+=("$line")
@@ -924,19 +945,10 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
 
             # -------------------------------------------------------------------
-            # DETEKSI: Apakah PostgreSQL berjalan di Docker?
+            # PEMBERITAHUAN DOCKER (sudah dideteksi di atas)
             # -------------------------------------------------------------------
-            if command -v docker &>/dev/null; then
-                # Cari container PostgreSQL yang sedang berjalan
-                PG_DOCKER_CONTAINER=$(docker ps --filter "ancestor=postgres" --format "{{.Names}}" 2>/dev/null | head -n 1)
-                if [ -z "$PG_DOCKER_CONTAINER" ]; then
-                    # Coba cari berdasarkan image name yang mengandung "postgres"
-                    PG_DOCKER_CONTAINER=$(docker ps --format "{{.Names}} {{.Image}}" 2>/dev/null | grep -i "postgres" | awk '{print $1}' | head -n 1)
-                fi
-                if [ -n "$PG_DOCKER_CONTAINER" ]; then
-                    PG_IS_DOCKER=true
-                    echo -e "${BLUE}🐳 PostgreSQL terdeteksi berjalan di Docker container: '${PG_DOCKER_CONTAINER}'${NC}"
-                fi
+            if [ "$PG_IS_DOCKER" = true ]; then
+                echo -e "${BLUE}🐳 PostgreSQL terdeteksi berjalan di Docker container: '${PG_DOCKER_CONTAINER}'${NC}"
             fi
 
             # Fungsi helper: jalankan psql di environment yang tepat
