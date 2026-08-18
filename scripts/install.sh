@@ -1327,7 +1327,7 @@ EOF
                 
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.oracle.OracleConnector",
     "tasks.max": "1",
@@ -1356,7 +1356,7 @@ EOF
             elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
     "tasks.max": "1",
@@ -1388,7 +1388,7 @@ EOF
 
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
     "tasks.max": "1",
@@ -1407,7 +1407,7 @@ EOF
             else
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.mysql.MySqlConnector",
     "tasks.max": "1",
@@ -1432,8 +1432,13 @@ EOF
 )
             fi
 
-            # Hapus konektor jika sudah ada sebelumnya agar konfigurasi baru (SMT) bisa masuk
-            curl -s -X DELETE "http://localhost:8083/connectors/${TARGET_DB}-connector" >/dev/null 2>&1 || true
+            # Hapus SEMUA konektor lama yang berkaitan dengan database ini
+            OLD_CONNECTORS=$(curl -s http://localhost:8083/connectors | grep -o '"[^"]*"' | tr -d '"' | grep "^${TARGET_DB}-connector" || true)
+            if [ -n "$OLD_CONNECTORS" ]; then
+                for oc in $OLD_CONNECTORS; do
+                    curl -s -X DELETE "http://localhost:8083/connectors/${oc}" >/dev/null 2>&1 || true
+                done
+            fi
             sleep 1
 
             DBZ_BODY_FILE="/tmp/dbz_response_$$.json"
@@ -1445,10 +1450,6 @@ EOF
                 echo -e "${GREEN}✓ Konektor Debezium didaftarkan (HTTP ${DBZ_RESP}). Memverifikasi status task...${NC}"
                 
                 # ---------------------------------------------------------------
-                # VERIFIKASI: Cek apakah TASK konektor benar-benar RUNNING
-                # Konektor bisa status "RUNNING" tapi TASK-nya "FAILED"
-                # ---------------------------------------------------------------
-                CONNECTOR_NAME="${TARGET_DB}-connector"
                 TASK_OK=false
                 for i in $(seq 1 12); do
                     sleep 5
