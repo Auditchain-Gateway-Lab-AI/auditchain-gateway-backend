@@ -735,6 +735,19 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
         TABLE_LIST=()
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            # -------------------------------------------------------------------
+            # AUTO-INSTALL postgresql-client jika psql belum ada
+            # -------------------------------------------------------------------
+            if ! command -v psql &>/dev/null; then
+                echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
+                apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+                if command -v psql &>/dev/null; then
+                    echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis. Mencoba deteksi Docker...${NC}"
+                fi
+            fi
+
             RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
             if [ -n "$RAW_TBLS" ]; then
                 while IFS= read -r line; do
@@ -908,18 +921,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             PG_IS_DOCKER=false
             PG_DOCKER_CONTAINER=""
 
-            # -------------------------------------------------------------------
-            # AUTO-INSTALL postgresql-client jika psql belum ada
-            # -------------------------------------------------------------------
-            if ! command -v psql &>/dev/null; then
-                echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
-                apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
-                if command -v psql &>/dev/null; then
-                    echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
-                else
-                    echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis. Mencoba deteksi Docker...${NC}"
-                fi
-            fi
+
 
             # -------------------------------------------------------------------
             # DETEKSI: Apakah PostgreSQL berjalan di Docker?
@@ -1291,7 +1293,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-        "name": "'"${CONNECTOR_NAME}"'",
+        "name": "${CONNECTOR_NAME}",
         "config": {
             "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
