@@ -351,7 +351,14 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// Jika belum, auto-detect berdasarkan nama tabel (user, account, member, dll)
 	isUserTable := false
 	if agentCfg.UserTableName != "" {
-		isUserTable = strings.Contains(tableName, agentCfg.UserTableName)
+		// agentCfg.UserTableName bisa berupa "public.users" atau "dbo.users"
+		// sedangkan tableName dari Debezium mungkin cuma "users".
+		parts := strings.Split(agentCfg.UserTableName, ".")
+		baseTarget := parts[len(parts)-1]
+		
+		isUserTable = strings.EqualFold(tableName, baseTarget) || 
+			strings.Contains(agentCfg.UserTableName, tableName) || 
+			strings.Contains(tableName, agentCfg.UserTableName)
 	} else {
 		lowerTable := strings.ToLower(tableName)
 		for _, keyword := range []string{"user", "account", "akun", "pengguna", "member", "employee", "karyawan"} {
