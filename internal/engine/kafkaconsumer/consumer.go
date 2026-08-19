@@ -371,6 +371,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	// Untuk tabel user, kita WAJIB memproses operasi "r" (snapshot read)
 	// agar memori identitas Gateway terisi dengan user yang sudah ada.
+	log.Printf("🔎 [DEBUG] tableName=%s, agentCfg.UserTableName=%s, isUserTable=%v", tableName, agentCfg.UserTableName, isUserTable)
 	if isUserTable {
 		e.processClientUserCDC(payload, cfg, tableName, agentCfg)
 	}
@@ -430,9 +431,13 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// Resolusi CUID/UUID → Nama Manusia
 	// Jika actor terlihat seperti ID acak (Prisma CUID, UUID, dll),
 	// coba cari nama aslinya di tabel client_users
+	log.Printf("🔎 [DEBUG] Actor SEBELUM resolve: '%s', looksLikeID=%v, table=%s", actor, looksLikeGeneratedID(actor), tableName)
 	if actor != "" && actor != "Unknown" && looksLikeGeneratedID(actor) {
 		if resolved := e.resolveActorName(cfg.ClientID, actor); resolved != "" {
+			log.Printf("✅ [DEBUG] Actor RESOLVED: '%s' → '%s'", actor, resolved)
 			actor = resolved
+		} else {
+			log.Printf("❌ [DEBUG] Actor TIDAK BISA di-resolve: '%s' — client_users kosong atau tidak ditemukan", actor)
 		}
 	}
 
@@ -917,14 +922,22 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 		return cached.(string)
 	}
 
-	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi CUID dari Prisma)
+	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi UUID/CUID)
 	var user models.ClientUser
 	err := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).First(&user).Error
 	if err != nil {
-		// Tidak ditemukan — JANGAN cache hasil kosong secara permanen!
-		// Data user mungkin belum tersinkron (race condition CDC).
-		// Biarkan lookup dicoba lagi pada pesan berikutnya.
-		return ""
+		// Fallback: coba cari di raw_data (mungkin ID disimpan dengan key berbeda)
+		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di username='%s', coba cari di raw_data...", actorID)
+		err2 := e.DB.Where("client_id = ? AND raw_data LIKE ?", clientID, "%"+actorID+"%").First(&user).Error
+		if err2 != nil {
+			log.Printf("❌ [DEBUG] resolveActorName: GAGAL TOTAL untuk actorID='%s'. Tidak ada data di client_users.", actorID)
+			// Hitung total rows di client_users untuk debugging
+			var count int64
+			e.DB.Model(&models.ClientUser{}).Where("client_id = ?", clientID).Count(&count)
+			log.Printf("📊 [DEBUG] Total client_users untuk client '%s': %d", clientID, count)
+			return ""
+		}
+		log.Printf("✅ [DEBUG] resolveActorName: DITEMUKAN via raw_data fallback untuk actorID='%s'", actorID)
 	}
 
 	// Prioritas: Email > FullName > Username (tetap CUID)
