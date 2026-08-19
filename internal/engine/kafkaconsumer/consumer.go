@@ -866,9 +866,10 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	e.actorCache.Delete(cfg.ClientID + ":" + lookupKey)
 
 	// Backfill: update audit_logs yang masih menyimpan UUID sebagai actor
-	resolvedName := fullName
+	// Prioritas: Email > FullName > Username
+	resolvedName := email
 	if resolvedName == "" {
-		resolvedName = email
+		resolvedName = fullName
 	}
 	if resolvedName == "" {
 		resolvedName = username
@@ -919,12 +920,12 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 		return ""
 	}
 
-	// Prioritas: FullName > Email > Username (tetap CUID)
+	// Prioritas: Email > FullName > Username (tetap CUID)
 	resolved := ""
-	if user.FullName != "" {
-		resolved = user.FullName
-	} else if user.Email != "" {
+	if user.Email != "" {
 		resolved = user.Email
+	} else if user.FullName != "" {
+		resolved = user.FullName
 	}
 
 	e.actorCache.Store(cacheKey, resolved)
