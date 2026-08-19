@@ -918,7 +918,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             fi
 
             if [ "$PG_IS_DOCKER" = true ]; then
-                RAW_TBLS=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+                RAW_TBLS=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
             else
                 RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
             fi
@@ -1121,7 +1121,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 local db_name="${1:-postgres}"
                 shift
                 if [ "$PG_IS_DOCKER" = true ]; then
-                    docker exec -i "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER_FALLBACK" -d "$db_name" "$@" 2>/dev/null
+                    docker exec "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER_FALLBACK" -d "$db_name" "$@" 2>/dev/null
                 else
                     sudo -u postgres psql -p "$DB_PORT" -d "$db_name" "$@" 2>/dev/null
                 fi
@@ -1136,7 +1136,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 echo -e "\n${BLUE}🐳 [Docker Mode] Mengkonfigurasi PostgreSQL di dalam Docker...${NC}"
 
                 # Cek wal_level saat ini
-                CURRENT_WAL=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                CURRENT_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
                 CURRENT_WAL=$(echo "$CURRENT_WAL" | tr -d '[:space:]')
 
                 if [ "$CURRENT_WAL" != "logical" ]; then
@@ -1189,7 +1189,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                                     sleep 5
 
                                     # Verifikasi
-                                    NEW_WAL=$(docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                                    NEW_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
                                     NEW_WAL=$(echo "$NEW_WAL" | tr -d '[:space:]')
                                     if [ "$NEW_WAL" = "logical" ]; then
                                         echo -e "${GREEN}✓ wal_level berhasil diubah ke 'logical' secara permanen!${NC}"
@@ -1299,11 +1299,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "\n${BLUE}🐳 [Docker Mode] Membuat user database otomatis via Docker...${NC}"
             echo -e "Membuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
 
-            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || \
-            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || true
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || \
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || true
 
-            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
-            docker exec -i "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
             USER_CREATED=true
                echo -e "  - Mengecek dan menghapus replication slot yang menggantung..."
             docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE active = false;" >/dev/null 2>&1 || true
