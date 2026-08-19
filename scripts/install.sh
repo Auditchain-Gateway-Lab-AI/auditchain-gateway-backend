@@ -833,7 +833,24 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 DETECTED_USER_COL="username"
             fi
         else
-            echo -e "${YELLOW}Tidak ditemukan tabel user secara otomatis.${NC}"
+            # Fallback: query database langsung untuk mencari tabel user
+            echo -e "${YELLOW}Tidak ditemukan tabel user di TABLE_LIST, mencoba query database langsung...${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                USER_TABLES=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '(user|account|akun|pengguna|member|employee|karyawan)' LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$USER_TABLES" ]; then
+                    DETECTED_USER_TABLE="$USER_TABLES"
+                    echo -e "${GREEN}✓ Tabel user ditemukan via query langsung: ${DETECTED_USER_TABLE}${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                USER_TABLES=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SELECT CONCAT('$TARGET_DB.', table_name) FROM information_schema.tables WHERE table_schema='$TARGET_DB' AND table_name REGEXP '(user|account|akun|pengguna|member|employee|karyawan)' LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$USER_TABLES" ]; then
+                    DETECTED_USER_TABLE="$USER_TABLES"
+                    echo -e "${GREEN}✓ Tabel user ditemukan via query langsung: ${DETECTED_USER_TABLE}${NC}"
+                fi
+            fi
+            if [ -z "$DETECTED_USER_TABLE" ]; then
+                echo -e "${YELLOW}⚠️  Tidak ditemukan tabel user. Resolusi nama actor mungkin tidak berfungsi.${NC}"
+            fi
         fi
 
         CHOSEN_TABLES=""
