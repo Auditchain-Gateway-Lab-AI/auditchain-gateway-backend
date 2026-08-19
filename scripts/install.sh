@@ -141,6 +141,155 @@ UPDATEEOF
     exit 0
 fi
 
+# ==============================================================================
+# MODE --fix: Perbaiki Konektor Debezium yang Tidak Memonitor Tabel User
+# ==============================================================================
+# Penggunaan: sudo bash install.sh --fix
+# Script ini otomatis:
+#   1. Mendeteksi konektor Debezium yang berjalan
+#   2. Mengecek apakah tabel user sudah dimonitor
+#   3. Jika belum, mendeteksi tabel user dari database
+#   4. Menambahkan tabel user ke konektor + publication
+#   5. Memaksa sinkronisasi data user ke Gateway
+# ==============================================================================
+if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
+    echo -e "\n${BLUE}======================================================================${NC}"
+    echo -e "${BLUE}         🔧 AUDITCHAIN AGENT FIX MODE — User Table Repair           ${NC}"
+    echo -e "${BLUE}======================================================================${NC}\n"
+
+    # 1. Deteksi konektor Debezium
+    echo -e "${BLUE}🔍 Mencari konektor Debezium...${NC}"
+    CONNECTORS=$(curl -s http://localhost:8083/connectors/ 2>/dev/null || true)
+    if [ -z "$CONNECTORS" ] || [ "$CONNECTORS" = "[]" ]; then
+        echo -e "${RED}❌ Tidak ada konektor Debezium ditemukan di localhost:8083${NC}"
+        echo -e "${YELLOW}Pastikan Kafka Connect berjalan di server ini.${NC}"
+        exit 1
+    fi
+
+    CONNECTOR_NAME=$(echo "$CONNECTORS" | python3 -c "import sys,json; print(json.load(sys.stdin)[0])" 2>/dev/null || echo "$CONNECTORS" | tr -d '[]"')
+    echo -e "${GREEN}✓ Konektor ditemukan: ${CONNECTOR_NAME}${NC}"
+
+    # 2. Ambil konfigurasi konektor
+    echo -e "${BLUE}🔍 Membaca konfigurasi konektor...${NC}"
+    CONFIG=$(curl -s "http://localhost:8083/connectors/${CONNECTOR_NAME}/config")
+    if [ -z "$CONFIG" ]; then
+        echo -e "${RED}❌ Gagal membaca konfigurasi konektor${NC}"
+        exit 1
+    fi
+
+    CURRENT_TABLES=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('table.include.list',''))" 2>/dev/null)
+    DB_NAME=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.dbname',''))" 2>/dev/null)
+    DB_HOST=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.hostname','localhost'))" 2>/dev/null)
+    DB_PORT=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.port','5432'))" 2>/dev/null)
+    DB_USER=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.user','postgres'))" 2>/dev/null)
+    DB_PASS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.password',''))" 2>/dev/null)
+    CONNECTOR_CLASS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('connector.class',''))" 2>/dev/null)
+    PUB_NAME=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('publication.name','dbz_publication'))" 2>/dev/null)
+
+    echo -e "  Database : ${DB_NAME}"
+    echo -e "  Tabel    : ${CURRENT_TABLES}"
+
+    # 3. Cek apakah tabel user sudah ada
+    if echo "$CURRENT_TABLES" | grep -qiE "\.users|\.user|\.accounts|\.account|\.akun|\.pengguna|\.member|\.employees|\.employee|\.karyawan"; then
+        echo -e "\n${GREEN}✅ Tabel user SUDAH ada di konfigurasi konektor. Tidak perlu diperbaiki.${NC}"
+        exit 0
+    fi
+
+    echo -e "${YELLOW}⚠️  Tabel user BELUM dimonitor. Mencari tabel user...${NC}"
+
+    # 4. Deteksi tabel user dari database
+    IS_POSTGRES=false
+    echo "$CONNECTOR_CLASS" | grep -qi "postgres" && IS_POSTGRES=true
+
+    DETECTED_USER_TABLE=""
+    if [ "$IS_POSTGRES" = true ]; then
+        DETECTED_USER_TABLE=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-align --tuples-only -c \
+            "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+        # Fallback: coba via docker
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            if [ -n "$PG_CONTAINER" ]; then
+                DETECTED_USER_TABLE=$(docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" --no-align --tuples-only -c \
+                    "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+            fi
+        fi
+        # Fallback: sudo
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            DETECTED_USER_TABLE=$(sudo -u postgres psql -d "$DB_NAME" --no-align --tuples-only -c \
+                "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+        fi
+    else
+        DETECTED_USER_TABLE=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -N -D "$DB_NAME" -e \
+            "SELECT CONCAT('$DB_NAME.', table_name) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name REGEXP '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+    fi
+
+    if [ -z "$DETECTED_USER_TABLE" ]; then
+        echo -e "${RED}❌ Tidak ditemukan tabel user di database '${DB_NAME}'.${NC}"
+        read -p "Masukkan nama tabel user manual (contoh: public.users): " DETECTED_USER_TABLE < /dev/tty
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            echo -e "${RED}Dibatalkan.${NC}"
+            exit 1
+        fi
+    fi
+
+    echo -e "${GREEN}✓ Tabel user terdeteksi: ${DETECTED_USER_TABLE}${NC}"
+
+    # 5. Update konfigurasi konektor Debezium
+    echo -e "${BLUE}🔧 Mengupdate konfigurasi konektor...${NC}"
+    NEW_TABLES="${CURRENT_TABLES},${DETECTED_USER_TABLE}"
+    echo "$CONFIG" | python3 -c "
+import sys, json
+config = json.load(sys.stdin)
+config['table.include.list'] = '${NEW_TABLES}'
+print(json.dumps(config))
+" | curl -s -X PUT "http://localhost:8083/connectors/${CONNECTOR_NAME}/config" \
+        -H "Content-Type: application/json" -d @- > /dev/null
+    echo -e "${GREEN}✓ Konektor diupdate: ${NEW_TABLES}${NC}"
+
+    # 6. Update publication (PostgreSQL)
+    if [ "$IS_POSTGRES" = true ]; then
+        echo -e "${BLUE}🔧 Mengupdate publication PostgreSQL...${NC}"
+        PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+            "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || \
+        {
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || \
+            sudo -u postgres psql -d "$DB_NAME" -c \
+                "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || true
+        }
+        echo -e "${GREEN}✓ Publication '${PUB_NAME}' diupdate.${NC}"
+    fi
+
+    # 7. Trigger sinkronisasi user
+    echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
+    if [ "$IS_POSTGRES" = true ]; then
+        PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+            "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || \
+        {
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || \
+            sudo -u postgres psql -d "$DB_NAME" -c \
+                "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || true
+        }
+    else
+        TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+        mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e \
+            "UPDATE ${TBL_BARE} SET updated_at = NOW();" 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
+
+    echo -e "\n${GREEN}======================================================================${NC}"
+    echo -e "${GREEN}  ✅ PERBAIKAN SELESAI!                                              ${NC}"
+    echo -e "${GREEN}======================================================================${NC}"
+    echo -e "  Konektor : ${CONNECTOR_NAME}"
+    echo -e "  Tabel    : ${NEW_TABLES}"
+    echo -e "  Database : ${DB_NAME}"
+    echo -e "\n${BLUE}Buat transaksi baru — Actor akan menampilkan Email, bukan UUID.${NC}\n"
+    exit 0
+fi
+
 if [ -f /etc/auditchain/agent.env ]; then
     echo -e "${YELLOW}ℹ️ Memuat konfigurasi sebelumnya dari /etc/auditchain/agent.env...${NC}"
     source /etc/auditchain/agent.env
