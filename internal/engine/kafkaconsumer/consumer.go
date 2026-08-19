@@ -809,6 +809,22 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 		}
 	}
 
+	// Gabungkan first_name + last_name jika kolom 'name' tunggal tidak ada
+	if fullName == "" {
+		firstName := ""
+		lastName := ""
+		if fnRaw, ok := findFieldInsensitive(payload, "first_name"); ok && fnRaw != nil {
+			firstName = extractScalarValue(fnRaw)
+		}
+		if lnRaw, ok := findFieldInsensitive(payload, "last_name"); ok && lnRaw != nil {
+			lastName = extractScalarValue(lnRaw)
+		}
+		combined := strings.TrimSpace(firstName + " " + lastName)
+		if combined != "" {
+			fullName = combined
+		}
+	}
+
 	// Jika fullName kosong tapi username ada dan bukan UUID/CUID, pakai username sebagai nama
 	if fullName == "" && username != "" && !looksLikeGeneratedID(username) {
 		fullName = username
@@ -848,6 +864,23 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 
 	// Invalidate actor cache agar resolusi langsung pakai data terbaru
 	e.actorCache.Delete(cfg.ClientID + ":" + lookupKey)
+
+	// Backfill: update audit_logs yang masih menyimpan UUID sebagai actor
+	resolvedName := fullName
+	if resolvedName == "" {
+		resolvedName = email
+	}
+	if resolvedName == "" {
+		resolvedName = username
+	}
+	if resolvedName != "" && lookupKey != "" && looksLikeGeneratedID(lookupKey) {
+		result := e.DB.Model(&models.AuditLog{}).Where(
+			"client_id = ? AND actor = ?", cfg.ClientID, lookupKey,
+		).Update("actor", resolvedName)
+		if result.RowsAffected > 0 {
+			log.Printf("🔄 [KafkaConsumer] Backfill: %d audit log(s) actor '%s' → '%s'", result.RowsAffected, lookupKey, resolvedName)
+		}
+	}
 }
 
 // looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
@@ -880,8 +913,9 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 	var user models.ClientUser
 	err := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).First(&user).Error
 	if err != nil {
-		// Tidak ditemukan, cache sebagai "" agar tidak query ulang
-		e.actorCache.Store(cacheKey, "")
+		// Tidak ditemukan — JANGAN cache hasil kosong secara permanen!
+		// Data user mungkin belum tersinkron (race condition CDC).
+		// Biarkan lookup dicoba lagi pada pesan berikutnya.
 		return ""
 	}
 
