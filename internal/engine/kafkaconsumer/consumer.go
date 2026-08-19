@@ -928,7 +928,7 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 	if err != nil {
 		// Fallback: coba cari di raw_data (mungkin ID disimpan dengan key berbeda)
 		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di username='%s', coba cari di raw_data...", actorID)
-		err2 := e.DB.Where("client_id = ? AND raw_data LIKE ?", clientID, "%"+actorID+"%").First(&user).Error
+		err2 := e.DB.Where("client_id = ? AND CAST(raw_data AS TEXT) LIKE ?", clientID, "%"+actorID+"%").First(&user).Error
 		if err2 != nil {
 			log.Printf("❌ [DEBUG] resolveActorName: GAGAL TOTAL untuk actorID='%s'. Tidak ada data di client_users.", actorID)
 			// Hitung total rows di client_users untuk debugging
