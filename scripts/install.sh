@@ -11,6 +11,12 @@
 # 5. Telemetry Phone-Home Callback to AuditChain Gateway
 # ==============================================================================
 
+# Seluruh script dibungkus dalam fungsi agar saat dijalankan via pipe
+# (curl ... | bash), bash membaca SELURUH body fungsi ke memori terlebih dahulu.
+# Ini mencegah command seperti docker exec / psql "memakan" sisa isi script.
+# Pola ini digunakan oleh Docker, Node.js, dan installer besar lainnya.
+do_install() {
+
 set -e
 
 # Colors for Terminal Output
@@ -1150,12 +1156,22 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
                     if [ -n "$PG_COMPOSE_DIR" ] && [ -d "$PG_COMPOSE_DIR" ]; then
                         COMPOSE_FILE=""
-                        for cf in "$PG_COMPOSE_DIR/docker-compose.yml" "$PG_COMPOSE_DIR/docker-compose.yaml" "$PG_COMPOSE_DIR/compose.yml" "$PG_COMPOSE_DIR/compose.yaml"; do
+                        for cf in "$PG_COMPOSE_DIR/docker-compose.yml" "$PG_COMPOSE_DIR/docker-compose.yaml" "$PG_COMPOSE_DIR/docker-compose.dev.yml" "$PG_COMPOSE_DIR/docker-compose.dev.yaml" "$PG_COMPOSE_DIR/docker-compose.override.yml" "$PG_COMPOSE_DIR/docker-compose.override.yaml" "$PG_COMPOSE_DIR/docker-compose.prod.yml" "$PG_COMPOSE_DIR/docker-compose.production.yml" "$PG_COMPOSE_DIR/compose.yml" "$PG_COMPOSE_DIR/compose.yaml"; do
                             if [ -f "$cf" ]; then
                                 COMPOSE_FILE="$cf"
                                 break
                             fi
                         done
+
+                        # Jika tidak ditemukan, coba cari compose file apa saja yang mengandung postgres
+                        if [ -z "$COMPOSE_FILE" ]; then
+                            for cf in "$PG_COMPOSE_DIR"/docker-compose*.yml "$PG_COMPOSE_DIR"/docker-compose*.yaml "$PG_COMPOSE_DIR"/compose*.yml "$PG_COMPOSE_DIR"/compose*.yaml; do
+                                if [ -f "$cf" ] && grep -q "postgres" "$cf" 2>/dev/null; then
+                                    COMPOSE_FILE="$cf"
+                                    break
+                                fi
+                            done
+                        fi
 
                         if [ -n "$COMPOSE_FILE" ]; then
                             echo -e "${BLUE}   Ditemukan: ${COMPOSE_FILE}${NC}"
@@ -1184,8 +1200,8 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                                     fi
 
                                     # Restart container PostgreSQL via compose
-                                    echo -e "${YELLOW}   Me-restart PostgreSQL container...${NC}"
-                                    (cd "$PG_COMPOSE_DIR" && docker compose restart "$PG_SERVICE" 2>/dev/null || docker-compose restart "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
+                                    echo -e "${YELLOW}   Me-restart PostgreSQL container (recreate agar wal_level aktif)...${NC}"
+                                    (cd "$PG_COMPOSE_DIR" && docker compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker-compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
                                     sleep 5
 
                                     # Verifikasi
@@ -1666,7 +1682,7 @@ EOF
                     for j in $(seq 1 6); do
                         sleep 5
                         # List semua topic di Kafka via Debezium REST API (Kafka Connect)
-                        TOPICS=$(docker exec $(docker ps -qf "ancestor=quay.io/debezium/kafka:2.7" 2>/dev/null || docker ps -qf "ancestor=quay.io/debezium/kafka:2.4" 2>/dev/null) /kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null || echo "")
+                        TOPICS=$(docker exec $(docker ps -qf "ancestor=quay.io/debezium/kafka:2.7" 2>/dev/null || docker ps -qf "ancestor=quay.io/debezium/kafka:2.4" 2>/dev/null || echo "none") /kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null < /dev/null || echo "")
                         MATCHING=$(echo "$TOPICS" | grep -c "^${EXPECTED_PREFIX}" 2>/dev/null || true)
                         echo -e "  [${j}/6] Ditemukan ${MATCHING} topic dengan prefix '${EXPECTED_PREFIX}'"
                         if [ "$MATCHING" -gt 0 ]; then
@@ -1781,3 +1797,6 @@ echo "  • Status Dashboard   : Pending Verification by Admin 🟡"
 echo " --------------------------------------------------------------------"
 echo -e "${BLUE}Silakan hubungi Admin AuditChain untuk pengaktifan koneksi resmi.${NC}\n"
 
+}
+# Eksekusi fungsi utama
+do_install "$@"
