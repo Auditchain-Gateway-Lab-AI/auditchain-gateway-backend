@@ -1508,6 +1508,51 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "Instalasi akan tetap dilanjutkan, status konektor mungkin 'failed'."
         fi
 
+        # Deteksi awal tabel berlangsung sebelum kredensial database diminta.
+        # Pada PostgreSQL native/external tidak ada user sistem `postgres`,
+        # sehingga deteksi awal bisa kosong walaupun public.users ada. Ulangi
+        # setelah koneksi TCP tervalidasi dan tambahkan tabel user sebelum
+        # connector Debezium dibuat.
+        if [ "$CONN_OK" = true ] && [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            if [ -z "$DETECTED_USER_TABLE" ]; then
+                DETECTED_USER_TABLE=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" --no-align --tuples-only -c \
+                    "SELECT schemaname || '.' || tablename
+                     FROM pg_tables
+                     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+                       AND tablename ~* '(user|account|akun|pengguna|member|employee|karyawan)'
+                     ORDER BY CASE WHEN tablename ~* '^users?$' THEN 0 ELSE 1 END, tablename
+                     LIMIT 1;" 2>/dev/null || true)
+            fi
+
+            if [ -n "$DETECTED_USER_TABLE" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+                TBL_SCHEMA=$(echo "$DETECTED_USER_TABLE" | awk -F. '{if (NF > 1) print $1; else print "public"}')
+                LATE_USER_COL=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" --no-align --tuples-only -c \
+                    "SELECT column_name
+                     FROM information_schema.columns
+                     WHERE table_schema = '${TBL_SCHEMA}' AND table_name = '${TBL_BARE}'
+                       AND column_name ~* '^(username|email|login|name|nama|user_name)$'
+                     ORDER BY CASE column_name WHEN 'username' THEN 1 WHEN 'email' THEN 2 ELSE 3 END
+                     LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$LATE_USER_COL" ]; then
+                    DETECTED_USER_COL="$LATE_USER_COL"
+                elif [ -z "$DETECTED_USER_COL" ]; then
+                    DETECTED_USER_COL="id"
+                fi
+
+                case ",${CHOSEN_TABLES}," in
+                    *",${DETECTED_USER_TABLE},"*) ;;
+                    *)
+                        CHOSEN_TABLES="${CHOSEN_TABLES:+${CHOSEN_TABLES},}${DETECTED_USER_TABLE}"
+                        SELECTED_TABLES="$CHOSEN_TABLES"
+                        echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis ditambahkan setelah verifikasi koneksi.${NC}"
+                        ;;
+                esac
+            else
+                echo -e "${YELLOW}⚠️  Tabel user tidak ditemukan setelah koneksi database berhasil; resolusi UUID akan dinonaktifkan.${NC}"
+            fi
+        fi
+
         if [ "$CHOSEN_ENGINE" = "oracle" ]; then
             echo -e "\n${YELLOW}⚠️ PERHATIAN: Oracle Database memerlukan konfigurasi tambahan!${NC}"
             echo -e "Pastikan database telah berada di mode ARCHIVELOG dan fitur LogMiner diaktifkan."
