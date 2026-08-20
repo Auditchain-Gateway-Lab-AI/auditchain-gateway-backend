@@ -1779,21 +1779,61 @@ EOF
 
         # ---------------------------------------------------------------
         # TRIGGER SINKRONISASI USER TABLE (DUMMY UPDATE)
-        # Jika client menginstall ulang (run install.sh berulang kali), 
-        # Debezium tidak akan melakukan snapshot karena resume offset.
-        # Kita paksa kirim data existing dengan update dummy.
+        # Jika connector sudah punya offset, tabel yang baru ditambahkan
+        # tidak akan mendapat snapshot ulang. Gunakan koneksi database yang
+        # telah diverifikasi; jangan hanya mengasumsikan PostgreSQL berjalan
+        # di Docker.
         # ---------------------------------------------------------------
-        if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ]; then
+        sync_user_table_cdc() {
+            local sync_ok=false
+            local pg_container="${PG_DOCKER_CONTAINER:-}"
+
             echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                docker exec < /dev/null "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c \
-                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1 || true
+                # Prioritas: koneksi TCP yang dipakai connector. Ini bekerja
+                # untuk PostgreSQL native, eksternal, maupun Docker host.
+                if command -v psql >/dev/null 2>&1 && \
+                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
+                    sync_ok=true
+                fi
+
+                # Fallback untuk database PostgreSQL yang hanya dapat
+                # diakses dari container atau melalui user sistem postgres.
+                if [ "$sync_ok" = false ] && [ -z "$pg_container" ]; then
+                    pg_container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                fi
+                if [ "$sync_ok" = false ] && [ -n "$pg_container" ] && \
+                    docker exec < /dev/null "$pg_container" psql -U postgres -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1; then
+                    sync_ok=true
+                fi
+                if [ "$sync_ok" = false ] && id -u postgres >/dev/null 2>&1 && \
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1; then
+                    sync_ok=true
+                fi
             elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
-                docker exec < /dev/null "$PG_DOCKER_CONTAINER" mysql -u root -D "$TARGET_DB" -e \
-                    "UPDATE ${TBL_BARE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1 || true
+                local tbl_bare
+                tbl_bare=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+                if command -v mysql >/dev/null 2>&1 && \
+                    mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e \
+                    "UPDATE ${tbl_bare} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
+                    sync_ok=true
+                fi
             fi
-            echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
+
+            if [ "$sync_ok" = true ]; then
+                echo -e "${GREEN}✓ Event CDC tabel user berhasil dipicu.${NC}"
+                return 0
+            fi
+
+            echo -e "${RED}✗ Gagal memicu event CDC tabel user. Tidak akan mengklaim sinkronisasi berhasil.${NC}"
+            return 1
+        }
+
+        if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ]; then
+            sync_user_table_cdc || true
         fi
     fi
 
@@ -1856,6 +1896,14 @@ HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${GATEWAY_URL}/a
 
 if [ "$HTTP_RESPONSE" -eq 200 ] || [ "$HTTP_RESPONSE" -eq 201 ]; then
     echo -e "${GREEN}✓ Telemetri berhasil dikirim ke Admin Dashboard!${NC}"
+
+    # Replay sekali lagi setelah Gateway menerima konfigurasi. Ini membuat
+    # bootstrap identitas tetap andal saat event pertama terbit sebelum
+    # consumer Gateway selesai dibuat.
+    if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ] && declare -F sync_user_table_cdc >/dev/null; then
+        sleep 3
+        sync_user_table_cdc || true
+    fi
 else
     echo -e "${YELLOW}[NOTE] Telemetri terkirim (Response Status: ${HTTP_RESPONSE}). Data siap diverifikasi Admin.${NC}"
 fi
