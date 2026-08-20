@@ -271,18 +271,18 @@ print(json.dumps(config))
     echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
     if [ "$IS_POSTGRES" = true ]; then
         PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
-            "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || \
+            "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || \
         {
             PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
             [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
-                "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || \
+                "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || \
             sudo -u postgres psql -d "$DB_NAME" -c \
-                "UPDATE ${DETECTED_USER_TABLE} SET updated_at = NOW();" 2>/dev/null || true
+                "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || true
         }
     else
         TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
         mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e \
-            "UPDATE ${TBL_BARE} SET updated_at = NOW();" 2>/dev/null || true
+            "UPDATE ${TBL_BARE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || true
     fi
     echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
 
@@ -1712,6 +1712,25 @@ EOF
         else
             echo -e "${YELLOW}[NOTE] Debezium belum siap merespon. Konfigurasi otomatis ditunda.${NC}"
             CONNECTOR_SETUP_STATUS="debezium_not_ready"
+        fi
+
+        # ---------------------------------------------------------------
+        # TRIGGER SINKRONISASI USER TABLE (DUMMY UPDATE)
+        # Jika client menginstall ulang (run install.sh berulang kali), 
+        # Debezium tidak akan melakukan snapshot karena resume offset.
+        # Kita paksa kirim data existing dengan update dummy.
+        # ---------------------------------------------------------------
+        if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ]; then
+            echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                docker exec < /dev/null "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1 || true
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+                docker exec < /dev/null "$PG_DOCKER_CONTAINER" mysql -u root -D "$TARGET_DB" -e \
+                    "UPDATE ${TBL_BARE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1 || true
+            fi
+            echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
         fi
     fi
 
