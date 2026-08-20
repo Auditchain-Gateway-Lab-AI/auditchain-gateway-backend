@@ -2,10 +2,15 @@ package client
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
+	"time"
 
 	"go-blockchain-api/internal/models"
 	"net/http"
@@ -239,6 +244,10 @@ func (h *Handler) DeleteClient(c *gin.Context) {
 	}
 
 	if err := h.Service.DeleteClient(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan atau sudah dihapus"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus klien"})
 		return
 	}
@@ -600,6 +609,8 @@ type AgentTelemetryRequest struct {
 	DBName          string `json:"db_name"`
 	DBTables        string `json:"db_tables"`
 	ConnectorStatus string `json:"connector_status"`
+	UserTableName   string `json:"user_table_name"`
+	UserColumnName  string `json:"user_column_name"`
 }
 
 func (h *Handler) ProcessTelemetry(c *gin.Context) {
@@ -622,17 +633,21 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			if req.DBName != "" {
 				companyName = "Auto Registered (" + req.Hostname + " - " + req.DBName + ")"
 			}
+			hash := sha256.Sum256([]byte(req.APIKeyPrefix))
+			apiKeyHash := hex.EncodeToString(hash[:])
+
 			client = models.Client{
 				CompanyName:  companyName,
-				APIKeyPrefix: req.APIKeyPrefix,
+				APIKeyPrefix: searchPrefix,
+				APIKeyHash:   apiKeyHash,
 				Status:       "active",
 			}
 			if err := h.DB.Create(&client).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan klien baru"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendaftarkan klien baru: " + err.Error()})
 				return
 			}
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error: " + err.Error()})
 			return
 		}
 	}
@@ -648,11 +663,16 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			DBName:          req.DBName,
 			DBTables:        req.DBTables,
 			ConnectorStatus: req.ConnectorStatus,
+			UserTableName:   req.UserTableName,
+			UserColumnName:  req.UserColumnName,
 			IsActive:        true,
 		}
 		h.DB.Create(&agentCfg)
 	} else {
-		h.DB.Model(&agentCfg).Updates(map[string]interface{}{
+		// Installer lama atau deteksi database yang gagal mengirim string kosong
+		// untuk konfigurasi user. Jangan sampai telemetry seperti itu menghapus
+		// konfigurasi yang sebelumnya sudah diatur admin.
+		updates := map[string]interface{}{
 			"agent_url":        req.AgentServerURL,
 			"tailscale_ip":     req.TailscaleIP,
 			"hostname":         req.Hostname,
@@ -661,7 +681,17 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			"db_tables":        req.DBTables,
 			"connector_status": req.ConnectorStatus,
 			"is_active":        true,
-		})
+		}
+		if userTableName := strings.TrimSpace(req.UserTableName); userTableName != "" {
+			updates["user_table_name"] = userTableName
+		}
+		if userColumnName := strings.TrimSpace(req.UserColumnName); userColumnName != "" {
+			updates["user_column_name"] = userColumnName
+		}
+		if err := h.DB.Model(&agentCfg).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memperbarui telemetry agent: " + err.Error()})
+			return
+		}
 	}
 
 	sourceSys := req.Hostname
@@ -791,4 +821,228 @@ func (h *Handler) ServeInstallScript(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusNotFound, gin.H{"error": "File script install.sh tidak ditemukan di server Gateway"})
+}
+
+func (h *Handler) GetClientUsersCDC(c *gin.Context) {
+	var users []models.ClientUser
+	if err := h.DB.Order("client_id asc, last_seen_at desc").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data user client"})
+		return
+	}
+
+	// Kelompokkan per client
+	type UserResponse struct {
+		Username    string    `json:"username"`
+		Email       string    `json:"email"`
+		FullName    string    `json:"full_name"`
+		SourceTable string    `json:"source_table"`
+		LastSeenAt  time.Time `json:"last_seen_at"`
+	}
+	type ClientUsersResponse struct {
+		ClientID    string         `json:"client_id"`
+		CompanyName string         `json:"company_name"`
+		Users       []UserResponse `json:"users"`
+	}
+
+	clientMap := make(map[string]*ClientUsersResponse)
+
+	for _, u := range users {
+		if _, exists := clientMap[u.ClientID]; !exists {
+			var client models.Client
+			h.DB.Where("id = ?", u.ClientID).First(&client)
+			clientMap[u.ClientID] = &ClientUsersResponse{
+				ClientID:    u.ClientID,
+				CompanyName: client.CompanyName,
+				Users:       []UserResponse{},
+			}
+		}
+		clientMap[u.ClientID].Users = append(clientMap[u.ClientID].Users, UserResponse{
+			Username:    u.Username,
+			Email:       u.Email,
+			FullName:    u.FullName,
+			SourceTable: u.SourceTable,
+			LastSeenAt:  u.LastSeenAt,
+		})
+	}
+
+	var response []ClientUsersResponse
+	for _, val := range clientMap {
+		response = append(response, *val)
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) GetMyUsersCDC(c *gin.Context) {
+	clientIDVal, exists := c.Get("client_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client tidak ditemukan pada token."})
+		return
+	}
+	clientID, ok := clientIDVal.(string)
+	if !ok || clientID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client pada token tidak valid."})
+		return
+	}
+
+	var users []models.ClientUser
+	if err := h.DB.Where("client_id = ?", clientID).Order("last_seen_at desc").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data user Anda"})
+		return
+	}
+
+	type UserResponse struct {
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		FullName   string    `json:"full_name"`
+		LastSeenAt time.Time `json:"last_seen_at"`
+	}
+
+	var response []UserResponse
+	for _, u := range users {
+		response = append(response, UserResponse{
+			Username:   u.Username,
+			Email:      u.Email,
+			FullName:   u.FullName,
+			LastSeenAt: u.LastSeenAt,
+		})
+	}
+
+	// Tangani array kosong agar return [] bukan null
+	if response == nil {
+		response = []UserResponse{}
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+type UpdateUserTableRequest struct {
+	UserTableName string `json:"user_table_name" binding:"required"`
+	// Kolom ini opsional karena consumer dapat mendeteksi email/nama secara
+	// otomatis. Tabel user tetap wajib agar event snapshot diproses.
+	UserColumnName string `json:"user_column_name"`
+}
+
+func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
+	clientID := c.Param("id")
+	var req UpdateUserTableRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.UserTableName = strings.TrimSpace(req.UserTableName)
+	req.UserColumnName = strings.TrimSpace(req.UserColumnName)
+	if req.UserTableName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_table_name tidak boleh kosong"})
+		return
+	}
+
+	var agentCfg models.AgentConfig
+	if err := h.DB.Where("client_id = ?", clientID).First(&agentCfg).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent config tidak ditemukan untuk klien ini"})
+		return
+	}
+
+	// 1. Update DB Gateway
+	agentCfg.UserTableName = req.UserTableName
+	agentCfg.UserColumnName = req.UserColumnName
+	if err := h.DB.Save(&agentCfg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan konfigurasi ke database"})
+		return
+	}
+
+	// 2. Remote update ke Debezium
+	if agentCfg.AgentURL == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success_local_only",
+			"message": "Berhasil disimpan di Gateway, namun klien ini tidak memiliki Agent URL untuk update remote.",
+		})
+		return
+	}
+
+	// Nama konektor biasanya adalah DBName + "-connector"
+	connectorName := agentCfg.DBName + "-connector"
+	getConfigUrl := fmt.Sprintf("%s/connectors/%s/config", agentCfg.AgentURL, connectorName)
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Get(getConfigUrl)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success_local_only",
+			"message": "Berhasil disimpan lokal, namun gagal menghubungi Debezium klien: " + err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success_local_only",
+			"message": fmt.Sprintf("Berhasil disimpan lokal, namun konektor '%s' tidak ditemukan di Debezium klien (HTTP %d).", connectorName, resp.StatusCode),
+		})
+		return
+	}
+
+	var connectorConfig map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&connectorConfig); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success_local_only",
+			"message": "Berhasil disimpan lokal, namun gagal memparsing konfigurasi dari Debezium klien.",
+		})
+		return
+	}
+
+	// 3. Inject ke table.include.list
+	includeListRaw, ok := connectorConfig["table.include.list"]
+	if ok && includeListRaw != nil {
+		includeList := fmt.Sprintf("%v", includeListRaw)
+		// Cek apakah tabel sudah ada di daftar
+		if !bytes.Contains([]byte(includeList), []byte(req.UserTableName)) {
+			// Tambahkan
+			if includeList == "" {
+				connectorConfig["table.include.list"] = req.UserTableName
+			} else {
+				connectorConfig["table.include.list"] = includeList + "," + req.UserTableName
+			}
+
+			// 4. PUT config kembali ke Debezium
+			payloadBytes, _ := json.Marshal(connectorConfig)
+			reqHttp, err := http.NewRequest(http.MethodPut, getConfigUrl, bytes.NewBuffer(payloadBytes))
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "success_local_only",
+					"message": "Berhasil disimpan lokal, gagal merakit request update remote.",
+				})
+				return
+			}
+			reqHttp.Header.Set("Content-Type", "application/json")
+
+			putResp, err := httpClient.Do(reqHttp)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "success_local_only",
+					"message": "Berhasil disimpan lokal, namun gagal mengirim update remote: " + err.Error(),
+				})
+				return
+			}
+			defer putResp.Body.Close()
+
+			if putResp.StatusCode != http.StatusOK && putResp.StatusCode != http.StatusCreated {
+				respBody, _ := io.ReadAll(putResp.Body)
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "success_local_only",
+					"message": fmt.Sprintf("Berhasil disimpan lokal, namun remote update gagal (%d): %s", putResp.StatusCode, string(respBody)),
+				})
+				return
+			}
+		}
+	} else {
+		// Jika tidak ada table.include.list (mungkin memonitor semua tabel)
+		// Tidak perlu diupdate
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success_full",
+		"message": "Berhasil menyimpan konfigurasi tabel user di Gateway DAN berhasil mengupdate Debezium klien secara remote!",
+	})
 }

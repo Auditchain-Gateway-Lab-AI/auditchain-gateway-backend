@@ -11,6 +11,12 @@
 # 5. Telemetry Phone-Home Callback to AuditChain Gateway
 # ==============================================================================
 
+# Seluruh script dibungkus dalam fungsi agar saat dijalankan via pipe
+# (curl ... | bash), bash membaca SELURUH body fungsi ke memori terlebih dahulu.
+# Ini mencegah command seperti docker exec / psql "memakan" sisa isi script.
+# Pola ini digunakan oleh Docker, Node.js, dan installer besar lainnya.
+do_install() {
+
 set -e
 
 # Colors for Terminal Output
@@ -59,7 +65,7 @@ version: '3.8'
 services:
   zookeeper:
     image: quay.io/debezium/zookeeper:2.4
-    restart: always
+    restart: unless-stopped
     ports:
       - "2181:2181"
       - "2888:2888"
@@ -75,7 +81,7 @@ services:
       start_period: 15s
   kafka:
     image: quay.io/debezium/kafka:2.4
-    restart: always
+    restart: unless-stopped
     ports:
       - "9092:9092"
     volumes:
@@ -94,7 +100,7 @@ services:
       start_period: 45s
   debezium:
     image: quay.io/debezium/connect:2.4
-    restart: always
+    restart: unless-stopped
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -138,6 +144,218 @@ UPDATEEOF
     echo -e "  • restart: always  → Container otomatis hidup saat server boot"
     echo -e "  • healthcheck      → Urutan nyala dijaga: Zookeeper → Kafka → Debezium"
     echo -e "  • Data CDC         → Tidak hilang (offset tersimpan di Kafka)\n"
+    exit 0
+fi
+
+# ==============================================================================
+# MODE --fix: Perbaiki Konektor Debezium yang Tidak Memonitor Tabel User
+# ==============================================================================
+# Penggunaan: sudo bash install.sh --fix
+# Script ini otomatis:
+#   1. Mendeteksi konektor Debezium yang berjalan
+#   2. Mengecek apakah tabel user sudah dimonitor
+#   3. Jika belum, mendeteksi tabel user dari database
+#   4. Menambahkan tabel user ke konektor + publication
+#   5. Memaksa sinkronisasi data user ke Gateway
+# ==============================================================================
+if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
+    echo -e "\n${BLUE}======================================================================${NC}"
+    echo -e "${BLUE}         🔧 AUDITCHAIN AGENT FIX MODE — User Table Repair           ${NC}"
+    echo -e "${BLUE}======================================================================${NC}\n"
+
+    # Data ini tersedia setelah instalasi awal dan dibutuhkan untuk
+    # mengirim konfigurasi tabel user yang sudah diperbaiki ke Gateway.
+    if [ -f /etc/auditchain/agent.env ]; then
+        source /etc/auditchain/agent.env
+    fi
+
+    # 1. Deteksi konektor Debezium
+    echo -e "${BLUE}🔍 Mencari konektor Debezium...${NC}"
+    CONNECTORS=$(curl -s http://localhost:8083/connectors/ 2>/dev/null || true)
+    if [ -z "$CONNECTORS" ] || [ "$CONNECTORS" = "[]" ]; then
+        echo -e "${RED}❌ Tidak ada konektor Debezium ditemukan di localhost:8083${NC}"
+        echo -e "${YELLOW}Pastikan Kafka Connect berjalan di server ini.${NC}"
+        exit 1
+    fi
+
+    CONNECTOR_NAME=$(echo "$CONNECTORS" | python3 -c "import sys,json; print(json.load(sys.stdin)[0])" 2>/dev/null || echo "$CONNECTORS" | tr -d '[]"')
+    echo -e "${GREEN}✓ Konektor ditemukan: ${CONNECTOR_NAME}${NC}"
+
+    # 2. Ambil konfigurasi konektor
+    echo -e "${BLUE}🔍 Membaca konfigurasi konektor...${NC}"
+    CONFIG=$(curl -s "http://localhost:8083/connectors/${CONNECTOR_NAME}/config")
+    if [ -z "$CONFIG" ]; then
+        echo -e "${RED}❌ Gagal membaca konfigurasi konektor${NC}"
+        exit 1
+    fi
+
+    CURRENT_TABLES=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('table.include.list',''))" 2>/dev/null)
+    DB_NAME=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.dbname',''))" 2>/dev/null)
+    DB_HOST=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.hostname','localhost'))" 2>/dev/null)
+    DB_PORT=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.port','5432'))" 2>/dev/null)
+    DB_USER=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.user','postgres'))" 2>/dev/null)
+    DB_PASS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('database.password',''))" 2>/dev/null)
+    CONNECTOR_CLASS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('connector.class',''))" 2>/dev/null)
+    PUB_NAME=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('publication.name','dbz_publication'))" 2>/dev/null)
+
+    echo -e "  Database : ${DB_NAME}"
+    echo -e "  Tabel    : ${CURRENT_TABLES}"
+
+    # 3. Cari tabel user yang sudah ada di connector. Jangan langsung exit:
+    # Gateway mungkin belum menerima user_table_name dan client_users belum
+    # pernah di-backfill, meskipun connector sudah memantau tabel tersebut.
+    DETECTED_USER_TABLE=$(printf '%s\n' "$CURRENT_TABLES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -iE '(^|\.)([^.]*user[^.]*|[^.]*account[^.]*|akun|pengguna|[^.]*member[^.]*|[^.]*employee[^.]*|karyawan)$' | head -n 1 || true)
+    USER_TABLE_ALREADY_INCLUDED=false
+    if [ -n "$DETECTED_USER_TABLE" ]; then
+        USER_TABLE_ALREADY_INCLUDED=true
+        echo -e "${GREEN}✓ Tabel user sudah dimonitor: ${DETECTED_USER_TABLE}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Tabel user BELUM dimonitor. Mencari tabel user...${NC}"
+    fi
+
+    # 4. Deteksi tabel user dari database jika belum ada di connector
+    IS_POSTGRES=false
+    echo "$CONNECTOR_CLASS" | grep -qi "postgres" && IS_POSTGRES=true
+
+    if [ -z "$DETECTED_USER_TABLE" ] && [ "$IS_POSTGRES" = true ]; then
+        DETECTED_USER_TABLE=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-align --tuples-only -c \
+            "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+        # Fallback: coba via docker
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            if [ -n "$PG_CONTAINER" ]; then
+                DETECTED_USER_TABLE=$(docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" --no-align --tuples-only -c \
+                    "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+            fi
+        fi
+        # Fallback: sudo
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            DETECTED_USER_TABLE=$(sudo -u postgres psql -d "$DB_NAME" --no-align --tuples-only -c \
+                "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+        fi
+    elif [ -z "$DETECTED_USER_TABLE" ]; then
+        DETECTED_USER_TABLE=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -N -D "$DB_NAME" -e \
+            "SELECT CONCAT('$DB_NAME.', table_name) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name REGEXP '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
+    fi
+
+    if [ -z "$DETECTED_USER_TABLE" ]; then
+        echo -e "${RED}❌ Tidak ditemukan tabel user di database '${DB_NAME}'.${NC}"
+        read -p "Masukkan nama tabel user manual (contoh: public.users): " DETECTED_USER_TABLE < /dev/tty
+        if [ -z "$DETECTED_USER_TABLE" ]; then
+            echo -e "${RED}Dibatalkan.${NC}"
+            exit 1
+        fi
+    fi
+
+    echo -e "${GREEN}✓ Tabel user terdeteksi: ${DETECTED_USER_TABLE}${NC}"
+
+    # Tentukan kolom yang aman untuk dummy update. Kolom ini juga dikirim
+    # ke Gateway sebagai preferensi identitas, namun consumer tetap punya
+    # auto-detection untuk email/nama.
+    DETECTED_USER_COL=""
+    TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+    if [ "$IS_POSTGRES" = true ]; then
+        DETECTED_USER_COL=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-align --tuples-only -c \
+            "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}' AND column_name ~* '^(username|email|login|name|nama|user_name)$' ORDER BY CASE column_name WHEN 'username' THEN 1 WHEN 'email' THEN 2 ELSE 3 END LIMIT 1;" 2>/dev/null || true)
+    else
+        DETECTED_USER_COL=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -N -D "$DB_NAME" -e \
+            "SELECT column_name FROM information_schema.columns WHERE table_schema='${DB_NAME}' AND table_name='${TBL_BARE}' AND column_name REGEXP '^(username|email|login|name|nama|user_name)$' ORDER BY FIELD(column_name, 'username', 'email', 'login', 'name', 'nama', 'user_name') LIMIT 1;" 2>/dev/null || true)
+    fi
+    if [ -z "$DETECTED_USER_COL" ]; then
+        DETECTED_USER_COL="id"
+        echo -e "${YELLOW}⚠️  Kolom nama tidak terdeteksi; memakai 'id' untuk memicu CDC.${NC}"
+    else
+        echo -e "${GREEN}✓ Kolom user terdeteksi: ${DETECTED_USER_COL}${NC}"
+    fi
+
+    # 5. Update konfigurasi konektor Debezium
+    NEW_TABLES="$CURRENT_TABLES"
+    if [ "$USER_TABLE_ALREADY_INCLUDED" = false ]; then
+        echo -e "${BLUE}🔧 Mengupdate konfigurasi konektor...${NC}"
+        NEW_TABLES="${CURRENT_TABLES:+${CURRENT_TABLES},}${DETECTED_USER_TABLE}"
+        echo "$CONFIG" | python3 -c "
+import sys, json
+config = json.load(sys.stdin)
+config['table.include.list'] = '${NEW_TABLES}'
+print(json.dumps(config))
+" | curl -s -X PUT "http://localhost:8083/connectors/${CONNECTOR_NAME}/config" \
+        -H "Content-Type: application/json" -d @- > /dev/null
+        echo -e "${GREEN}✓ Konektor diupdate: ${NEW_TABLES}${NC}"
+    fi
+
+    # 6. Update publication (PostgreSQL)
+    if [ "$IS_POSTGRES" = true ]; then
+        echo -e "${BLUE}🔧 Mengupdate publication PostgreSQL...${NC}"
+        PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+            "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || \
+        {
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || \
+            sudo -u postgres psql -d "$DB_NAME" -c \
+                "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || true
+        }
+        echo -e "${GREEN}✓ Publication '${PUB_NAME}' diupdate.${NC}"
+    fi
+
+    # 7. Trigger sinkronisasi user
+    echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
+    if [ "$IS_POSTGRES" = true ]; then
+        PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+            "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || \
+        {
+            PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+            [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || \
+            sudo -u postgres psql -d "$DB_NAME" -c \
+                "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || true
+        }
+    else
+        TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+        mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -D "$DB_NAME" -e \
+            "UPDATE ${TBL_BARE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
+
+    # Simpan hasil perbaikan di Gateway. Tanpa langkah ini consumer Gateway
+    # tidak tahu bahwa event dari tabel di atas adalah identitas user.
+    if [ -n "${AUDITCHAIN_GATEWAY_URL:-}" ] && [ -n "${AUDITCHAIN_API_KEY:-}" ] && [ -n "${KAFKA_BROKERS:-}" ] && [ -n "${AGENT_SERVER_URL:-}" ]; then
+        FIX_GATEWAY_URL=$(echo "$AUDITCHAIN_GATEWAY_URL" | sed -E 's|/api/?$||' | sed -E 's|/$||')
+        FIX_PAYLOAD=$(cat <<EOF
+{
+  "api_key_prefix": "${AUDITCHAIN_API_KEY}",
+  "kafka_brokers": "${KAFKA_BROKERS}",
+  "agent_server_url": "${AGENT_SERVER_URL}",
+  "hostname": "${HOSTNAME:-$(hostname)}",
+  "tailscale_ip": "${TAILSCALE_IP:-}",
+  "status": "running",
+  "db_engine": "${DB_ENGINE:-}",
+  "db_name": "${DB_NAME}",
+  "db_tables": "${NEW_TABLES}",
+  "connector_status": "running",
+  "user_table_name": "${DETECTED_USER_TABLE}",
+  "user_column_name": "${DETECTED_USER_COL}"
+}
+EOF
+)
+        FIX_HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${FIX_GATEWAY_URL}/api/agent/telemetry" \
+            -H "Content-Type: application/json" -d "${FIX_PAYLOAD}" || echo "000")
+        if [ "$FIX_HTTP_RESPONSE" = "200" ] || [ "$FIX_HTTP_RESPONSE" = "201" ]; then
+            echo -e "${GREEN}✓ Konfigurasi tabel user disimpan di Gateway.${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Gagal menyimpan konfigurasi tabel user ke Gateway (HTTP ${FIX_HTTP_RESPONSE}).${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️  agent.env belum lengkap; set user_table_name di Gateway secara manual.${NC}"
+    fi
+
+    echo -e "\n${GREEN}======================================================================${NC}"
+    echo -e "${GREEN}  ✅ PERBAIKAN SELESAI!                                              ${NC}"
+    echo -e "${GREEN}======================================================================${NC}"
+    echo -e "  Konektor : ${CONNECTOR_NAME}"
+    echo -e "  Tabel    : ${NEW_TABLES}"
+    echo -e "  Database : ${DB_NAME}"
+    echo -e "\n${BLUE}Buat transaksi baru — Actor akan menampilkan Email, bukan UUID.${NC}\n"
     exit 0
 fi
 
@@ -228,8 +446,8 @@ cat <<EOF > /etc/auditchain/docker-compose.yml
 version: '3.8'
 services:
   zookeeper:
-    image: quay.io/debezium/zookeeper:2.4
-    restart: always
+    image: quay.io/debezium/zookeeper:2.7
+    restart: unless-stopped
     ports:
       - "2181:2181"
       - "2888:2888"
@@ -244,15 +462,18 @@ services:
       retries: 5
       start_period: 15s
   kafka:
-    image: quay.io/debezium/kafka:2.4
-    restart: always
+    image: quay.io/debezium/kafka:2.7
+    restart: unless-stopped
     ports:
       - "9092:9092"
     volumes:
       - kafka_data:/kafka/data
     environment:
       - ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${TAILSCALE_IP}:9092
+      - KAFKA_LISTENERS=INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://${TAILSCALE_IP}:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -263,14 +484,14 @@ services:
       retries: 10
       start_period: 45s
   debezium:
-    image: quay.io/debezium/connect:2.4
-    restart: always
+    image: quay.io/debezium/connect:2.7
+    restart: unless-stopped
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
       - "8083:8083"
     environment:
-      - BOOTSTRAP_SERVERS=kafka:9092
+      - BOOTSTRAP_SERVERS=kafka:29092
       - GROUP_ID=1
       - CONFIG_STORAGE_TOPIC=my_connect_configs
       - OFFSET_STORAGE_TOPIC=my_connect_offsets
@@ -735,18 +956,118 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
         TABLE_LIST=()
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-            RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            # -------------------------------------------------------------------
+            # DETEKSI: Apakah PostgreSQL berjalan di Docker?
+            # -------------------------------------------------------------------
+            PG_IS_DOCKER=false
+            PG_DOCKER_CONTAINER=""
+            if command -v docker &>/dev/null; then
+                PG_DOCKER_CONTAINER=$(docker ps --filter "ancestor=postgres" --format "{{.Names}}" 2>/dev/null | head -n 1)
+                if [ -z "$PG_DOCKER_CONTAINER" ]; then
+                    PG_DOCKER_CONTAINER=$(docker ps --format "{{.Names}} {{.Image}}" 2>/dev/null | grep -i "postgres" | awk '{print $1}' | head -n 1)
+                fi
+                if [ -n "$PG_DOCKER_CONTAINER" ]; then
+                    PG_IS_DOCKER=true
+                fi
+            fi
+
+            # -------------------------------------------------------------------
+            # AUTO-INSTALL postgresql-client jika psql belum ada
+            # -------------------------------------------------------------------
+            if ! command -v psql &>/dev/null; then
+                if [ "$PG_IS_DOCKER" = false ]; then
+                    echo -e "${YELLOW}⚠️ psql belum tersedia di host ini. Menginstal postgresql-client...${NC}"
+                    apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+                    if command -v psql &>/dev/null; then
+                        echo -e "${GREEN}✓ postgresql-client berhasil diinstal.${NC}"
+                    else
+                        echo -e "${YELLOW}⚠️ Gagal menginstal postgresql-client secara otomatis.${NC}"
+                    fi
+                fi
+            fi
+
+            if [ "$PG_IS_DOCKER" = true ]; then
+                RAW_TBLS=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            else
+                RAW_TBLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>/dev/null || true)
+            fi
             if [ -n "$RAW_TBLS" ]; then
                 while IFS= read -r line; do
                     [ -n "$line" ] && TABLE_LIST+=("$line")
                 done <<< "$RAW_TBLS"
             fi
-        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-            RAW_TBLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW TABLES" 2>/dev/null || true)
-            if [ -n "$RAW_TBLS" ]; then
-                while IFS= read -r line; do
-                    [ -n "$line" ] && TABLE_LIST+=("${TARGET_DB}.${line}")
-                done <<< "$RAW_TBLS"
+		elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+			RAW_TBLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW TABLES" 2>/dev/null || true)
+			if [ -n "$RAW_TBLS" ]; then
+				while IFS= read -r line; do
+					[ -n "$line" ] && TABLE_LIST+=("${TARGET_DB}.${line}")
+				done <<< "$RAW_TBLS"
+			fi
+		fi
+        # ------------------------------------------------------------------------------
+        # 5.5. DETEKSI TABEL USER
+        # ------------------------------------------------------------------------------
+        echo -e "\n${BLUE}🔍 Mencoba mendeteksi tabel user untuk sinkronisasi otomatis...${NC}"
+        DETECTED_USER_TABLE=""
+        DETECTED_USER_COL=""
+
+        if [ ${#TABLE_LIST[@]} -gt 0 ]; then
+            for tbl in "${TABLE_LIST[@]}"; do
+                if echo "$tbl" | grep -qiE "user|account|akun|pengguna|member"; then
+                    DETECTED_USER_TABLE="$tbl"
+                    break
+                fi
+            done
+        fi
+
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            echo -e "${GREEN}✓ Tabel user terdeteksi: ${DETECTED_USER_TABLE}${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
+                if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
+                RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                while IFS= read -r col; do
+                    if echo "$col" | grep -qiE "username|email|nama|login|name"; then
+                        DETECTED_USER_COL="$col"
+                        break
+                    fi
+                done <<< "$RAW_COLS"
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
+                if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
+                RAW_COLS=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SHOW COLUMNS FROM ${TBL_BARE}" 2>/dev/null | awk '{print $1}')
+                while IFS= read -r col; do
+                    if echo "$col" | grep -qiE "username|email|nama|login|name"; then
+                        DETECTED_USER_COL="$col"
+                        break
+                    fi
+                done <<< "$RAW_COLS"
+            fi
+
+            if [ -n "$DETECTED_USER_COL" ]; then
+                echo -e "${GREEN}✓ Kolom username terdeteksi: ${DETECTED_USER_COL}${NC}"
+            else
+                echo -e "${YELLOW}Kolom username tidak ditemukan otomatis, set default ke 'username'${NC}"
+                DETECTED_USER_COL="username"
+            fi
+        else
+            # Fallback: query database langsung untuk mencari tabel user
+            echo -e "${YELLOW}Tidak ditemukan tabel user di TABLE_LIST, mencoba query database langsung...${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                USER_TABLES=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" --no-align --tuples-only -c "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '(user|account|akun|pengguna|member|employee|karyawan)' LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$USER_TABLES" ]; then
+                    DETECTED_USER_TABLE="$USER_TABLES"
+                    echo -e "${GREEN}✓ Tabel user ditemukan via query langsung: ${DETECTED_USER_TABLE}${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                USER_TABLES=$(mysql --no-defaults -N -D "$TARGET_DB" -e "SELECT CONCAT('$TARGET_DB.', table_name) FROM information_schema.tables WHERE table_schema='$TARGET_DB' AND table_name REGEXP '(user|account|akun|pengguna|member|employee|karyawan)' LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$USER_TABLES" ]; then
+                    DETECTED_USER_TABLE="$USER_TABLES"
+                    echo -e "${GREEN}✓ Tabel user ditemukan via query langsung: ${DETECTED_USER_TABLE}${NC}"
+                fi
+            fi
+            if [ -z "$DETECTED_USER_TABLE" ]; then
+                echo -e "${YELLOW}⚠️  Tidak ditemukan tabel user. Resolusi nama actor mungkin tidak berfungsi.${NC}"
             fi
         fi
 
@@ -821,6 +1142,17 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             read -p "Masukkan Nama Tabel/Koleksi yang ingin di-audit (contoh: public.audit_trail atau targetdb.koleksi): " CHOSEN_TABLES < /dev/tty
         fi
 
+        # Otomatis sertakan tabel user ke dalam CHOSEN_TABLES agar disedot Debezium
+        # Kita WAJIB menyedot tabel user untuk mengatasi masalah CUID/UUID dari Prisma,
+        # agar Gateway bisa mencocokkan UUID dari kolom updated_by ke nama aslinya.
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            if ! echo "$CHOSEN_TABLES" | grep -q "$DETECTED_USER_TABLE"; then
+                CHOSEN_TABLES="${CHOSEN_TABLES},${DETECTED_USER_TABLE}"
+                CHOSEN_TABLES=$(echo "$CHOSEN_TABLES" | sed 's/^,//')
+                echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis disertakan dalam pengawasan CDC.${NC}"
+            fi
+        fi
+
         SELECTED_TABLES="$CHOSEN_TABLES"
         echo -e "${GREEN}✓ Tabel Terpilih: ${CHOSEN_TABLES}${NC}"
 
@@ -835,138 +1167,458 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             [ "$CHOSEN_ENGINE" = "oracle" ] && DB_PORT="1521"
         fi
 
-        USER_CREATED=false
-        echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
-        echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Docker/Remote."
-        read -p "(y/N): " AUTO_USER < /dev/tty
-        if [[ "$AUTO_USER" =~ ^[Yy]$ ]]; then
-
-        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-            echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if sudo -u postgres psql -p "$DB_PORT" -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
-                sudo -u postgres psql -p "$DB_PORT" -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
-                sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
-                USER_CREATED=true
-                echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
-            fi
-            # Buat Publication untuk Debezium (membutuhkan superuser)
-            echo -e "Membuat Publication CDC untuk Debezium..."
-            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
-            sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null || true
-        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-            echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
-            if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
-               mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
-                USER_CREATED=true
-                echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
-            fi
-        fi
+        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
+        if [ "$MANUAL_MODE" = false ]; then
+            DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
         fi
 
-        if [ "$USER_CREATED" = false ]; then
-            echo -e "${YELLOW}[NOTE] Otomasi pembuat user DB tidak tersedia (mis. database di Docker).${NC}"
-            echo -e "${YELLOW}Silakan masukkan kredensial database yang sudah ada:${NC}"
-
-            MAX_RETRIES=3
-            RETRY_COUNT=0
-            CONN_OK=false
-
-            while [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                RETRY_COUNT=$((RETRY_COUNT+1))
-                if [ $RETRY_COUNT -gt 1 ]; then
-                    echo -e "\n${YELLOW}🔄 Percobaan ke-${RETRY_COUNT} dari ${MAX_RETRIES}...${NC}"
-                fi
-
-                read -p "Database Username: " AGENT_DB_USER < /dev/tty
-                read -p "Database Password (terlihat): " AGENT_DB_PASS < /dev/tty
-
-                echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
-
-                if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                    TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1)
-                    if echo "$TEST_RESULT" | grep -q "^1$"; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
-                elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
-                    TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e "SELECT 1;" 2>&1)
-                    if [ $? -eq 0 ]; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
-                elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
-                    TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1)
-                    if echo "$TEST_RESULT" | grep -q "^1$"; then
-                        CONN_OK=true
-                        echo -e "${GREEN}✓ Koneksi berhasil! Kredensial valid.${NC}"
-                    else
-                        echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
-                        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                            echo -e "${YELLOW}Silakan periksa kembali username dan password Anda.${NC}"
-                        fi
-                    fi
-                else
-                    # Skip test for Oracle and MongoDB since they require specific clients
-                    CONN_OK=true
-                    echo -e "${GREEN}✓ [Skip Test] Asumsi kredensial ${CHOSEN_ENGINE} valid karena klien native tidak tersedia.${NC}"
-                fi
-            done
-
-            if [ "$CONN_OK" = false ]; then
-                echo -e "${RED}✗ Gagal terkoneksi setelah ${MAX_RETRIES} percobaan. Proses dibatalkan.${NC}"
-                echo -e "${YELLOW}Tip: Pastikan database bisa diakses dari host ini via TCP: psql -h ${DB_HOST} -p ${DB_PORT} -U <user> -d ${TARGET_DB}${NC}"
-            fi
-        fi
-
+        # ------------------------------------------------------------------------------
+        # TWEAK BIND-ADDRESS / LISTEN_ADDRESS SEBELUM TES KONEKSI & BUAT USER
+        # ------------------------------------------------------------------------------
         if [ "$CHOSEN_ENGINE" = "postgres" ]; then
             NEEDS_PG_RESTART=false
 
-            # --- Cek WAL Level ---
-            CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
-            if [ "$CURRENT_WAL" != "logical" ]; then
-                echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
-                echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
-                NEEDS_PG_RESTART=true
+            # PG_IS_DOCKER dan PG_DOCKER_CONTAINER sudah dideteksi di bagian table detection di atas.
+            # JANGAN di-reset di sini!
+
+            if [ "$PG_IS_DOCKER" = true ]; then
+                echo -e "${BLUE}🐳 PostgreSQL terdeteksi berjalan di Docker container: '${PG_DOCKER_CONTAINER}'${NC}"
             fi
 
-            # --- Cek listen_addresses agar Docker bisa connect ---
-            CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
-            if [ "$CURRENT_LISTEN" = "localhost" ]; then
-                echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via 172.17.0.1.${NC}"
-                sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
-                echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
-                NEEDS_PG_RESTART=true
-            fi
+            # Fungsi helper: jalankan psql di environment yang tepat
+            run_psql() {
+                local db_name="${1:-postgres}"
+                shift
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    docker exec "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER_FALLBACK" -d "$db_name" "$@" 2>/dev/null
+                else
+                    sudo -u postgres psql -p "$DB_PORT" -d "$db_name" "$@" 2>/dev/null
+                fi
+            }
+            # Simpan username superuser yang ada di container/native (biasanya 'postgres')
+            AGENT_DB_USER_FALLBACK="postgres"
 
-            # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
-            PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
-            if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
-                if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
-                    echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
-                    echo "# AuditChain - Allow Debezium Docker container" >> "$PG_HBA"
-                    echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
-                    echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (172.16.0.0/12 - semua subnet Docker).${NC}"
+            # -------------------------------------------------------------------
+            # DOCKER MODE: Konfigurasi wal_level via Docker
+            # -------------------------------------------------------------------
+            if [ "$PG_IS_DOCKER" = true ]; then
+                echo -e "\n${BLUE}🐳 [Docker Mode] Mengkonfigurasi PostgreSQL di dalam Docker...${NC}"
+
+                # Cek wal_level saat ini
+                CURRENT_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                CURRENT_WAL=$(echo "$CURRENT_WAL" | tr -d '[:space:]')
+
+                if [ "$CURRENT_WAL" != "logical" ]; then
+                    echo -e "${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
+                    echo -e "${YELLOW}   Untuk Docker, wal_level HARUS diset permanen via docker-compose.yml.${NC}"
+
+                    # Cari docker-compose.yml milik container PostgreSQL
+                    PG_COMPOSE_DIR=""
+                    # Coba ambil dari label Docker Compose
+                    PG_COMPOSE_DIR=$(docker inspect "$PG_DOCKER_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || echo "")
+
+                    if [ -n "$PG_COMPOSE_DIR" ] && [ -d "$PG_COMPOSE_DIR" ]; then
+                        COMPOSE_FILE=""
+                        for cf in "$PG_COMPOSE_DIR/docker-compose.yml" "$PG_COMPOSE_DIR/docker-compose.yaml" "$PG_COMPOSE_DIR/docker-compose.dev.yml" "$PG_COMPOSE_DIR/docker-compose.dev.yaml" "$PG_COMPOSE_DIR/docker-compose.override.yml" "$PG_COMPOSE_DIR/docker-compose.override.yaml" "$PG_COMPOSE_DIR/docker-compose.prod.yml" "$PG_COMPOSE_DIR/docker-compose.production.yml" "$PG_COMPOSE_DIR/compose.yml" "$PG_COMPOSE_DIR/compose.yaml"; do
+                            if [ -f "$cf" ]; then
+                                COMPOSE_FILE="$cf"
+                                break
+                            fi
+                        done
+
+                        # Jika tidak ditemukan, coba cari compose file apa saja yang mengandung postgres
+                        if [ -z "$COMPOSE_FILE" ]; then
+                            for cf in "$PG_COMPOSE_DIR"/docker-compose*.yml "$PG_COMPOSE_DIR"/docker-compose*.yaml "$PG_COMPOSE_DIR"/compose*.yml "$PG_COMPOSE_DIR"/compose*.yaml; do
+                                if [ -f "$cf" ] && grep -q "postgres" "$cf" 2>/dev/null; then
+                                    COMPOSE_FILE="$cf"
+                                    break
+                                fi
+                            done
+                        fi
+
+                        if [ -n "$COMPOSE_FILE" ]; then
+                            echo -e "${BLUE}   Ditemukan: ${COMPOSE_FILE}${NC}"
+
+                            # Ambil nama service PostgreSQL di compose
+                            PG_SERVICE=$(docker inspect "$PG_DOCKER_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || echo "")
+
+                            if [ -n "$PG_SERVICE" ]; then
+                                # Cek apakah sudah ada command wal_level=logical
+                                if grep -q "wal_level=logical" "$COMPOSE_FILE" 2>/dev/null; then
+                                    echo -e "${GREEN}✓ wal_level=logical sudah dikonfigurasi di docker-compose.yml.${NC}"
+                                else
+                                    echo -e "${YELLOW}   Menambahkan 'command: [\"postgres\", \"-c\", \"wal_level=logical\"]' ke service '${PG_SERVICE}'...${NC}"
+                                    # Backup dulu
+                                    cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak.auditchain"
+
+                                    # Tambahkan command setelah baris image postgres
+                                    # Gunakan sed untuk menyisipkan baris command setelah image: postgres
+                                    if grep -qE "^\\s+image:.*postgres" "$COMPOSE_FILE"; then
+                                        sed -i "/image:.*postgres/a\\    command: [\"postgres\", \"-c\", \"wal_level=logical\", \"-c\", \"max_replication_slots=4\", \"-c\", \"max_wal_senders=4\"]" "$COMPOSE_FILE"
+                                        echo -e "${GREEN}✓ docker-compose.yml berhasil dimodifikasi.${NC}"
+                                    else
+                                        echo -e "${YELLOW}⚠️ Tidak dapat menemukan baris 'image: postgres' di compose file.${NC}"
+                                        echo -e "${YELLOW}   Silakan tambahkan manual di service PostgreSQL:${NC}"
+                                        echo -e "${YELLOW}   command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                                    fi
+
+                                    # Restart container PostgreSQL via compose
+                                    echo -e "${YELLOW}   Me-restart PostgreSQL container (recreate agar wal_level aktif)...${NC}"
+                                    (cd "$PG_COMPOSE_DIR" && docker compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker-compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
+                                    sleep 5
+
+                                    # Verifikasi
+                                    NEW_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                                    NEW_WAL=$(echo "$NEW_WAL" | tr -d '[:space:]')
+                                    if [ "$NEW_WAL" = "logical" ]; then
+                                        echo -e "${GREEN}✓ wal_level berhasil diubah ke 'logical' secara permanen!${NC}"
+                                    else
+                                        echo -e "${RED}⚠️ wal_level masih '${NEW_WAL}'. Mungkin perlu recreate container:${NC}"
+                                        echo -e "${YELLOW}   cd $PG_COMPOSE_DIR && docker compose up -d ${PG_SERVICE}${NC}"
+                                    fi
+                                fi
+                            fi
+                        else
+                            echo -e "${YELLOW}⚠️ Tidak dapat menemukan docker-compose.yml di ${PG_COMPOSE_DIR}.${NC}"
+                            echo -e "${YELLOW}   Silakan tambahkan manual: command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                        fi
+                    else
+                        echo -e "${YELLOW}⚠️ Tidak dapat menemukan folder docker-compose PostgreSQL.${NC}"
+                        echo -e "${YELLOW}   Silakan tambahkan manual ke docker-compose.yml Anda:${NC}"
+                        echo -e "${YELLOW}   command: [\"postgres\", \"-c\", \"wal_level=logical\"]${NC}"
+                        echo -e "${YELLOW}   Lalu jalankan: docker compose up -d${NC}"
+                    fi
+                else
+                    echo -e "${GREEN}✓ WAL Level sudah 'logical'. Siap untuk CDC.${NC}"
+                fi
+
+                # Docker: pg_hba.conf biasanya sudah mengizinkan semua koneksi (trust/md5)
+                echo -e "${GREEN}✓ [Docker Mode] pg_hba.conf biasanya sudah permisif di container Docker.${NC}"
+
+            # -------------------------------------------------------------------
+            # NATIVE MODE: Konfigurasi wal_level via systemctl (cara lama)
+            # -------------------------------------------------------------------
+            else
+                echo -e "\n${BLUE}[Native Mode] Mengkonfigurasi PostgreSQL native...${NC}"
+
+                # --- Cek WAL Level ---
+                CURRENT_WAL=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW wal_level;" 2>/dev/null || echo "unknown")
+                if [ "$CURRENT_WAL" != "logical" ]; then
+                    echo -e "\n${YELLOW}⚠️ WAL Level saat ini: '${CURRENT_WAL}'. Debezium memerlukan 'logical'.${NC}"
+                    sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET wal_level = logical;" 2>/dev/null || true
+                    echo -e "${GREEN}✓ WAL Level diubah ke 'logical'.${NC}"
                     NEEDS_PG_RESTART=true
+                fi
+
+                # --- Cek listen_addresses agar Docker bisa connect ---
+                CURRENT_LISTEN=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW listen_addresses;" 2>/dev/null || echo "localhost")
+                if [ "$CURRENT_LISTEN" = "localhost" ]; then
+                    echo -e "${YELLOW}⚠️ PostgreSQL hanya mendengarkan 'localhost'. Debezium (Docker) butuh akses via ${DB_HOST}.${NC}"
+                    sudo -u postgres psql -p "$DB_PORT" -c "ALTER SYSTEM SET listen_addresses = '*';" 2>/dev/null || true
+                    echo -e "${GREEN}✓ listen_addresses diubah ke '*'.${NC}"
+                    NEEDS_PG_RESTART=true
+                fi
+
+                # --- Tambahkan rule pg_hba.conf untuk Docker subnet ---
+                PG_HBA=$(sudo -u postgres psql -p "$DB_PORT" --no-align --tuples-only -c "SHOW hba_file;" 2>/dev/null || echo "")
+                if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
+                    if ! grep -q "AuditChain" "$PG_HBA" 2>/dev/null; then
+                        echo -e "${YELLOW}⚠️ Menambahkan rule pg_hba.conf untuk Docker subnet...${NC}"
+                        echo "# AuditChain - Allow Debezium Docker container & Host Scripts" >> "$PG_HBA"
+                        echo "host    all    all    172.16.0.0/12    md5" >> "$PG_HBA"
+                        echo "host    all    all    10.0.0.0/8       md5" >> "$PG_HBA"
+                        echo "host    all    all    192.168.0.0/16   md5" >> "$PG_HBA"
+                        echo "host    all    all    0.0.0.0/0        md5" >> "$PG_HBA"
+                        echo "host    all    all    0.0.0.0/0        scram-sha-256" >> "$PG_HBA"
+                        echo -e "${GREEN}✓ Rule pg_hba.conf ditambahkan (Private Subnets).${NC}"
+                        NEEDS_PG_RESTART=true
+                    fi
+                fi
+
+                # --- Restart PostgreSQL jika ada perubahan ---
+                if [ "$NEEDS_PG_RESTART" = true ]; then
+                    echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
+                    systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
+                    sleep 2
+                    echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+                fi
+            fi
+        elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+            NEEDS_MYSQL_RESTART=false
+            CURRENT_BIND=$(mysql --no-defaults -P "$DB_PORT" -N -e "SELECT @@bind_address;" 2>/dev/null | tr -d ' ' || echo "unknown")
+            if [ "$CURRENT_BIND" = "127.0.0.1" ] || [ "$CURRENT_BIND" = "localhost" ]; then
+                echo -e "\n${YELLOW}⚠️ MySQL hanya mendengarkan '${CURRENT_BIND}' (localhost). Debezium (Docker) butuh akses jaringan.${NC}"
+                echo -e "${YELLOW}Mencoba mengubah bind-address menjadi 0.0.0.0 di konfigurasi MySQL...${NC}"
+                
+                for conf_file in /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mariadb.conf.d/50-server.cnf /etc/my.cnf /etc/mysql/my.cnf; do
+                    if [ -f "$conf_file" ] && grep -qE "^\s*bind-address\s*=\s*(127\.0\.0\.1|localhost)" "$conf_file"; then
+                        sudo sed -i -E 's/^\s*bind-address\s*=\s*(127\.0\.0\.1|localhost)/bind-address = 0.0.0.0/' "$conf_file"
+                        echo -e "${GREEN}✓ bind-address diubah ke '0.0.0.0' pada $conf_file.${NC}"
+                        NEEDS_MYSQL_RESTART=true
+                        break
+                    fi
+                done
+                
+                if [ "$NEEDS_MYSQL_RESTART" = true ]; then
+                    echo -e "${YELLOW}Restarting MySQL/MariaDB untuk menerapkan perubahan...${NC}"
+                    systemctl restart mysql 2>/dev/null || systemctl restart mysqld 2>/dev/null || systemctl restart mariadb 2>/dev/null || true
+                    sleep 3
+                    echo -e "${GREEN}✓ MySQL berhasil di-restart.${NC}"
+                else
+                    echo -e "${RED}✗ Tidak dapat menemukan file konfigurasi MySQL secara otomatis.${NC}"
+                    echo -e "${YELLOW}Silakan ubah 'bind-address = 0.0.0.0' secara manual dan restart MySQL.${NC}"
+                fi
+            fi
+        fi
+
+        USER_CREATED=false
+
+        # Untuk Docker, kita bisa membuat user otomatis tanpa perlu tanya
+        if [ "$PG_IS_DOCKER" = true ] && [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            echo -e "\n${BLUE}🐳 [Docker Mode] Membuat user database otomatis via Docker...${NC}"
+            echo -e "Membuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || \
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || true
+
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+            USER_CREATED=true
+               echo -e "  - Mengecek dan menghapus replication slot yang menggantung..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE active = false;" >/dev/null 2>&1 || true
+            
+            echo -e "  - Membersihkan publication lama (jika ada)..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" >/dev/null 2>&1 || true
+            
+            echo -e "  - Membuat publication khusus tabel terpilih..."
+            docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" >/dev/null 2>&1 || true
+            
+            echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
+        else
+            # Non-Docker: tanya user apakah mau buat otomatis
+            echo -e "\n${YELLOW}Apakah Anda ingin skrip membuatkan User Database (auditchain_agent) secara otomatis?${NC}"
+            echo -e "Pilih 'y' jika database terpasang di host ini (native). Pilih 'n' jika Anda sudah membuat user sendiri atau DB berada di Remote."
+            read -p "(y/N): " AUTO_USER < /dev/tty
+            if [[ "$AUTO_USER" =~ ^[Yy]$ ]]; then
+
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+                if sudo -u postgres psql -p "$DB_PORT" -c "CREATE USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null || sudo -u postgres psql -p "$DB_PORT" -c "ALTER USER ${AGENT_DB_USER} WITH REPLICATION LOGIN PASSWORD '${AGENT_DB_PASS}';" 2>/dev/null; then
+                    sudo -u postgres psql -p "$DB_PORT" -c "GRANT CONNECT ON DATABASE \"${TARGET_DB}\" TO ${AGENT_DB_USER};" 2>/dev/null || true
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${AGENT_DB_USER};" 2>/dev/null || true
+                    USER_CREATED=true
+                    echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
+                fi
+                # Buat Publication untuk Debezium (membutuhkan superuser)
+                echo -e "Membuat Publication CDC untuk Debezium..."
+                sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "DROP PUBLICATION IF EXISTS dbz_publication;" 2>/dev/null || true
+                if ! sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" 2>/dev/null; then
+                    echo -e "${RED}[ERROR] Gagal membuat publication 'dbz_publication'!${NC}"
+                    echo -e "${YELLOW}Pastikan user yang menjalankan script punya akses SUPERUSER ke PostgreSQL.${NC}"
+                    echo -e "${YELLOW}Atau buat manual: CREATE PUBLICATION dbz_publication FOR TABLE ...;${NC}"
+                fi
+
+                # Verifikasi publication terbentuk
+                PUB_CHECK=$(sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -tAc "SELECT COUNT(*) FROM pg_publication WHERE pubname = 'dbz_publication';" 2>/dev/null || echo "0")
+                if [ "$PUB_CHECK" -eq 0 ]; then
+                    echo -e "${RED}⚠️  Publication 'dbz_publication' TIDAK DITEMUKAN setelah pembuatan!${NC}"
+                else
+                    echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
+                if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
+                   mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null; then
+                    USER_CREATED=true
+                    echo -e "${GREEN}✓ User DB '${AGENT_DB_USER}' berhasil dibuat otomatis!${NC}"
+                fi
+            fi
+            fi
+        fi
+
+        # ------------------------------------------------------------------------------
+        # TEST CONNECTION
+        # ------------------------------------------------------------------------------
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        CONN_OK=false
+
+        while [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RETRY_COUNT=$((RETRY_COUNT+1))
+            
+            if [ "$USER_CREATED" = false ]; then
+                if [ $RETRY_COUNT -eq 1 ]; then
+                    echo -e "\n${YELLOW}[NOTE] Otomasi pembuat user DB tidak tersedia (mis. database di Docker) atau dilewati.${NC}"
+                    echo -e "${YELLOW}Silakan masukkan kredensial database yang sudah ada:${NC}"
+                else
+                    echo -e "\n${YELLOW}🔄 Percobaan ke-${RETRY_COUNT} dari ${MAX_RETRIES}...${NC}"
+                fi
+                read -p "Database Username: " AGENT_DB_USER < /dev/tty
+                read -p "Database Password (terlihat): " AGENT_DB_PASS < /dev/tty
+            else
+                if [ $RETRY_COUNT -eq 1 ]; then
+                    echo -e "\n${BLUE}🔌 Menguji koneksi dengan user otomatis...${NC}"
+                else
+                    echo -e "\n${YELLOW}🔄 Menunggu Anda memperbaiki konfigurasi... (Percobaan ke-${RETRY_COUNT}/${MAX_RETRIES})${NC}"
+                    echo -e "Silakan perbaiki bind-address/pg_hba.conf secara manual, atau tekan Ctrl+C untuk membatalkan."
+                    read -p "Tekan ENTER untuk mencoba lagi koneksi..." < /dev/tty
                 fi
             fi
 
-            # --- Restart PostgreSQL jika ada perubahan ---
-            if [ "$NEEDS_PG_RESTART" = true ]; then
-                echo -e "${YELLOW}Restarting PostgreSQL untuk menerapkan perubahan...${NC}"
-                systemctl restart postgresql 2>/dev/null || systemctl restart postgres 2>/dev/null || true
-                sleep 2
-                echo -e "${GREEN}✓ PostgreSQL berhasil di-restart.${NC}"
+            echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
+
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                TEST_RESULT=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -N -e "SELECT 1;" 2>&1 || true)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                fi
+            elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
+                TEST_RESULT=$(sqlcmd -S "$DB_HOST,$DB_PORT" -U "$AGENT_DB_USER" -P "$AGENT_DB_PASS" -d "$TARGET_DB" -Q "SELECT 1" -h -1 -W 2>&1 || true)
+                if echo "$TEST_RESULT" | grep -q "^1$"; then
+                    CONN_OK=true
+                    echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
+                else
+                    echo -e "${RED}✗ Koneksi gagal: ${TEST_RESULT}${NC}"
+                fi
+            else
+                # Skip test for Oracle and MongoDB since they require specific clients
+                CONN_OK=true
+                echo -e "${GREEN}✓ [Skip Test] Asumsi kredensial ${CHOSEN_ENGINE} valid karena klien native tidak tersedia.${NC}"
+            fi
+
+            if [ "$CONN_OK" = false ] && [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$USER_CREATED" = false ]; then
+                echo -e "${YELLOW}Silakan periksa kembali username, password, atau konfigurasi jaringan Anda.${NC}"
+            fi
+        done
+
+        if [ "$CONN_OK" = false ]; then
+            echo -e "${RED}✗ Gagal terkoneksi setelah ${MAX_RETRIES} percobaan. Debezium mungkin tidak akan berjalan dengan baik!${NC}"
+            echo -e "${YELLOW}Tip: Pastikan database bisa diakses dari host ini via TCP: psql/mysql -h ${DB_HOST} -p ${DB_PORT} -u <user>${NC}"
+            echo -e "Instalasi akan tetap dilanjutkan, status konektor mungkin 'failed'."
+        fi
+
+        # Deteksi awal tabel berlangsung sebelum kredensial database diminta.
+        # Pada PostgreSQL native/external tidak ada user sistem `postgres`,
+        # sehingga deteksi awal bisa kosong walaupun public.users ada. Ulangi
+        # setelah koneksi TCP tervalidasi dan tambahkan tabel user sebelum
+        # connector Debezium dibuat.
+        if [ "$CONN_OK" = true ] && [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            if [ -z "$DETECTED_USER_TABLE" ]; then
+                DETECTED_USER_TABLE=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" --no-align --tuples-only -c \
+                    "SELECT schemaname || '.' || tablename
+                     FROM pg_tables
+                     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+                       AND tablename ~* '(user|account|akun|pengguna|member|employee|karyawan)'
+                     ORDER BY CASE WHEN tablename ~* '^users?$' THEN 0 ELSE 1 END, tablename
+                     LIMIT 1;" 2>/dev/null || true)
+            fi
+
+            if [ -n "$DETECTED_USER_TABLE" ]; then
+                TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+                TBL_SCHEMA=$(echo "$DETECTED_USER_TABLE" | awk -F. '{if (NF > 1) print $1; else print "public"}')
+                LATE_USER_COL=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" --no-align --tuples-only -c \
+                    "SELECT column_name
+                     FROM information_schema.columns
+                     WHERE table_schema = '${TBL_SCHEMA}' AND table_name = '${TBL_BARE}'
+                       AND column_name ~* '^(username|email|login|name|nama|user_name)$'
+                     ORDER BY CASE column_name WHEN 'username' THEN 1 WHEN 'email' THEN 2 ELSE 3 END
+                     LIMIT 1;" 2>/dev/null || true)
+                if [ -n "$LATE_USER_COL" ]; then
+                    DETECTED_USER_COL="$LATE_USER_COL"
+                elif [ -z "$DETECTED_USER_COL" ]; then
+                    DETECTED_USER_COL="id"
+                fi
+
+                case ",${CHOSEN_TABLES}," in
+                    *",${DETECTED_USER_TABLE},"*) ;;
+                    *)
+                        CHOSEN_TABLES="${CHOSEN_TABLES:+${CHOSEN_TABLES},}${DETECTED_USER_TABLE}"
+                        SELECTED_TABLES="$CHOSEN_TABLES"
+                        echo -e "${GREEN}✓ Tabel user '${DETECTED_USER_TABLE}' otomatis ditambahkan setelah verifikasi koneksi.${NC}"
+                        ;;
+                esac
+            else
+                echo -e "${YELLOW}⚠️  Tabel user tidak ditemukan setelah koneksi database berhasil; resolusi UUID akan dinonaktifkan.${NC}"
+            fi
+        fi
+
+        # publication.autocreate.mode pada connector sengaja disabled agar
+        # scope CDC eksplisit. Karena itu publication HARUS dipastikan ada
+        # sebelum connector dibuat, termasuk ketika client memilih memakai
+        # kredensial PostgreSQL yang sudah ada (AUTO_USER=n).
+        PUBLICATION_READY=true
+        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            PUBLICATION_READY=false
+
+            postgres_admin_query() {
+                local sql="$1"
+                local pg_container="${PG_DOCKER_CONTAINER:-}"
+
+                if command -v psql >/dev/null 2>&1 && \
+                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+
+                if [ -z "$pg_container" ]; then
+                    pg_container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                fi
+                if [ -n "$pg_container" ] && \
+                    docker exec < /dev/null "$pg_container" psql -U postgres -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+
+                if id -u postgres >/dev/null 2>&1 && \
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+                return 1
+            }
+
+            ensure_postgres_publication() {
+                local pub_name="dbz_publication"
+                local pub_exists
+                local pub_tables
+                local selected_table
+                local selected_tables=()
+
+                IFS=',' read -r -a selected_tables <<< "$CHOSEN_TABLES"
+                pub_exists=$(postgres_admin_query "SELECT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '${pub_name}');") || return 1
+                pub_exists=$(echo "$pub_exists" | tr -d '[:space:]')
+
+                if [ "$pub_exists" != "t" ]; then
+                    postgres_admin_query "CREATE PUBLICATION ${pub_name} FOR TABLE ${CHOSEN_TABLES};" || return 1
+                    return 0
+                fi
+
+                pub_tables=$(postgres_admin_query "SELECT schemaname || '.' || tablename FROM pg_publication_tables WHERE pubname = '${pub_name}';") || return 1
+                for selected_table in "${selected_tables[@]}"; do
+                    selected_table=$(echo "$selected_table" | xargs)
+                    [ -z "$selected_table" ] && continue
+                    if ! printf '%s\n' "$pub_tables" | grep -Fxq "$selected_table"; then
+                        postgres_admin_query "ALTER PUBLICATION ${pub_name} ADD TABLE ${selected_table};" || return 1
+                    fi
+                done
+                return 0
+            }
+
+            echo -e "${BLUE}🔐 Memastikan publication PostgreSQL untuk CDC...${NC}"
+            if ensure_postgres_publication; then
+                PUBLICATION_READY=true
+                echo -e "${GREEN}✓ Publication 'dbz_publication' siap untuk tabel terpilih.${NC}"
+            else
+                echo -e "${RED}✗ Publication PostgreSQL tidak dapat dibuat/diverifikasi. Connector Debezium tidak akan dijalankan.${NC}"
+                echo -e "${YELLOW}Gunakan kredensial pemilik tabel/superuser PostgreSQL, lalu ulangi installer.${NC}"
             fi
         fi
 
@@ -994,6 +1646,9 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
         fi
 
         echo -e "\nMenunggu Debezium Engine siap (maks 30 detik)..."
+        # Set HOSTNAME sekarang agar topic.prefix di Debezium & telemetri Gateway konsisten
+        HOSTNAME=$(hostname)
+        CONNECTOR_NAME="${TARGET_DB}-connector-$(date +%s)"
         DEBEZIUM_READY=false
         for i in $(seq 1 15); do
             if curl -s http://localhost:8083/ > /dev/null 2>&1; then
@@ -1003,18 +1658,14 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             sleep 2
         done
 
-        if [ "$DEBEZIUM_READY" = true ]; then
-            # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
-            if [ "$MANUAL_MODE" = false ]; then
-                DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
-            fi
+        if [ "$DEBEZIUM_READY" = true ] && { [ "$CHOSEN_ENGINE" != "postgres" ] || [ "$PUBLICATION_READY" = true ]; }; then
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "name": "${CONNECTOR_NAME}",
+        "config": {
+            "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "tasks.max": "1",
     "database.hostname": "${DB_HOST}",
     "database.port": "${DB_PORT}",
@@ -1026,6 +1677,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
     "plugin.name": "pgoutput",
     "publication.autocreate.mode": "disabled",
     "publication.name": "dbz_publication",
+    "slot.name": "dbz_${TARGET_DB//-/_}_${RANDOM}",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
@@ -1045,7 +1697,7 @@ EOF
                 
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.oracle.OracleConnector",
     "tasks.max": "1",
@@ -1059,7 +1711,7 @@ EOF
     "schema.include.list": "${UPPER_USER},${AGENT_DB_USER}",
     "table.include.list": "${CHOSEN_TABLES}",
     "database.tablename.case.insensitive": "false",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${SELECTED_DB_NAME}",
     "log.mining.strategy": "online_catalog",
     "transforms": "unwrap",
@@ -1074,7 +1726,7 @@ EOF
             elif [ "$CHOSEN_ENGINE" = "sqlserver" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
     "tasks.max": "1",
@@ -1085,7 +1737,7 @@ EOF
     "database.names": "${TARGET_DB}",
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "database.encrypt": "false",
     "database.trustServerCertificate": "true",
@@ -1106,7 +1758,7 @@ EOF
 
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
     "tasks.max": "1",
@@ -1125,7 +1777,7 @@ EOF
             else
                 CONNECTOR_PAYLOAD=$(cat <<EOF
 {
-  "name": "${TARGET_DB}-connector",
+  "name": "${CONNECTOR_NAME}",
   "config": {
     "connector.class": "io.debezium.connector.mysql.MySqlConnector",
     "tasks.max": "1",
@@ -1137,7 +1789,7 @@ EOF
     "topic.prefix": "${HOSTNAME}_${TARGET_DB}",
     "database.include.list": "${TARGET_DB}",
     "table.include.list": "${CHOSEN_TABLES}",
-    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
     "schema.history.internal.kafka.topic": "schema-changes.${TARGET_DB}",
     "transforms": "unwrap",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
@@ -1150,8 +1802,13 @@ EOF
 )
             fi
 
-            # Hapus konektor jika sudah ada sebelumnya agar konfigurasi baru (SMT) bisa masuk
-            curl -s -X DELETE "http://localhost:8083/connectors/${TARGET_DB}-connector" >/dev/null 2>&1 || true
+            # Hapus SEMUA konektor lama yang berkaitan dengan database ini
+            OLD_CONNECTORS=$(curl -s http://localhost:8083/connectors | grep -o '"[^"]*"' | tr -d '"' | grep "^${TARGET_DB}-connector" || true)
+            if [ -n "$OLD_CONNECTORS" ]; then
+                for oc in $OLD_CONNECTORS; do
+                    curl -s -X DELETE "http://localhost:8083/connectors/${oc}" >/dev/null 2>&1 || true
+                done
+            fi
             sleep 1
 
             DBZ_BODY_FILE="/tmp/dbz_response_$$.json"
@@ -1160,8 +1817,65 @@ EOF
                 -d "${CONNECTOR_PAYLOAD}" || echo "000")
 
             if [ "$DBZ_RESP" -eq 201 ] || [ "$DBZ_RESP" -eq 200 ] || [ "$DBZ_RESP" -eq 409 ]; then
-                echo -e "${GREEN}✓ Konektor Database Debezium BERHASIL didaftarkan! Data mulai disedot.${NC}"
-                CONNECTOR_SETUP_STATUS="running"
+                echo -e "${GREEN}✓ Konektor Debezium didaftarkan (HTTP ${DBZ_RESP}). Memverifikasi status task...${NC}"
+                
+                # ---------------------------------------------------------------
+                TASK_OK=false
+                for i in $(seq 1 12); do
+                    sleep 5
+                    TASK_STATUS=$(curl -s "http://localhost:8083/connectors/${CONNECTOR_NAME}/status" 2>/dev/null || echo "{}")
+                    
+                    # Cek status connector
+                    CONN_STATE=$(echo "$TASK_STATUS" | grep -oP '"state"\s*:\s*"[^"]*"' | head -1 | grep -oP '"[^"]*"$' | tr -d '"')
+                    # Cek status task[0]
+                    TASK_STATE=$(echo "$TASK_STATUS" | grep -oP '"tasks"\s*:\s*\[.*?\]' | grep -oP '"state"\s*:\s*"[^"]*"' | head -1 | grep -oP '"[^"]*"$' | tr -d '"')
+                    
+                    echo -e "  [${i}/12] Connector: ${CONN_STATE:-?} | Task: ${TASK_STATE:-belum ada}..."
+                    
+                    if [ "$TASK_STATE" = "RUNNING" ]; then
+                        TASK_OK=true
+                        echo -e "${GREEN}✓ Task konektor Debezium RUNNING! CDC aktif.${NC}"
+                        break
+                    elif [ "$TASK_STATE" = "FAILED" ]; then
+                        echo -e "${RED}✗ Task konektor FAILED! Detail:${NC}"
+                        echo "$TASK_STATUS" | grep -oP '"trace"\s*:\s*"[^"]*"' | head -1 | sed 's/"trace".*"//;s/"$//' || true
+                        CONNECTOR_SETUP_STATUS="task_failed"
+                        break
+                    fi
+                done
+                
+                if [ "$TASK_OK" = true ]; then
+                    CONNECTOR_SETUP_STATUS="running"
+                    
+                    # ---------------------------------------------------------------
+                    # TUNGGU TOPIC: Beri waktu Debezium membuat topic di Kafka
+                    # Gateway akan gagal jika topic belum ada saat mulai consume
+                    # ---------------------------------------------------------------
+                    echo -e "${BLUE}⏳ Menunggu Debezium membuat topic di Kafka (max 30s)...${NC}"
+                    EXPECTED_PREFIX="${HOSTNAME}_${TARGET_DB}"
+                    [ "$CHOSEN_ENGINE" = "oracle" ] && [ -n "$ORACLE_PDB" ] && EXPECTED_PREFIX="${HOSTNAME}_${SELECTED_DB_NAME}"
+                    
+                    TOPIC_FOUND=false
+                    for j in $(seq 1 6); do
+                        sleep 5
+                        # List semua topic di Kafka via Debezium REST API (Kafka Connect)
+                        TOPICS=$(docker exec $(docker ps -qf "ancestor=quay.io/debezium/kafka:2.7" 2>/dev/null || docker ps -qf "ancestor=quay.io/debezium/kafka:2.4" 2>/dev/null || echo "none") /kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>/dev/null < /dev/null || echo "")
+                        MATCHING=$(echo "$TOPICS" | grep -c "^${EXPECTED_PREFIX}" 2>/dev/null || true)
+                        echo -e "  [${j}/6] Ditemukan ${MATCHING} topic dengan prefix '${EXPECTED_PREFIX}'"
+                        if [ "$MATCHING" -gt 0 ]; then
+                            TOPIC_FOUND=true
+                            echo -e "${GREEN}✓ Topic Kafka berhasil dibuat oleh Debezium!${NC}"
+                            break
+                        fi
+                    done
+                    
+                    if [ "$TOPIC_FOUND" = false ]; then
+                        echo -e "${YELLOW}⚠️  Topic belum terdeteksi, tapi konektor RUNNING. Topic mungkin butuh waktu lebih lama (initial snapshot).${NC}"
+                    fi
+                elif [ "$CONNECTOR_SETUP_STATUS" != "task_failed" ]; then
+                    echo -e "${YELLOW}⚠️  Task konektor belum RUNNING setelah 60 detik. Cek manual: curl localhost:8083/connectors/${CONNECTOR_NAME}/status${NC}"
+                    CONNECTOR_SETUP_STATUS="task_pending"
+                fi
             else
                 echo -e "${YELLOW}[NOTE] Respon Debezium (HTTP Status: ${DBZ_RESP}).${NC}"
                 if [ -f "${DBZ_BODY_FILE}" ]; then
@@ -1172,9 +1886,71 @@ EOF
                 CONNECTOR_SETUP_STATUS="failed_${DBZ_RESP}"
             fi
             rm -f "${DBZ_BODY_FILE}"
+        elif [ "$CHOSEN_ENGINE" = "postgres" ] && [ "$PUBLICATION_READY" != true ]; then
+            CONNECTOR_SETUP_STATUS="publication_failed"
+            echo -e "${RED}[ERROR] Connector tidak dibuat karena publication PostgreSQL belum siap.${NC}"
         else
             echo -e "${YELLOW}[NOTE] Debezium belum siap merespon. Konfigurasi otomatis ditunda.${NC}"
             CONNECTOR_SETUP_STATUS="debezium_not_ready"
+        fi
+
+        # ---------------------------------------------------------------
+        # TRIGGER SINKRONISASI USER TABLE (DUMMY UPDATE)
+        # Jika connector sudah punya offset, tabel yang baru ditambahkan
+        # tidak akan mendapat snapshot ulang. Gunakan koneksi database yang
+        # telah diverifikasi; jangan hanya mengasumsikan PostgreSQL berjalan
+        # di Docker.
+        # ---------------------------------------------------------------
+        sync_user_table_cdc() {
+            local sync_ok=false
+            local pg_container="${PG_DOCKER_CONTAINER:-}"
+
+            echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
+            if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+                # Prioritas: koneksi TCP yang dipakai connector. Ini bekerja
+                # untuk PostgreSQL native, eksternal, maupun Docker host.
+                if command -v psql >/dev/null 2>&1 && \
+                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
+                    sync_ok=true
+                fi
+
+                # Fallback untuk database PostgreSQL yang hanya dapat
+                # diakses dari container atau melalui user sistem postgres.
+                if [ "$sync_ok" = false ] && [ -z "$pg_container" ]; then
+                    pg_container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                fi
+                if [ "$sync_ok" = false ] && [ -n "$pg_container" ] && \
+                    docker exec < /dev/null "$pg_container" psql -U postgres -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1; then
+                    sync_ok=true
+                fi
+                if [ "$sync_ok" = false ] && id -u postgres >/dev/null 2>&1 && \
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null 2>&1; then
+                    sync_ok=true
+                fi
+            elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
+                local tbl_bare
+                tbl_bare=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+                if command -v mysql >/dev/null 2>&1 && \
+                    mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$AGENT_DB_USER" -p"$AGENT_DB_PASS" -D "$TARGET_DB" -e \
+                    "UPDATE ${tbl_bare} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
+                    sync_ok=true
+                fi
+            fi
+
+            if [ "$sync_ok" = true ]; then
+                echo -e "${GREEN}✓ Event CDC tabel user berhasil dipicu.${NC}"
+                return 0
+            fi
+
+            echo -e "${RED}✗ Gagal memicu event CDC tabel user. Tidak akan mengklaim sinkronisasi berhasil.${NC}"
+            return 1
+        }
+
+        if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ]; then
+            sync_user_table_cdc || true
         fi
     fi
 
@@ -1223,7 +1999,9 @@ PAYLOAD=$(cat <<EOF
   "db_engine": "${SELECTED_DB_ENGINE}",
   "db_name": "${SELECTED_DB_NAME}",
   "db_tables": "${SELECTED_TABLES}",
-  "connector_status": "${CONNECTOR_SETUP_STATUS}"
+  "connector_status": "${CONNECTOR_SETUP_STATUS}",
+  "user_table_name": "${DETECTED_USER_TABLE}",
+  "user_column_name": "${DETECTED_USER_COL}"
 }
 EOF
 )
@@ -1235,6 +2013,14 @@ HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${GATEWAY_URL}/a
 
 if [ "$HTTP_RESPONSE" -eq 200 ] || [ "$HTTP_RESPONSE" -eq 201 ]; then
     echo -e "${GREEN}✓ Telemetri berhasil dikirim ke Admin Dashboard!${NC}"
+
+    # Replay sekali lagi setelah Gateway menerima konfigurasi. Ini membuat
+    # bootstrap identitas tetap andal saat event pertama terbit sebelum
+    # consumer Gateway selesai dibuat.
+    if [ "$CONNECTOR_SETUP_STATUS" = "running" ] && [ -n "$DETECTED_USER_TABLE" ] && declare -F sync_user_table_cdc >/dev/null; then
+        sleep 3
+        sync_user_table_cdc || true
+    fi
 else
     echo -e "${YELLOW}[NOTE] Telemetri terkirim (Response Status: ${HTTP_RESPONSE}). Data siap diverifikasi Admin.${NC}"
 fi
@@ -1258,3 +2044,6 @@ echo "  • Status Dashboard   : Pending Verification by Admin 🟡"
 echo " --------------------------------------------------------------------"
 echo -e "${BLUE}Silakan hubungi Admin AuditChain untuk pengaktifan koneksi resmi.${NC}\n"
 
+}
+# Eksekusi fungsi utama
+do_install "$@"

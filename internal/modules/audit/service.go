@@ -197,6 +197,7 @@ func normalizeDBEngine(engine string) string {
 
 type RangeItemResult struct {
 	LogID              string                      `json:"log_id"`
+	Log                models.AuditLog             `json:"log"`
 	VerifyStatus       string                      `json:"verify_status"`
 	Message            string                      `json:"message,omitempty"`
 	AgentStatus        string                      `json:"agent_status,omitempty"`
@@ -221,6 +222,7 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	for _, auditLog := range logs {
 		item := RangeItemResult{
 			LogID: auditLog.LogID,
+			Log:   auditLog,
 		}
 
 		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)

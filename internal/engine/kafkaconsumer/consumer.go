@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type Engine struct {
 
 	sourceSystemCache sync.Map
 	mappingCache      sync.Map
+	actorCache        sync.Map // key: "clientID:actorID" → resolved name
 
 	mu        sync.Mutex
 	consumers map[string]*runningConsumer // key: ClientID
@@ -176,8 +178,22 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 	}
 
 	if len(topicSet) == 0 {
-		log.Printf("⚠️  [KafkaConsumer] Belum ada topic prefix=%s", cfg.TopicPrefix)
-		time.Sleep(10 * time.Second)
+		// Debug: tampilkan semua topic yang tersedia di broker agar mudah diagnosa mismatch prefix
+		allTopics := make([]string, 0)
+		for _, p := range partitions {
+			found := false
+			for _, at := range allTopics {
+				if at == p.Topic {
+					found = true
+					break
+				}
+			}
+			if !found {
+				allTopics = append(allTopics, p.Topic)
+			}
+		}
+		log.Printf("⚠️  [KafkaConsumer] Belum ada topic prefix=%s (tersedia di Kafka: %v)", cfg.TopicPrefix, allTopics)
+		time.Sleep(30 * time.Second)
 		return nil
 	}
 
@@ -195,7 +211,7 @@ func (e *Engine) discoverAndConsume(ctx context.Context, cfg models.ClientKafkaC
 		MinBytes:       1,
 		MaxBytes:       10e6,
 		CommitInterval: time.Second,
-		StartOffset:    kafka.LastOffset,
+		StartOffset:    kafka.FirstOffset,
 		Dialer:         dialer,
 	})
 	defer reader.Close()
@@ -305,9 +321,6 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	if op == "" {
 		op, _ = payload["op"].(string)
 	}
-	if op == "r" {
-		return nil // Skip snapshot read
-	}
 
 	tableName, _ := payload["__table"].(string)
 	if tableName == "" {
@@ -320,12 +333,56 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		tableName, _ = payload["collection"].(string)
 	}
 
-	userName, _ := payload["__user_name"].(string)
-	tsMs, _ := payload["__ts_ms"].(float64)
-
+	if tableName == "" {
+		// Fallback parse dari topic name: "client_topic_prefix.schema.table"
+		parts := strings.Split(msg.Topic, ".")
+		if len(parts) > 0 {
+			tableName = parts[len(parts)-1]
+		}
+	}
 	if tableName == "" {
 		return nil
 	}
+
+	var agentCfg models.AgentConfig
+	e.DB.Where("client_id = ?", cfg.ClientID).First(&agentCfg)
+
+	// Proses CDC tabel user: jika admin sudah konfigurasi UserTableName, gunakan itu.
+	// Jika belum, auto-detect berdasarkan nama tabel (user, account, member, dll)
+	isUserTable := false
+	if agentCfg.UserTableName != "" {
+		// agentCfg.UserTableName bisa berupa "public.users" atau "dbo.users"
+		// sedangkan tableName dari Debezium mungkin cuma "users".
+		parts := strings.Split(agentCfg.UserTableName, ".")
+		baseTarget := parts[len(parts)-1]
+
+		isUserTable = strings.EqualFold(tableName, baseTarget) ||
+			strings.Contains(agentCfg.UserTableName, tableName) ||
+			strings.Contains(tableName, agentCfg.UserTableName)
+	} else {
+		lowerTable := strings.ToLower(tableName)
+		for _, keyword := range []string{"user", "account", "akun", "pengguna", "member", "employee", "karyawan"} {
+			if strings.Contains(lowerTable, keyword) {
+				isUserTable = true
+				break
+			}
+		}
+	}
+
+	// Untuk tabel user, kita WAJIB memproses operasi "r" (snapshot read)
+	// agar memori identitas Gateway terisi dengan user yang sudah ada.
+	log.Printf("🔎 [DEBUG] tableName=%s, agentCfg.UserTableName=%s, isUserTable=%v", tableName, agentCfg.UserTableName, isUserTable)
+	if isUserTable {
+		e.processClientUserCDC(payload, cfg, tableName, agentCfg)
+	}
+
+	// Untuk tabel non-user, skip operasi "r" (jangan catat snapshot awal sebagai audit log)
+	if op == "r" {
+		return nil
+	}
+
+	userName, _ := payload["__user_name"].(string)
+	tsMs, _ := payload["__ts_ms"].(float64)
 
 	mapping := e.resolveClientMapping(cfg.ClientID)
 
@@ -339,23 +396,49 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	resource := fmt.Sprintf("%s:%s", tableName, resourceID)
 
 	actor := userName
+	actorFound := false
+
 	if mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
 			actor = extractScalarValue(customActor)
-		} else {
-			// Jika kolom tidak ditemukan di tabel, langsung tempel teks statis yang diketik Admin
-			actor = mapping.ActorField
+			actorFound = true
 		}
 	}
-	if actor == "" && mapping.FallbackActorField != "" {
+
+	if !actorFound && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
 			actor = extractScalarValue(fallbackActor)
-		} else {
-			actor = mapping.FallbackActorField
+			actorFound = true
 		}
 	}
-	if actor == "" {
-		actor = "simrs-system"
+
+	// Auto-detect common actor columns jika admin tidak mensettingnya
+	if !actorFound {
+		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby"}
+		for _, field := range commonFields {
+			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
+				actor = extractScalarValue(autoActor)
+				actorFound = true
+				break
+			}
+		}
+	}
+
+	if !actorFound && actor == "" {
+		actor = "Unknown"
+	}
+
+	// Resolusi CUID/UUID → Nama Manusia
+	// Jika actor terlihat seperti ID acak (Prisma CUID, UUID, dll),
+	// coba cari nama aslinya di tabel client_users
+	log.Printf("🔎 [DEBUG] Actor SEBELUM resolve: '%s', looksLikeID=%v, table=%s", actor, looksLikeGeneratedID(actor), tableName)
+	if actor != "" && actor != "Unknown" && looksLikeGeneratedID(actor) {
+		if resolved := e.resolveActorName(cfg.ClientID, actor); resolved != "" {
+			log.Printf("✅ [DEBUG] Actor RESOLVED: '%s' → '%s'", actor, resolved)
+			actor = resolved
+		} else {
+			log.Printf("❌ [DEBUG] Actor TIDAK BISA di-resolve: '%s' — client_users kosong atau tidak ditemukan", actor)
+		}
 	}
 
 	var timestamp time.Time
@@ -576,6 +659,14 @@ func cleanPayload(p DebeziumOracleMessage) DebeziumOracleMessage {
 		if k == "op" || k == "table" || k == "db" || k == "schema" || k == "ts_ms" || k == "deleted" || k == "user_name" || k == "collection" {
 			continue
 		}
+
+		// Redact sensitive fields
+		lowerK := strings.ToLower(k)
+		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
+			res[k] = "[REDACTED]"
+			continue
+		}
+
 		res[k] = v
 	}
 	return res
@@ -597,6 +688,13 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 		if skip[lowerK] || skip[k] {
 			continue
 		}
+
+		// Redact sensitive fields
+		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
+			meta[lowerK] = "[REDACTED]"
+			continue
+		}
+
 		meta[lowerK] = normalizeFieldValue(v)
 	}
 	return meta
@@ -659,4 +757,209 @@ func getDialer(cfg models.ClientKafkaConfig) *kafka.Dialer {
 			overrides: overrides,
 		},
 	}
+}
+
+func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.ClientKafkaConfig, tableName string, agentCfg models.AgentConfig) {
+	// Tentukan kolom identifier user — dari config admin, atau auto-detect
+	userCol := agentCfg.UserColumnName
+	if userCol == "" {
+		// Auto-detect: cari kolom yang kemungkinan besar berisi identifier user
+		candidates := []string{"username", "email", "login", "name", "nama", "user_name"}
+		for _, c := range candidates {
+			if raw, ok := findFieldInsensitive(payload, c); ok && raw != nil {
+				userCol = c
+				break
+			}
+		}
+	}
+
+	// Ambil user ID (primary key) — ini yang akan dipakai untuk mencocokkan actor
+	userID := ""
+	idCandidates := []string{"id", "user_id", "userid", "uid"}
+	for _, idc := range idCandidates {
+		if idRaw, ok := findFieldInsensitive(payload, idc); ok && idRaw != nil {
+			userID = extractScalarValue(idRaw)
+			if userID != "" {
+				break
+			}
+		}
+	}
+
+	// Ambil username/identifier dari kolom yang terdeteksi
+	username := ""
+	if userCol != "" {
+		if usernameRaw, ok := findFieldInsensitive(payload, userCol); ok && usernameRaw != nil {
+			username = extractScalarValue(usernameRaw)
+		}
+	}
+
+	// Jika tidak ada ID maupun username, skip
+	if userID == "" && username == "" {
+		return
+	}
+
+	// Gunakan userID sebagai key utama (karena ini yang muncul di kolom actor tabel lain)
+	// Fallback ke username jika tidak ada ID
+	lookupKey := userID
+	if lookupKey == "" {
+		lookupKey = username
+	}
+
+	// Coba cari email dan fullname
+	email := ""
+	if emailRaw, ok := findFieldInsensitive(payload, "email"); ok {
+		email = extractScalarValue(emailRaw)
+	}
+
+	fullName := ""
+	for _, nameField := range []string{"name", "nama", "full_name", "fullname", "display_name"} {
+		if nameRaw, ok := findFieldInsensitive(payload, nameField); ok {
+			fullName = extractScalarValue(nameRaw)
+			if fullName != "" {
+				break
+			}
+		}
+	}
+
+	// Gabungkan first_name + last_name jika kolom 'name' tunggal tidak ada
+	if fullName == "" {
+		firstName := ""
+		lastName := ""
+		if fnRaw, ok := findFieldInsensitive(payload, "first_name"); ok && fnRaw != nil {
+			firstName = extractScalarValue(fnRaw)
+		}
+		if lnRaw, ok := findFieldInsensitive(payload, "last_name"); ok && lnRaw != nil {
+			lastName = extractScalarValue(lnRaw)
+		}
+		combined := strings.TrimSpace(firstName + " " + lastName)
+		if combined != "" {
+			fullName = combined
+		}
+	}
+
+	// Jika fullName kosong tapi username ada dan bukan UUID/CUID, pakai username sebagai nama
+	if fullName == "" && username != "" && !looksLikeGeneratedID(username) {
+		fullName = username
+	}
+
+	rawJSON, _ := json.Marshal(payload)
+
+	var clientUser models.ClientUser
+	err := e.DB.Where("client_id = ? AND username = ?", cfg.ClientID, lookupKey).First(&clientUser).Error
+	if err != nil {
+		// Insert
+		newUser := models.ClientUser{
+			ClientID:    cfg.ClientID,
+			Username:    lookupKey, // Simpan ID (UUID/CUID) agar bisa di-resolve nanti
+			Email:       email,
+			FullName:    fullName,
+			SourceTable: tableName,
+			RawData:     string(rawJSON),
+			LastSeenAt:  time.Now(),
+		}
+		e.DB.Create(&newUser)
+		log.Printf("👤 [KafkaConsumer] User baru disimpan: id=%s name=%s email=%s", lookupKey, fullName, email)
+	} else {
+		// Update
+		updates := map[string]interface{}{
+			"last_seen_at": time.Now(),
+			"raw_data":     string(rawJSON),
+		}
+		if email != "" {
+			updates["email"] = email
+		}
+		if fullName != "" {
+			updates["full_name"] = fullName
+		}
+		e.DB.Model(&clientUser).Updates(updates)
+	}
+
+	// Invalidate actor cache agar resolusi langsung pakai data terbaru
+	e.actorCache.Delete(cfg.ClientID + ":" + lookupKey)
+
+	// Backfill: update audit_logs yang masih menyimpan UUID sebagai actor
+	// Prioritas: Email > FullName > Username
+	resolvedName := email
+	if resolvedName == "" {
+		resolvedName = fullName
+	}
+	if resolvedName == "" {
+		resolvedName = username
+	}
+	if resolvedName != "" && lookupKey != "" && looksLikeGeneratedID(lookupKey) {
+		result := e.DB.Model(&models.AuditLog{}).Where(
+			"client_id = ? AND actor = ?", cfg.ClientID, lookupKey,
+		).Update("actor", resolvedName)
+		if result.RowsAffected > 0 {
+			log.Printf("🔄 [KafkaConsumer] Backfill: %d audit log(s) actor '%s' → '%s'", result.RowsAffected, lookupKey, resolvedName)
+		}
+	}
+}
+
+// looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
+// sehingga perlu di-resolve ke nama manusia.
+var (
+	cuidPattern  = regexp.MustCompile(`^c[a-z0-9]{20,30}$`)                                             // Prisma CUID: cmsrsfohw000a6jjxh4jgty6d
+	uuidPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`) // UUID v4
+	hexIDPattern = regexp.MustCompile(`^[0-9a-f]{24,}$`)                                                // MongoDB ObjectId dll
+)
+
+func looksLikeGeneratedID(val string) bool {
+	if len(val) < 16 {
+		return false // Terlalu pendek, kemungkinan bukan generated ID
+	}
+	lower := strings.ToLower(val)
+	return cuidPattern.MatchString(lower) || uuidPattern.MatchString(lower) || hexIDPattern.MatchString(lower)
+}
+
+// resolveActorName menerjemahkan ID acak (CUID/UUID) menjadi nama manusia
+// dengan mencari di tabel client_users. Hasilnya di-cache agar tidak query DB berulang.
+func (e *Engine) resolveActorName(clientID, actorID string) string {
+	cacheKey := clientID + ":" + actorID
+
+	// Cek cache dulu
+	if cached, ok := e.actorCache.Load(cacheKey); ok {
+		return cached.(string)
+	}
+
+	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi UUID/CUID)
+	var user models.ClientUser
+	result := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).Limit(1).Find(&user)
+	if result.Error != nil {
+		log.Printf("⚠️  [KafkaConsumer] Gagal mencari actor '%s' di client_users: %v", actorID, result.Error)
+		return ""
+	}
+	if result.RowsAffected == 0 {
+		// Fallback: coba cari di raw_data (mungkin ID disimpan dengan key berbeda)
+		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di username='%s', coba cari di raw_data...", actorID)
+		fallbackResult := e.DB.Where("client_id = ? AND CAST(raw_data AS TEXT) LIKE ?", clientID, "%"+actorID+"%").Limit(1).Find(&user)
+		if fallbackResult.Error != nil {
+			log.Printf("⚠️  [KafkaConsumer] Gagal fallback actor '%s' di raw_data: %v", actorID, fallbackResult.Error)
+			return ""
+		}
+		if fallbackResult.RowsAffected == 0 {
+			log.Printf("❌ [DEBUG] resolveActorName: GAGAL TOTAL untuk actorID='%s'. Tidak ada data di client_users.", actorID)
+			// Hitung total rows di client_users untuk debugging
+			var count int64
+			e.DB.Model(&models.ClientUser{}).Where("client_id = ?", clientID).Count(&count)
+			log.Printf("📊 [DEBUG] Total client_users untuk client '%s': %d", clientID, count)
+			return ""
+		}
+		log.Printf("✅ [DEBUG] resolveActorName: DITEMUKAN via raw_data fallback untuk actorID='%s'", actorID)
+	}
+
+	// Prioritas: Email > FullName > Username (tetap CUID)
+	resolved := ""
+	if user.Email != "" {
+		resolved = user.Email
+	} else if user.FullName != "" {
+		resolved = user.FullName
+	}
+
+	e.actorCache.Store(cacheKey, resolved)
+
+	if resolved != "" {
+		log.Printf("🔍 [KafkaConsumer] Resolved actor: %s → %s", actorID, resolved)
+	}
+	return resolved
 }
