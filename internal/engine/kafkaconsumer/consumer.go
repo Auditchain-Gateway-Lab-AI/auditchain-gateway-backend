@@ -355,9 +355,9 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		// sedangkan tableName dari Debezium mungkin cuma "users".
 		parts := strings.Split(agentCfg.UserTableName, ".")
 		baseTarget := parts[len(parts)-1]
-		
-		isUserTable = strings.EqualFold(tableName, baseTarget) || 
-			strings.Contains(agentCfg.UserTableName, tableName) || 
+
+		isUserTable = strings.EqualFold(tableName, baseTarget) ||
+			strings.Contains(agentCfg.UserTableName, tableName) ||
 			strings.Contains(tableName, agentCfg.UserTableName)
 	} else {
 		lowerTable := strings.ToLower(tableName)
@@ -659,7 +659,7 @@ func cleanPayload(p DebeziumOracleMessage) DebeziumOracleMessage {
 		if k == "op" || k == "table" || k == "db" || k == "schema" || k == "ts_ms" || k == "deleted" || k == "user_name" || k == "collection" {
 			continue
 		}
-		
+
 		// Redact sensitive fields
 		lowerK := strings.ToLower(k)
 		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
@@ -810,7 +810,7 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	if emailRaw, ok := findFieldInsensitive(payload, "email"); ok {
 		email = extractScalarValue(emailRaw)
 	}
-	
+
 	fullName := ""
 	for _, nameField := range []string{"name", "nama", "full_name", "fullname", "display_name"} {
 		if nameRaw, ok := findFieldInsensitive(payload, nameField); ok {
@@ -899,9 +899,9 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 // looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
 // sehingga perlu di-resolve ke nama manusia.
 var (
-	cuidPattern = regexp.MustCompile(`^c[a-z0-9]{20,30}$`)                                                          // Prisma CUID: cmsrsfohw000a6jjxh4jgty6d
-	uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)             // UUID v4
-	hexIDPattern = regexp.MustCompile(`^[0-9a-f]{24,}$`)                                                            // MongoDB ObjectId dll
+	cuidPattern  = regexp.MustCompile(`^c[a-z0-9]{20,30}$`)                                             // Prisma CUID: cmsrsfohw000a6jjxh4jgty6d
+	uuidPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`) // UUID v4
+	hexIDPattern = regexp.MustCompile(`^[0-9a-f]{24,}$`)                                                // MongoDB ObjectId dll
 )
 
 func looksLikeGeneratedID(val string) bool {
@@ -924,12 +924,20 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 
 	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi UUID/CUID)
 	var user models.ClientUser
-	err := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).First(&user).Error
-	if err != nil {
+	result := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).Limit(1).Find(&user)
+	if result.Error != nil {
+		log.Printf("⚠️  [KafkaConsumer] Gagal mencari actor '%s' di client_users: %v", actorID, result.Error)
+		return ""
+	}
+	if result.RowsAffected == 0 {
 		// Fallback: coba cari di raw_data (mungkin ID disimpan dengan key berbeda)
 		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di username='%s', coba cari di raw_data...", actorID)
-		err2 := e.DB.Where("client_id = ? AND CAST(raw_data AS TEXT) LIKE ?", clientID, "%"+actorID+"%").First(&user).Error
-		if err2 != nil {
+		fallbackResult := e.DB.Where("client_id = ? AND CAST(raw_data AS TEXT) LIKE ?", clientID, "%"+actorID+"%").Limit(1).Find(&user)
+		if fallbackResult.Error != nil {
+			log.Printf("⚠️  [KafkaConsumer] Gagal fallback actor '%s' di raw_data: %v", actorID, fallbackResult.Error)
+			return ""
+		}
+		if fallbackResult.RowsAffected == 0 {
 			log.Printf("❌ [DEBUG] resolveActorName: GAGAL TOTAL untuk actorID='%s'. Tidak ada data di client_users.", actorID)
 			// Hitung total rows di client_users untuk debugging
 			var count int64

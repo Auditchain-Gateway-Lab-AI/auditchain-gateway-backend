@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"go-blockchain-api/internal/models"
@@ -668,7 +669,10 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 		}
 		h.DB.Create(&agentCfg)
 	} else {
-		h.DB.Model(&agentCfg).Updates(map[string]interface{}{
+		// Installer lama atau deteksi database yang gagal mengirim string kosong
+		// untuk konfigurasi user. Jangan sampai telemetry seperti itu menghapus
+		// konfigurasi yang sebelumnya sudah diatur admin.
+		updates := map[string]interface{}{
 			"agent_url":        req.AgentServerURL,
 			"tailscale_ip":     req.TailscaleIP,
 			"hostname":         req.Hostname,
@@ -676,10 +680,18 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			"db_name":          req.DBName,
 			"db_tables":        req.DBTables,
 			"connector_status": req.ConnectorStatus,
-			"user_table_name":  req.UserTableName,
-			"user_column_name": req.UserColumnName,
 			"is_active":        true,
-		})
+		}
+		if userTableName := strings.TrimSpace(req.UserTableName); userTableName != "" {
+			updates["user_table_name"] = userTableName
+		}
+		if userColumnName := strings.TrimSpace(req.UserColumnName); userColumnName != "" {
+			updates["user_column_name"] = userColumnName
+		}
+		if err := h.DB.Model(&agentCfg).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memperbarui telemetry agent: " + err.Error()})
+			return
+		}
 	}
 
 	sourceSys := req.Hostname
@@ -905,8 +917,10 @@ func (h *Handler) GetMyUsersCDC(c *gin.Context) {
 }
 
 type UpdateUserTableRequest struct {
-	UserTableName  string `json:"user_table_name" binding:"required"`
-	UserColumnName string `json:"user_column_name" binding:"required"`
+	UserTableName string `json:"user_table_name" binding:"required"`
+	// Kolom ini opsional karena consumer dapat mendeteksi email/nama secara
+	// otomatis. Tabel user tetap wajib agar event snapshot diproses.
+	UserColumnName string `json:"user_column_name"`
 }
 
 func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
@@ -914,6 +928,12 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 	var req UpdateUserTableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.UserTableName = strings.TrimSpace(req.UserTableName)
+	req.UserColumnName = strings.TrimSpace(req.UserColumnName)
+	if req.UserTableName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_table_name tidak boleh kosong"})
 		return
 	}
 

@@ -163,6 +163,12 @@ if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
     echo -e "${BLUE}         🔧 AUDITCHAIN AGENT FIX MODE — User Table Repair           ${NC}"
     echo -e "${BLUE}======================================================================${NC}\n"
 
+    # Data ini tersedia setelah instalasi awal dan dibutuhkan untuk
+    # mengirim konfigurasi tabel user yang sudah diperbaiki ke Gateway.
+    if [ -f /etc/auditchain/agent.env ]; then
+        source /etc/auditchain/agent.env
+    fi
+
     # 1. Deteksi konektor Debezium
     echo -e "${BLUE}🔍 Mencari konektor Debezium...${NC}"
     CONNECTORS=$(curl -s http://localhost:8083/connectors/ 2>/dev/null || true)
@@ -195,20 +201,23 @@ if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
     echo -e "  Database : ${DB_NAME}"
     echo -e "  Tabel    : ${CURRENT_TABLES}"
 
-    # 3. Cek apakah tabel user sudah ada
-    if echo "$CURRENT_TABLES" | grep -qiE "\.users|\.user|\.accounts|\.account|\.akun|\.pengguna|\.member|\.employees|\.employee|\.karyawan"; then
-        echo -e "\n${GREEN}✅ Tabel user SUDAH ada di konfigurasi konektor. Tidak perlu diperbaiki.${NC}"
-        exit 0
+    # 3. Cari tabel user yang sudah ada di connector. Jangan langsung exit:
+    # Gateway mungkin belum menerima user_table_name dan client_users belum
+    # pernah di-backfill, meskipun connector sudah memantau tabel tersebut.
+    DETECTED_USER_TABLE=$(printf '%s\n' "$CURRENT_TABLES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -iE '(^|\.)([^.]*user[^.]*|[^.]*account[^.]*|akun|pengguna|[^.]*member[^.]*|[^.]*employee[^.]*|karyawan)$' | head -n 1 || true)
+    USER_TABLE_ALREADY_INCLUDED=false
+    if [ -n "$DETECTED_USER_TABLE" ]; then
+        USER_TABLE_ALREADY_INCLUDED=true
+        echo -e "${GREEN}✓ Tabel user sudah dimonitor: ${DETECTED_USER_TABLE}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Tabel user BELUM dimonitor. Mencari tabel user...${NC}"
     fi
 
-    echo -e "${YELLOW}⚠️  Tabel user BELUM dimonitor. Mencari tabel user...${NC}"
-
-    # 4. Deteksi tabel user dari database
+    # 4. Deteksi tabel user dari database jika belum ada di connector
     IS_POSTGRES=false
     echo "$CONNECTOR_CLASS" | grep -qi "postgres" && IS_POSTGRES=true
 
-    DETECTED_USER_TABLE=""
-    if [ "$IS_POSTGRES" = true ]; then
+    if [ -z "$DETECTED_USER_TABLE" ] && [ "$IS_POSTGRES" = true ]; then
         DETECTED_USER_TABLE=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-align --tuples-only -c \
             "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
         # Fallback: coba via docker
@@ -224,7 +233,7 @@ if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
             DETECTED_USER_TABLE=$(sudo -u postgres psql -d "$DB_NAME" --no-align --tuples-only -c \
                 "SELECT schemaname||'.'||tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND tablename ~* '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
         fi
-    else
+    elif [ -z "$DETECTED_USER_TABLE" ]; then
         DETECTED_USER_TABLE=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -N -D "$DB_NAME" -e \
             "SELECT CONCAT('$DB_NAME.', table_name) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name REGEXP '^(users?|accounts?|akun|pengguna|members?|employees?|karyawan)$' LIMIT 1;" 2>/dev/null || true)
     fi
@@ -240,17 +249,39 @@ if [ "$1" = "--fix" ] || [ "${FIX_MODE}" = "true" ]; then
 
     echo -e "${GREEN}✓ Tabel user terdeteksi: ${DETECTED_USER_TABLE}${NC}"
 
+    # Tentukan kolom yang aman untuk dummy update. Kolom ini juga dikirim
+    # ke Gateway sebagai preferensi identitas, namun consumer tetap punya
+    # auto-detection untuk email/nama.
+    DETECTED_USER_COL=""
+    TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $NF}')
+    if [ "$IS_POSTGRES" = true ]; then
+        DETECTED_USER_COL=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" --no-align --tuples-only -c \
+            "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}' AND column_name ~* '^(username|email|login|name|nama|user_name)$' ORDER BY CASE column_name WHEN 'username' THEN 1 WHEN 'email' THEN 2 ELSE 3 END LIMIT 1;" 2>/dev/null || true)
+    else
+        DETECTED_USER_COL=$(mysql --no-defaults -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -N -D "$DB_NAME" -e \
+            "SELECT column_name FROM information_schema.columns WHERE table_schema='${DB_NAME}' AND table_name='${TBL_BARE}' AND column_name REGEXP '^(username|email|login|name|nama|user_name)$' ORDER BY FIELD(column_name, 'username', 'email', 'login', 'name', 'nama', 'user_name') LIMIT 1;" 2>/dev/null || true)
+    fi
+    if [ -z "$DETECTED_USER_COL" ]; then
+        DETECTED_USER_COL="id"
+        echo -e "${YELLOW}⚠️  Kolom nama tidak terdeteksi; memakai 'id' untuk memicu CDC.${NC}"
+    else
+        echo -e "${GREEN}✓ Kolom user terdeteksi: ${DETECTED_USER_COL}${NC}"
+    fi
+
     # 5. Update konfigurasi konektor Debezium
-    echo -e "${BLUE}🔧 Mengupdate konfigurasi konektor...${NC}"
-    NEW_TABLES="${CURRENT_TABLES},${DETECTED_USER_TABLE}"
-    echo "$CONFIG" | python3 -c "
+    NEW_TABLES="$CURRENT_TABLES"
+    if [ "$USER_TABLE_ALREADY_INCLUDED" = false ]; then
+        echo -e "${BLUE}🔧 Mengupdate konfigurasi konektor...${NC}"
+        NEW_TABLES="${CURRENT_TABLES:+${CURRENT_TABLES},}${DETECTED_USER_TABLE}"
+        echo "$CONFIG" | python3 -c "
 import sys, json
 config = json.load(sys.stdin)
 config['table.include.list'] = '${NEW_TABLES}'
 print(json.dumps(config))
 " | curl -s -X PUT "http://localhost:8083/connectors/${CONNECTOR_NAME}/config" \
         -H "Content-Type: application/json" -d @- > /dev/null
-    echo -e "${GREEN}✓ Konektor diupdate: ${NEW_TABLES}${NC}"
+        echo -e "${GREEN}✓ Konektor diupdate: ${NEW_TABLES}${NC}"
+    fi
 
     # 6. Update publication (PostgreSQL)
     if [ "$IS_POSTGRES" = true ]; then
@@ -285,6 +316,38 @@ print(json.dumps(config))
             "UPDATE ${TBL_BARE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>/dev/null || true
     fi
     echo -e "${GREEN}✓ Data user disinkronisasi.${NC}"
+
+    # Simpan hasil perbaikan di Gateway. Tanpa langkah ini consumer Gateway
+    # tidak tahu bahwa event dari tabel di atas adalah identitas user.
+    if [ -n "${AUDITCHAIN_GATEWAY_URL:-}" ] && [ -n "${AUDITCHAIN_API_KEY:-}" ] && [ -n "${KAFKA_BROKERS:-}" ] && [ -n "${AGENT_SERVER_URL:-}" ]; then
+        FIX_GATEWAY_URL=$(echo "$AUDITCHAIN_GATEWAY_URL" | sed -E 's|/api/?$||' | sed -E 's|/$||')
+        FIX_PAYLOAD=$(cat <<EOF
+{
+  "api_key_prefix": "${AUDITCHAIN_API_KEY}",
+  "kafka_brokers": "${KAFKA_BROKERS}",
+  "agent_server_url": "${AGENT_SERVER_URL}",
+  "hostname": "${HOSTNAME:-$(hostname)}",
+  "tailscale_ip": "${TAILSCALE_IP:-}",
+  "status": "running",
+  "db_engine": "${DB_ENGINE:-}",
+  "db_name": "${DB_NAME}",
+  "db_tables": "${NEW_TABLES}",
+  "connector_status": "running",
+  "user_table_name": "${DETECTED_USER_TABLE}",
+  "user_column_name": "${DETECTED_USER_COL}"
+}
+EOF
+)
+        FIX_HTTP_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${FIX_GATEWAY_URL}/api/agent/telemetry" \
+            -H "Content-Type: application/json" -d "${FIX_PAYLOAD}" || echo "000")
+        if [ "$FIX_HTTP_RESPONSE" = "200" ] || [ "$FIX_HTTP_RESPONSE" = "201" ]; then
+            echo -e "${GREEN}✓ Konfigurasi tabel user disimpan di Gateway.${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Gagal menyimpan konfigurasi tabel user ke Gateway (HTTP ${FIX_HTTP_RESPONSE}).${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠️  agent.env belum lengkap; set user_table_name di Gateway secara manual.${NC}"
+    fi
 
     echo -e "\n${GREEN}======================================================================${NC}"
     echo -e "${GREEN}  ✅ PERBAIKAN SELESAI!                                              ${NC}"
