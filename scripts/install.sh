@@ -1553,6 +1553,75 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             fi
         fi
 
+        # publication.autocreate.mode pada connector sengaja disabled agar
+        # scope CDC eksplisit. Karena itu publication HARUS dipastikan ada
+        # sebelum connector dibuat, termasuk ketika client memilih memakai
+        # kredensial PostgreSQL yang sudah ada (AUTO_USER=n).
+        PUBLICATION_READY=true
+        if [ "$CHOSEN_ENGINE" = "postgres" ]; then
+            PUBLICATION_READY=false
+
+            postgres_admin_query() {
+                local sql="$1"
+                local pg_container="${PG_DOCKER_CONTAINER:-}"
+
+                if command -v psql >/dev/null 2>&1 && \
+                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+
+                if [ -z "$pg_container" ]; then
+                    pg_container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                fi
+                if [ -n "$pg_container" ] && \
+                    docker exec < /dev/null "$pg_container" psql -U postgres -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+
+                if id -u postgres >/dev/null 2>&1 && \
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -v ON_ERROR_STOP=1 -Atqc "$sql"; then
+                    return 0
+                fi
+                return 1
+            }
+
+            ensure_postgres_publication() {
+                local pub_name="dbz_publication"
+                local pub_exists
+                local pub_tables
+                local selected_table
+                local selected_tables=()
+
+                IFS=',' read -r -a selected_tables <<< "$CHOSEN_TABLES"
+                pub_exists=$(postgres_admin_query "SELECT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '${pub_name}');") || return 1
+                pub_exists=$(echo "$pub_exists" | tr -d '[:space:]')
+
+                if [ "$pub_exists" != "t" ]; then
+                    postgres_admin_query "CREATE PUBLICATION ${pub_name} FOR TABLE ${CHOSEN_TABLES};" || return 1
+                    return 0
+                fi
+
+                pub_tables=$(postgres_admin_query "SELECT schemaname || '.' || tablename FROM pg_publication_tables WHERE pubname = '${pub_name}';") || return 1
+                for selected_table in "${selected_tables[@]}"; do
+                    selected_table=$(echo "$selected_table" | xargs)
+                    [ -z "$selected_table" ] && continue
+                    if ! printf '%s\n' "$pub_tables" | grep -Fxq "$selected_table"; then
+                        postgres_admin_query "ALTER PUBLICATION ${pub_name} ADD TABLE ${selected_table};" || return 1
+                    fi
+                done
+                return 0
+            }
+
+            echo -e "${BLUE}🔐 Memastikan publication PostgreSQL untuk CDC...${NC}"
+            if ensure_postgres_publication; then
+                PUBLICATION_READY=true
+                echo -e "${GREEN}✓ Publication 'dbz_publication' siap untuk tabel terpilih.${NC}"
+            else
+                echo -e "${RED}✗ Publication PostgreSQL tidak dapat dibuat/diverifikasi. Connector Debezium tidak akan dijalankan.${NC}"
+                echo -e "${YELLOW}Gunakan kredensial pemilik tabel/superuser PostgreSQL, lalu ulangi installer.${NC}"
+            fi
+        fi
+
         if [ "$CHOSEN_ENGINE" = "oracle" ]; then
             echo -e "\n${YELLOW}⚠️ PERHATIAN: Oracle Database memerlukan konfigurasi tambahan!${NC}"
             echo -e "Pastikan database telah berada di mode ARCHIVELOG dan fitur LogMiner diaktifkan."
@@ -1589,7 +1658,7 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             sleep 2
         done
 
-        if [ "$DEBEZIUM_READY" = true ]; then
+        if [ "$DEBEZIUM_READY" = true ] && { [ "$CHOSEN_ENGINE" != "postgres" ] || [ "$PUBLICATION_READY" = true ]; }; then
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 CONNECTOR_PAYLOAD=$(cat <<EOF
@@ -1817,6 +1886,9 @@ EOF
                 CONNECTOR_SETUP_STATUS="failed_${DBZ_RESP}"
             fi
             rm -f "${DBZ_BODY_FILE}"
+        elif [ "$CHOSEN_ENGINE" = "postgres" ] && [ "$PUBLICATION_READY" != true ]; then
+            CONNECTOR_SETUP_STATUS="publication_failed"
+            echo -e "${RED}[ERROR] Connector tidak dibuat karena publication PostgreSQL belum siap.${NC}"
         else
             echo -e "${YELLOW}[NOTE] Debezium belum siap merespon. Konfigurasi otomatis ditunda.${NC}"
             CONNECTOR_SETUP_STATUS="debezium_not_ready"
