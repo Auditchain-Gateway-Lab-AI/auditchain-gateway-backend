@@ -486,6 +486,11 @@ services:
   debezium:
     image: quay.io/debezium/connect:2.7
     restart: unless-stopped
+    # Docker Linux tidak menyediakan host.docker.internal secara default.
+    # Mapping ini memungkinkan Debezium menjangkau PostgreSQL aplikasi yang
+    # berjalan di project Docker lain melalui port host yang dipublish.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -968,6 +973,16 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 fi
                 if [ -n "$PG_DOCKER_CONTAINER" ]; then
                     PG_IS_DOCKER=true
+
+                    # Debezium berjalan di container lain. `localhost` akan
+                    # menunjuk ke container Debezium sendiri, bukan ke
+                    # PostgreSQL aplikasi. Gunakan host gateway dan port
+                    # PostgreSQL yang dipublish oleh container aplikasi.
+                    PG_MAPPED_PORT=$(docker port "$PG_DOCKER_CONTAINER" 5432/tcp 2>/dev/null | sed -n '1s/.*://p')
+                    if [ -n "$PG_MAPPED_PORT" ]; then
+                        DB_PORT="$PG_MAPPED_PORT"
+                    fi
+                    DB_HOST="host.docker.internal"
                 fi
             fi
 
@@ -1025,7 +1040,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
                 if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
-                RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    RAW_COLS=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                else
+                    RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                fi
                 while IFS= read -r col; do
                     if echo "$col" | grep -qiE "username|email|nama|login|name"; then
                         DETECTED_USER_COL="$col"
@@ -1158,8 +1177,9 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
         AGENT_DB_USER="auditchain_agent"
         AGENT_DB_PASS=$(openssl rand -hex 12 2>/dev/null || echo "ac_pwd_$(date +%s)")
-        # Set default port hanya jika belum di-set manual
-        if [ "$MANUAL_MODE" = false ]; then
+        # Set default port hanya jika belum di-set manual. Jangan menimpa
+        # host/port PostgreSQL yang berjalan di Docker project lain.
+        if [ "$MANUAL_MODE" = false ] && [ "$PG_IS_DOCKER" != true ]; then
             DB_PORT="5432"
             [ "$CHOSEN_ENGINE" = "mysql" ] && DB_PORT="3306"
             [ "$CHOSEN_ENGINE" = "sqlserver" ] && DB_PORT="1433"
@@ -1167,8 +1187,14 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             [ "$CHOSEN_ENGINE" = "oracle" ] && DB_PORT="1521"
         fi
 
-        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
-        if [ "$MANUAL_MODE" = false ]; then
+        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP.
+        # PostgreSQL Docker memakai host.docker.internal yang sudah dipetakan
+        # pada service Debezium di docker-compose di atas.
+        if [ "$PG_IS_DOCKER" = true ]; then
+            DB_HOST="host.docker.internal"
+            PG_MAPPED_PORT=$(docker port "$PG_DOCKER_CONTAINER" 5432/tcp 2>/dev/null | sed -n '1s/.*://p')
+            [ -n "$PG_MAPPED_PORT" ] && DB_PORT="$PG_MAPPED_PORT"
+        elif [ "$MANUAL_MODE" = false ]; then
             DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
         fi
 
@@ -1265,7 +1291,17 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                                     # Restart container PostgreSQL via compose
                                     echo -e "${YELLOW}   Me-restart PostgreSQL container (recreate agar wal_level aktif)...${NC}"
                                     (cd "$PG_COMPOSE_DIR" && docker compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker-compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
-                                    sleep 5
+
+                                    # Container dapat berganti ID saat recreate.
+                                    # Tunggu sampai PostgreSQL siap menerima query,
+                                    # bukan hanya menunggu sejumlah detik tetap.
+                                    for _ in $(seq 1 12); do
+                                        PG_DOCKER_CONTAINER=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                                        if [ -n "$PG_DOCKER_CONTAINER" ] && docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SELECT 1;" 2>/dev/null | grep -q '^1$'; then
+                                            break
+                                        fi
+                                        sleep 2
+                                    done
 
                                     # Verifikasi
                                     NEW_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
@@ -1468,7 +1504,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    TEST_RESULT=$(docker exec "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                else
+                    TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                fi
                 if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
                     echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
