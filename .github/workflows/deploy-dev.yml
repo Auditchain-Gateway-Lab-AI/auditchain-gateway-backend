@@ -1,0 +1,23 @@
+name: Deploy Backend Dev
+
+on:
+  push:
+    branches:
+      - ops-Petrus
+  workflow_dispatch:
+
+concurrency:
+  group: backend-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to dev server
+    runs-on: [self-hosted, backend-dev]
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy ops-Petrus branch
+        run: |
+          cd /home/besu/auditchain/middleware-AuditChain-Gateway
+          DEPLOY_BRANCH=ops-Petrus bash deploy.sh
