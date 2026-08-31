@@ -97,8 +97,8 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	if req.Format != "csv" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Hanya format csv yang didukung saat ini."})
+	if req.Format != "csv" && req.Format != "pdf" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Hanya format csv dan pdf yang didukung saat ini."})
 		return
 	}
 
@@ -119,16 +119,28 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	csvData, err := h.Service.GenerateCSVReport(clientID, fromTime, toTime)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal generate laporan CSV."})
-		return
+	var data []byte
+	var generateErr error
+	var filename string
+	var contentType string
+
+	if req.Format == "pdf" {
+		data, generateErr = h.Service.GeneratePDFReport(clientID, fromTime, toTime)
+		filename = fmt.Sprintf("auditchain-report-%s.pdf", time.Now().Format("20060102-150405"))
+		contentType = "application/pdf"
+	} else {
+		data, generateErr = h.Service.GenerateCSVReport(clientID, fromTime, toTime)
+		filename = fmt.Sprintf("auditchain-report-%s.csv", time.Now().Format("20060102-150405"))
+		contentType = "text/csv; charset=utf-8"
 	}
 
-	filename := fmt.Sprintf("auditchain-report-%s.csv", time.Now().Format("20060102-150405"))
+	if generateErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal generate laporan " + strings.ToUpper(req.Format) + "."})
+		return
+	}
 	
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	c.Data(http.StatusOK, "text/csv; charset=utf-8", csvData)
+	c.Data(http.StatusOK, contentType, data)
 }
 
 // TODO: Phase 2 methods (history, download)
