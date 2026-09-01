@@ -13,7 +13,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to dev server
-    runs-on: [self-hosted, backend-dev]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
 
     steps:
