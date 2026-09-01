@@ -6,11 +6,11 @@ cd "$(dirname "$0")"
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 BRANCH="${DEPLOY_BRANCH:-$CURRENT_BRANCH}"
 
-# Cek local changes di server, tolak deploy kalau ada uncommitted changes
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Deploy stopped: local changes exist on the server."
+# Cek tracked local changes di server, tolak deploy kalau ada perubahan pada file repo
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "Deploy stopped: tracked local changes exist on the server."
   echo "Commit, stash, or discard them first, then run this script again."
-  git status --short
+  git status --short --untracked-files=no
   exit 1
 fi
 

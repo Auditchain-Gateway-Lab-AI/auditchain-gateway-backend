@@ -2,3 +2,7 @@
 wallet/
 postman/
 AGENT_ONBOARDING_SPEC.md
+
+# Local build/download artifacts
+/gateway-app
+/go*.linux-amd64.tar.gz
