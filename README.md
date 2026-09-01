@@ -1,6 +1,6 @@
 # 🛡️ AuditChain Gateway
 
-AuditChain Gateway adalah *middleware* dan API Gateway berskala *Enterprise* yang menerima, memproses, dan mengunci log audit dari berbagai sistem klien (rumah sakit/SIMRS, data geospasial, dsb.) secara *immutable* (tidak dapat diubah) ke dalam jaringan **Hyperledger Fabric Blockchain**.
+AuditChain Gateway adalah *Middleware* dan API Gateway berskala *Enterprise* yang menerima, memproses, dan mengunci log audit dari berbagai sistem klien (rumah sakit/SIMRS, data geospasial, dsb.) secara *immutable* (tidak dapat diubah) ke dalam jaringan **Hyperledger Fabric Blockchain**.
 
 Sistem ini menggunakan arsitektur **multi-tenant (SaaS)**, ingestion via **Change Data Capture (CDC)** per klien, struktur data **Merkle Tree**, dan verifikasi berlapis untuk memastikan integritas data (Anti-Tampering) dengan performa *high-throughput*.
 
