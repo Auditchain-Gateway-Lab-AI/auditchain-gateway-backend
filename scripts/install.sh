@@ -296,6 +296,28 @@ print(json.dumps(config))
                 "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || true
         }
         echo -e "${GREEN}✓ Publication '${PUB_NAME}' diupdate.${NC}"
+
+        # REPLICA IDENTITY FULL: agar DELETE event menyertakan data row lengkap
+        echo -e "${BLUE}🔧 Mengaktifkan REPLICA IDENTITY FULL untuk tabel yang dimonitor...${NC}"
+        FIX_ALL_TABLES="${CURRENT_TABLES}"
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            FIX_ALL_TABLES="${FIX_ALL_TABLES},${DETECTED_USER_TABLE}"
+        fi
+        IFS=',' read -ra _RI_TABLES <<< "$FIX_ALL_TABLES"
+        for _ri_tbl in "${_RI_TABLES[@]}"; do
+            _ri_tbl=$(echo "$_ri_tbl" | xargs)
+            [ -z "$_ri_tbl" ] && continue
+            PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+                "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || \
+            {
+                PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+                [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                    "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || \
+                sudo -u postgres psql -d "$DB_NAME" -c \
+                    "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+            }
+        done
+        echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
     fi
 
     # 7. Trigger sinkronisasi user
@@ -1429,6 +1451,18 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "  - Membuat publication khusus tabel terpilih..."
             docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" >/dev/null 2>&1 || true
             
+            # REPLICA IDENTITY FULL: agar PostgreSQL mengirim data row lengkap
+            # pada event DELETE, sehingga Debezium bisa menyertakan kolom actor
+            # (updated_by, deleted_by, dll) dalam payload CDC.
+            echo -e "  - Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih..."
+            IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+            for _ri_tbl in "${_RI_TABLES[@]}"; do
+                _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                [ -z "$_ri_tbl" ] && continue
+                docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" >/dev/null 2>&1 || true
+            done
+            echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
+            
             echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
         else
             # Non-Docker: tanya user apakah mau buat otomatis
@@ -1461,6 +1495,17 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 else
                     echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
                 fi
+
+                # REPLICA IDENTITY FULL: agar PostgreSQL mengirim data row lengkap
+                # pada event DELETE, sehingga Debezium bisa menyertakan kolom actor.
+                echo -e "Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih..."
+                IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+                for _ri_tbl in "${_RI_TABLES[@]}"; do
+                    _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                    [ -z "$_ri_tbl" ] && continue
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+                done
+                echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
             elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
                 echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
                 if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
@@ -1656,6 +1701,16 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if ensure_postgres_publication; then
                 PUBLICATION_READY=true
                 echo -e "${GREEN}✓ Publication 'dbz_publication' siap untuk tabel terpilih.${NC}"
+
+                # REPLICA IDENTITY FULL: agar DELETE event menyertakan data row lengkap
+                echo -e "${BLUE}🔧 Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih...${NC}"
+                IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+                for _ri_tbl in "${_RI_TABLES[@]}"; do
+                    _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                    [ -z "$_ri_tbl" ] && continue
+                    postgres_admin_query "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+                done
+                echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
             else
                 echo -e "${RED}✗ Publication PostgreSQL tidak dapat dibuat/diverifikasi. Connector Debezium tidak akan dijalankan.${NC}"
                 echo -e "${YELLOW}Gunakan kredensial pemilik tabel/superuser PostgreSQL, lalu ulangi installer.${NC}"

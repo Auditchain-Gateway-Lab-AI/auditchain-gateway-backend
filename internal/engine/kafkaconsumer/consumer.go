@@ -414,12 +414,52 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	// Auto-detect common actor columns jika admin tidak mensettingnya
 	if !actorFound {
-		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby"}
+		// Prioritaskan deleted_by untuk operasi DELETE
+		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby", "deletedby"}
+		if action == "DELETE" {
+			commonFields = []string{"deleted_by", "deletedby", "updated_by", "modified_by", "actor", "user_id", "username", "author", "userid", "updatedby", "created_by", "createdby"}
+		}
 		for _, field := range commonFields {
 			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
 				actor = extractScalarValue(autoActor)
 				actorFound = true
 				break
+			}
+		}
+	}
+
+	// Fallback khusus DELETE: Debezium ExtractNewRecordState menghapus data row
+	// pada event DELETE, sehingga kolom actor (updated_by, dll) tidak tersedia.
+	// Strategi fallback:
+	//   1. Cek "before" state (tersedia jika REPLICA IDENTITY FULL diaktifkan)
+	//   2. Cari actor dari audit log terakhir untuk resource yang sama
+	if !actorFound && (actor == "" || actor == "Unknown") && action == "DELETE" {
+		// Strategi 1: Cari dari "before" payload (jika REPLICA IDENTITY FULL aktif)
+		if before, ok := payload["before"].(map[string]interface{}); ok {
+			deleteActorFields := []string{"deleted_by", "deletedby", "updated_by", "modified_by", "created_by", "actor", "user_id", "username", "author"}
+			for _, field := range deleteActorFields {
+				if val, exists := before[field]; exists && val != nil {
+					resolved := extractScalarValue(val)
+					if resolved != "" {
+						actor = resolved
+						actorFound = true
+						log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari 'before' state: field=%s, actor=%s", field, actor)
+						break
+					}
+				}
+			}
+		}
+
+		// Strategi 2: Fallback ke audit log terakhir untuk resource yang sama
+		if !actorFound {
+			var lastLog models.AuditLog
+			if err := e.DB.Where(
+				"client_id = ? AND resource = ? AND actor != 'Unknown' AND actor != ''",
+				cfg.ClientID, resource,
+			).Order("timestamp DESC").First(&lastLog).Error; err == nil && lastLog.Actor != "" {
+				actor = lastLog.Actor
+				actorFound = true
+				log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari histori audit log: actor=%s, resource=%s", actor, resource)
 			}
 		}
 	}
