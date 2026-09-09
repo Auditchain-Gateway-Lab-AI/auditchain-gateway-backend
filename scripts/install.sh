@@ -550,6 +550,8 @@ SELECTED_DB_ENGINE=""
 SELECTED_DB_NAME=""
 SELECTED_TABLES=""
 CONNECTOR_SETUP_STATUS="skipped"
+USER_SYNC_STATUS="skipped"
+USER_SYNC_MESSAGE=""
 
 HAS_POSTGRES=false
 HAS_MYSQL=false
@@ -1999,15 +2001,15 @@ EOF
         sync_user_table_cdc() {
             local sync_ok=false
             local pg_container="${PG_DOCKER_CONTAINER:-}"
+            local sync_error=""
 
             echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 # Prioritas: koneksi TCP yang dipakai connector. Ini bekerja
                 # untuk PostgreSQL native, eksternal, maupun Docker host.
-                if command -v psql >/dev/null 2>&1 && \
-                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
-                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
-                    sync_ok=true
+                if command -v psql >/dev/null 2>&1; then
+                    sync_error=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>&1 >/dev/null) && sync_ok=true || true
                 fi
 
                 # Fallback untuk database PostgreSQL yang hanya dapat
@@ -2036,11 +2038,17 @@ EOF
             fi
 
             if [ "$sync_ok" = true ]; then
+                USER_SYNC_STATUS="ok"
+                USER_SYNC_MESSAGE="User table CDC sync event triggered"
                 echo -e "${GREEN}✓ Event CDC tabel user berhasil dipicu.${NC}"
                 return 0
             fi
 
             echo -e "${RED}✗ Gagal memicu event CDC tabel user. Tidak akan mengklaim sinkronisasi berhasil.${NC}"
+            USER_SYNC_STATUS="failed"
+            USER_SYNC_MESSAGE=$(echo "${sync_error:-unknown error}" | tr '\n' ' ' | sed "s/\"/'/g")
+            echo -e "${YELLOW}   Dampak: actor dapat tampil Unknown sampai tabel user berubah secara natural.${NC}"
+            echo -e "${YELLOW}   Detail: ${USER_SYNC_MESSAGE}${NC}"
             return 1
         }
 
@@ -2070,6 +2078,8 @@ DB_ENGINE="${SELECTED_DB_ENGINE}"
 DB_NAME="${SELECTED_DB_NAME}"
 DB_TABLES="${SELECTED_TABLES}"
 CONNECTOR_STATUS="${CONNECTOR_SETUP_STATUS}"
+USER_SYNC_STATUS="${USER_SYNC_STATUS}"
+USER_SYNC_MESSAGE="${USER_SYNC_MESSAGE}"
 EOF
 chmod 600 /etc/auditchain/agent.env
 
@@ -2095,6 +2105,8 @@ PAYLOAD=$(cat <<EOF
   "db_name": "${SELECTED_DB_NAME}",
   "db_tables": "${SELECTED_TABLES}",
   "connector_status": "${CONNECTOR_SETUP_STATUS}",
+  "user_sync_status": "${USER_SYNC_STATUS}",
+  "user_sync_message": "${USER_SYNC_MESSAGE}",
   "user_table_name": "${DETECTED_USER_TABLE}",
   "user_column_name": "${DETECTED_USER_COL}"
 }
@@ -2135,6 +2147,7 @@ echo "  • Kafka Broker Host  : ${KAFKA_BROKERS}"
 echo "  • Agent Server URL   : ${AGENT_SERVER_URL}"
 echo "  • Database Monitored : ${SELECTED_DB_ENGINE} -> ${SELECTED_DB_NAME}"
 echo "  • Connector Status   : ${CONNECTOR_SETUP_STATUS}"
+echo "  • User Sync Status   : ${USER_SYNC_STATUS}"
 echo "  • Status Dashboard   : Pending Verification by Admin 🟡"
 echo " --------------------------------------------------------------------"
 echo -e "${BLUE}Silakan hubungi Admin AuditChain untuk pengaktifan koneksi resmi.${NC}\n"
