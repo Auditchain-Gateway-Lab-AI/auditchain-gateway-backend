@@ -609,6 +609,8 @@ type AgentTelemetryRequest struct {
 	DBName          string `json:"db_name"`
 	DBTables        string `json:"db_tables"`
 	ConnectorStatus string `json:"connector_status"`
+	UserSyncStatus  string `json:"user_sync_status"`
+	UserSyncMessage string `json:"user_sync_message"`
 	UserTableName   string `json:"user_table_name"`
 	UserColumnName  string `json:"user_column_name"`
 }
@@ -663,6 +665,8 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 			DBName:          req.DBName,
 			DBTables:        req.DBTables,
 			ConnectorStatus: req.ConnectorStatus,
+			UserSyncStatus:  req.UserSyncStatus,
+			UserSyncMessage: req.UserSyncMessage,
 			UserTableName:   req.UserTableName,
 			UserColumnName:  req.UserColumnName,
 			IsActive:        true,
@@ -673,14 +677,16 @@ func (h *Handler) ProcessTelemetry(c *gin.Context) {
 		// untuk konfigurasi user. Jangan sampai telemetry seperti itu menghapus
 		// konfigurasi yang sebelumnya sudah diatur admin.
 		updates := map[string]interface{}{
-			"agent_url":        req.AgentServerURL,
-			"tailscale_ip":     req.TailscaleIP,
-			"hostname":         req.Hostname,
-			"db_engine":        req.DBEngine,
-			"db_name":          req.DBName,
-			"db_tables":        req.DBTables,
-			"connector_status": req.ConnectorStatus,
-			"is_active":        true,
+			"agent_url":         req.AgentServerURL,
+			"tailscale_ip":      req.TailscaleIP,
+			"hostname":          req.Hostname,
+			"db_engine":         req.DBEngine,
+			"db_name":           req.DBName,
+			"db_tables":         req.DBTables,
+			"connector_status":  req.ConnectorStatus,
+			"user_sync_status":  req.UserSyncStatus,
+			"user_sync_message": req.UserSyncMessage,
+			"is_active":         true,
 		}
 		if userTableName := strings.TrimSpace(req.UserTableName); userTableName != "" {
 			updates["user_table_name"] = userTableName
