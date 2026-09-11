@@ -75,7 +75,7 @@ func NewService(db *gorm.DB) *Service {
 //     Jika kosong → log bukan dari Agent, lapis ini dilewati.
 //  2. Ambil AgentConfig klien dari DB.
 //     Jika belum dikonfigurasi → lapis ini dilewati.
-//  3. Panggil GET <agent_url>/verify/<source_record_id>.
+//  3. Panggil GET <agent_url>/verify/<table>/<source_record_id>.
 //  4. Bandingkan field kunci: tabel↔resource, operasi↔action, app_user/db_user↔actor,
 //     serta metadata (data_lama+data_baru) ↔ metadata di log.
 func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, error) {
@@ -115,9 +115,17 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 	return &VerifyResult{IsMatch: true, SourceFound: false, AgentUsed: false}, nil
 }
 
-// verifyViaAuditTrail — mode SIMRS, query ke /verify/<audit_trail_id>
+// verifyViaAuditTrail — mode SIMRS, query ke /verify/<table>/<source_record_id>
 func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.AuditLog) (*VerifyResult, error) {
-	agentRec, err := s.fetchFromAgent(cfg, auditLog.SourceRecordID)
+	tableName := auditLog.Resource
+	if strings.Contains(tableName, ":") {
+		tableName = strings.SplitN(tableName, ":", 2)[0]
+	}
+	if tableName == "" {
+		return nil, fmt.Errorf("resource tabel untuk verifikasi Agent kosong")
+	}
+
+	agentRec, err := s.fetchFromAgent(cfg, tableName, auditLog.SourceRecordID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent: %w", err)
 	}
@@ -310,14 +318,14 @@ func (s *Service) loadAgentConfig(clientID string) (*models.AgentConfig, error) 
 	return &cfg, err
 }
 
-// fetchFromAgent memanggil GET <agent_url>/verify/<source_record_id>
-func (s *Service) fetchFromAgent(cfg *models.AgentConfig, sourceRecordID string) (*AuditTrailRecord, error) {
+// fetchFromAgent memanggil GET <agent_url>/verify/<table>/<source_record_id>
+func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecordID string) (*AuditTrailRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s", cfg.AgentURL, sourceRecordID)
+	url := fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(cfg.AgentURL, "/"), tableName, sourceRecordID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
