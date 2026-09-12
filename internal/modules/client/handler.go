@@ -33,6 +33,9 @@ type CreateClientRequest struct {
 	Status             string `json:"status" example:"active"`
 	ActorField         string `json:"actor_field" example:"app_user"`
 	FallbackActorField string `json:"fallback_actor_field" example:"db_user"`
+	CreateActorField   string `json:"create_actor_field" example:"created_by"`
+	UpdateActorField   string `json:"update_actor_field" example:"updated_by"`
+	DeleteActorField   string `json:"delete_actor_field" example:"deleted_by"`
 	ActionField        string `json:"action_field" example:"operasi"`
 	ResourceField      string `json:"resource_field" example:"tabel"`
 }
@@ -150,6 +153,9 @@ func (h *Handler) CreateClient(c *gin.Context) {
 		"field_mapping": gin.H{
 			"actor_field":          clientData.ActorField,
 			"fallback_actor_field": clientData.FallbackActorField,
+			"create_actor_field":   clientData.CreateActorField,
+			"update_actor_field":   clientData.UpdateActorField,
+			"delete_actor_field":   clientData.DeleteActorField,
 			"action_field":         clientData.ActionField,
 			"resource_field":       clientData.ResourceField,
 		},
@@ -502,6 +508,9 @@ type UpdateClientRequest struct {
 	Status             string `json:"status"`
 	ActorField         string `json:"actor_field"`
 	FallbackActorField string `json:"fallback_actor_field"`
+	CreateActorField   string `json:"create_actor_field"`
+	UpdateActorField   string `json:"update_actor_field"`
+	DeleteActorField   string `json:"delete_actor_field"`
 	ActionField        string `json:"action_field"`
 	ResourceField      string `json:"resource_field"`
 	TopicPrefix        string `json:"topic_prefix"`
@@ -537,6 +546,17 @@ func (h *Handler) UpdateClient(c *gin.Context) {
 		client.ActorField = req.ActorField
 	}
 	client.FallbackActorField = req.FallbackActorField
+	// Field baru hanya diubah bila dikirim oleh admin form; endpoint
+	// /dashboard/actor-config dipakai untuk menyimpan nilai kosong (reset).
+	if req.CreateActorField != "" {
+		client.CreateActorField = req.CreateActorField
+	}
+	if req.UpdateActorField != "" {
+		client.UpdateActorField = req.UpdateActorField
+	}
+	if req.DeleteActorField != "" {
+		client.DeleteActorField = req.DeleteActorField
+	}
 	if req.ActionField != "" {
 		client.ActionField = req.ActionField
 	}
@@ -551,7 +571,6 @@ func (h *Handler) UpdateClient(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal meng-update data klien"})
 		return
 	}
-
 	if req.TopicPrefix != "" {
 		h.DB.Model(&models.ClientKafkaConfig{}).Where("client_id = ?", client.ID).Update("topic_prefix", req.TopicPrefix)
 	}
@@ -566,6 +585,57 @@ func (h *Handler) UpdateClient(c *gin.Context) {
 		"message": "Data klien berhasil diperbarui",
 		"client":  client,
 	})
+}
+
+// GetActorConfig mengembalikan mapping actor milik client pada token JWT.
+func (h *Handler) GetActorConfig(c *gin.Context) {
+	clientID, ok := c.Get("client_id")
+	if !ok || fmt.Sprint(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "client_id tidak ditemukan pada sesi"})
+		return
+	}
+	var client models.Client
+	if err := h.DB.Select("id, company_name, actor_field, fallback_actor_field, create_actor_field, update_actor_field, delete_actor_field").First(&client, "id = ?", fmt.Sprint(clientID)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil konfigurasi actor"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"client": client})
+}
+
+// UpdateActorConfig hanya mengubah mapping milik client yang sedang login.
+func (h *Handler) UpdateActorConfig(c *gin.Context) {
+	clientID, ok := c.Get("client_id")
+	if !ok || fmt.Sprint(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "client_id tidak ditemukan pada sesi"})
+		return
+	}
+	var req struct {
+		ActorField         string `json:"actor_field"`
+		FallbackActorField string `json:"fallback_actor_field"`
+		CreateActorField   string `json:"create_actor_field"`
+		UpdateActorField   string `json:"update_actor_field"`
+		DeleteActorField   string `json:"delete_actor_field"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format request tidak valid"})
+		return
+	}
+	var client models.Client
+	if err := h.DB.First(&client, "id = ?", fmt.Sprint(clientID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Klien tidak ditemukan"})
+		return
+	}
+	client.ActorField, client.FallbackActorField = strings.TrimSpace(req.ActorField), strings.TrimSpace(req.FallbackActorField)
+	client.CreateActorField, client.UpdateActorField, client.DeleteActorField = strings.TrimSpace(req.CreateActorField), strings.TrimSpace(req.UpdateActorField), strings.TrimSpace(req.DeleteActorField)
+	if err := h.DB.Save(&client).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan konfigurasi actor"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Konfigurasi actor berhasil diperbarui", "client": client})
 }
 
 func (h *Handler) GetClientDetail(c *gin.Context) {
