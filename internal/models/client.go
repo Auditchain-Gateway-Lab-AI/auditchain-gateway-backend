@@ -17,7 +17,7 @@ type Client struct {
 	APIKeyHash   string `gorm:"type:varchar(255);not null" json:"-"`
 
 	// Konfigurasi SaaS
-	Status           string `gorm:"type:varchar(20);default:'active'" json:"status"`
+	Status string `gorm:"type:varchar(20);default:'active'" json:"status"`
 
 	// Konfigurasi Mapping Field Dinamis
 	// Digunakan untuk memetakan field kustom klien ke field standar Gateway.
@@ -28,6 +28,9 @@ type Client struct {
 	//   ResourceField        = "tabel"
 	ActorField         string `gorm:"type:varchar(100)" json:"actor_field"`
 	FallbackActorField string `gorm:"type:varchar(100)" json:"fallback_actor_field"`
+	CreateActorField   string `gorm:"type:varchar(100)" json:"create_actor_field"`
+	UpdateActorField   string `gorm:"type:varchar(100)" json:"update_actor_field"`
+	DeleteActorField   string `gorm:"type:varchar(100)" json:"delete_actor_field"`
 	ActionField        string `gorm:"type:varchar(100)" json:"action_field"`
 	ResourceField      string `gorm:"type:varchar(100)" json:"resource_field"`
 
