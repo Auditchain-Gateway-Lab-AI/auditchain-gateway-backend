@@ -55,7 +55,7 @@ type Service struct {
 	db *gorm.DB
 }
 
-// ResourceRecord adalah response dari endpoint /verify-resource di Agent
+// ResourceRecord adalah response dari endpoint /verify/<table>/<id> di Agent.
 type ResourceRecord struct {
 	Found     bool                   `json:"found"`
 	Table     string                 `json:"table"`
@@ -167,7 +167,7 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	tableName := parts[0]
 	resourceID := parts[1]
 
-	// Panggil Agent: GET /verify-resource/<table>/<id>
+	// Panggil Agent: GET /verify/<table>/<id>
 	resourceRec, err := s.fetchResourceFromAgent(cfg, tableName, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent untuk resource: %w", err)
@@ -219,14 +219,14 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	}, nil
 }
 
-// fetchResourceFromAgent memanggil GET <agent_url>/verify-resource/<table>/<id>
+// fetchResourceFromAgent memanggil GET <agent_url>/verify/<table>/<id>
 func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s/%s", cfg.AgentURL, tableName, resourceID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, resourceID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -325,7 +325,7 @@ func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecor
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(cfg.AgentURL, "/"), tableName, sourceRecordID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, sourceRecordID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -360,6 +360,10 @@ func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecor
 	}
 
 	return &rec, nil
+}
+
+func agentVerifyURL(agentURL, tableName, resourceID string) string {
+	return fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(agentURL, "/"), tableName, resourceID)
 }
 
 // compareFields membandingkan field-field penting antara AuditLog di middleware
