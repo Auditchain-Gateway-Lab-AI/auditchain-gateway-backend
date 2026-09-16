@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// AuditTrailRecord adalah respons dari endpoint GET /verify/:id di Agent.
+// AuditTrailRecord adalah respons dari endpoint GET /verify/<table>/<id> di Agent.
 // Field-field ini mencerminkan kolom tabel audit_trail di DB klien.
 type AuditTrailRecord struct {
 	Found    bool                   `json:"found"`
