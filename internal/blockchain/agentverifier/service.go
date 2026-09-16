@@ -118,14 +118,20 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 // verifyViaAuditTrail — mode SIMRS, query ke /verify/<table>/<source_record_id>
 func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.AuditLog) (*VerifyResult, error) {
 	tableName := auditLog.Resource
+	recordID := auditLog.SourceRecordID
 	if strings.Contains(tableName, ":") {
-		tableName = strings.SplitN(tableName, ":", 2)[0]
+		parts := strings.SplitN(tableName, ":", 2)
+		tableName = parts[0]
+		if len(parts) == 2 && parts[1] != "" {
+			// Endpoint Agent membutuhkan ID row pada tabel, bukan audit_trail_id.
+			recordID = parts[1]
+		}
 	}
-	if tableName == "" {
+	if tableName == "" || recordID == "" {
 		return nil, fmt.Errorf("resource tabel untuk verifikasi Agent kosong")
 	}
 
-	agentRec, err := s.fetchFromAgent(cfg, tableName, auditLog.SourceRecordID)
+	agentRec, err := s.fetchFromAgent(cfg, tableName, recordID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent: %w", err)
 	}
