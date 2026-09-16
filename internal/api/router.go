@@ -5,6 +5,7 @@ import (
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/report"
 
 	_ "go-blockchain-api/docs"
 
@@ -19,6 +20,7 @@ func SetupRouter(
 	authHandler *auth.Handler,
 	clientHandler *client.Handler,
 	agentHandler *agentverifier.Handler,
+	reportHandler *report.Handler,
 ) *gin.Engine {
 	router := gin.Default()
 
@@ -39,6 +41,7 @@ func SetupRouter(
 	auth.RegisterRoutes(apiGroup, authHandler)
 	client.RegisterRoutes(apiGroup, clientHandler)
 	audit.RegisterRoutes(apiGroup, auditHandler)
+	report.RegisterRoutes(apiGroup, reportHandler)
 
 	agentverifier.RegisterRoutes(apiGroup.Group("/dashboard"), agentHandler)
 

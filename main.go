@@ -34,6 +34,7 @@ import (
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/report"
 )
 
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService) {
@@ -121,7 +122,10 @@ func main() {
 
 	agentHandler := agentverifier.NewHandler(db)
 
-	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler)
+	reportService := report.NewService(auditService)
+	reportHandler := report.NewHandler(reportService)
+
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {

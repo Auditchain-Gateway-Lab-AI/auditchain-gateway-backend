@@ -29,6 +29,9 @@ type clientMapping struct {
 	FallbackActorField string
 	ActionField        string
 	ResourceField      string
+	CreateActorField   string
+	UpdateActorField   string
+	DeleteActorField   string
 }
 
 type Engine struct {
@@ -43,16 +46,14 @@ type Engine struct {
 }
 
 func (e *Engine) resolveClientMapping(clientID string) clientMapping {
-	if cached, ok := e.mappingCache.Load(clientID); ok {
-		return cached.(clientMapping)
-	}
-
 	var m clientMapping
 	if err := e.DB.Table("clients").
-		Select("actor_field, fallback_actor_field, action_field, resource_field").
+		Select("actor_field, fallback_actor_field, create_actor_field, update_actor_field, delete_actor_field, action_field, resource_field").
 		Where("id = ?", clientID).
 		Scan(&m).Error; err == nil {
-		e.mappingCache.Store(clientID, m)
+		// Mapping dapat diubah dari Gateway Portal; baca konfigurasi terbaru
+		// agar perubahan berlaku tanpa restart consumer.
+		return m
 	}
 	return m
 }
@@ -397,29 +398,86 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	actor := userName
 	actorFound := false
+	// Mapping khusus operasi memiliki prioritas di atas mapping umum.
+	operationField := mapping.UpdateActorField
+	if action == "INSERT" {
+		operationField = mapping.CreateActorField
+	}
+	if action == "DELETE" {
+		operationField = mapping.DeleteActorField
+	}
+	if operationField != "" {
+		if value, ok := findFieldInsensitive(payload, operationField); ok && value != nil {
+			if resolved := extractScalarValue(value); resolved != "" {
+				actor, actorFound = resolved, true
+			}
+		}
+	}
 
-	if mapping.ActorField != "" {
+	if !actorFound && mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
-			actor = extractScalarValue(customActor)
-			actorFound = true
+			if resolved := extractScalarValue(customActor); resolved != "" {
+				actor, actorFound = resolved, true
+			}
 		}
 	}
 
 	if !actorFound && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
-			actor = extractScalarValue(fallbackActor)
-			actorFound = true
+			if resolved := extractScalarValue(fallbackActor); resolved != "" {
+				actor, actorFound = resolved, true
+			}
 		}
 	}
 
 	// Auto-detect common actor columns jika admin tidak mensettingnya
 	if !actorFound {
-		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby"}
+		// Prioritaskan deleted_by untuk operasi DELETE
+		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby", "deletedby"}
+		if action == "DELETE" {
+			commonFields = []string{"deleted_by", "deletedby", "updated_by", "modified_by", "actor", "user_id", "username", "author", "userid", "updatedby", "created_by", "createdby"}
+		}
 		for _, field := range commonFields {
 			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
 				actor = extractScalarValue(autoActor)
 				actorFound = true
 				break
+			}
+		}
+	}
+
+	// Fallback khusus DELETE: Debezium ExtractNewRecordState menghapus data row
+	// pada event DELETE, sehingga kolom actor (updated_by, dll) tidak tersedia.
+	// Strategi fallback:
+	//   1. Cek "before" state (tersedia jika REPLICA IDENTITY FULL diaktifkan)
+	//   2. Cari actor dari audit log terakhir untuk resource yang sama
+	if !actorFound && (actor == "" || actor == "Unknown") && action == "DELETE" {
+		// Strategi 1: Cari dari "before" payload (jika REPLICA IDENTITY FULL aktif)
+		if before, ok := payload["before"].(map[string]interface{}); ok {
+			deleteActorFields := []string{"deleted_by", "deletedby", "updated_by", "modified_by", "created_by", "actor", "user_id", "username", "author"}
+			for _, field := range deleteActorFields {
+				if val, exists := before[field]; exists && val != nil {
+					resolved := extractScalarValue(val)
+					if resolved != "" {
+						actor = resolved
+						actorFound = true
+						log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari 'before' state: field=%s, actor=%s", field, actor)
+						break
+					}
+				}
+			}
+		}
+
+		// Strategi 2: Fallback ke audit log terakhir untuk resource yang sama
+		if !actorFound {
+			var lastLog models.AuditLog
+			if err := e.DB.Where(
+				"client_id = ? AND resource = ? AND actor != 'Unknown' AND actor != ''",
+				cfg.ClientID, resource,
+			).Order("timestamp DESC").First(&lastLog).Error; err == nil && lastLog.Actor != "" {
+				actor = lastLog.Actor
+				actorFound = true
+				log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari histori audit log: actor=%s, resource=%s", actor, resource)
 			}
 		}
 	}
