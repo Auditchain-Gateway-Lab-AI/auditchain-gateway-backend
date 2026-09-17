@@ -44,7 +44,7 @@ services:
       start_period: 10s
 
   minio-init:
-    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T17-34-57Z}
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}
     container_name: auditchain-minio-init
     restart: "no"
     depends_on:

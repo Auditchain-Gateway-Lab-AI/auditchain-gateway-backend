@@ -24,15 +24,44 @@ fi
 mc version enable "local/$bucket" >/dev/null 2>&1 || true
 mc retention set --default "$retention_mode" "${retention_days}d" "local/$bucket"
 
-# The policy templates use the default local bucket name. Render a temporary
-# copy so a staging/production bucket override still receives the same least-
-# privilege policy without modifying the read-only bootstrap mount.
+# The mc image is intentionally minimal and does not include sed/cat. Render
+# the two least-privilege policies using the POSIX shell's printf builtin so a
+# staging/production bucket override still receives the same policy.
 writer_policy_file="/tmp/audit-snapshot-writer.json"
 reader_policy_file="/tmp/audit-snapshot-reader.json"
-sed "s/auditchain-recovery/$bucket/g" \
-  /bootstrap/policies/audit-snapshot-writer.json > "$writer_policy_file"
-sed "s/auditchain-recovery/$bucket/g" \
-  /bootstrap/policies/audit-snapshot-reader.json > "$reader_policy_file"
+printf '%s\n' \
+  '{' \
+  '  "Version": "2012-10-17",' \
+  '  "Statement": [' \
+  '    {' \
+  '      "Effect": "Allow",' \
+  '      "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"],' \
+  '      "Resource": ["arn:aws:s3:::'"$bucket"'"]' \
+  '    },' \
+  '    {' \
+  '      "Effect": "Allow",' \
+  '      "Action": ["s3:AbortMultipartUpload", "s3:GetObject", "s3:GetObjectAttributes", "s3:GetObjectVersion", "s3:GetObjectVersionAttributes", "s3:ListMultipartUploadParts", "s3:PutObject"],' \
+  '      "Resource": ["arn:aws:s3:::'"$bucket"'/*"]' \
+  '    }' \
+  '  ]' \
+  '}' > "$writer_policy_file"
+
+printf '%s\n' \
+  '{' \
+  '  "Version": "2012-10-17",' \
+  '  "Statement": [' \
+  '    {' \
+  '      "Effect": "Allow",' \
+  '      "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketVersions"],' \
+  '      "Resource": ["arn:aws:s3:::'"$bucket"'"]' \
+  '    },' \
+  '    {' \
+  '      "Effect": "Allow",' \
+  '      "Action": ["s3:GetObject", "s3:GetObjectAttributes", "s3:GetObjectVersion", "s3:GetObjectVersionAttributes"],' \
+  '      "Resource": ["arn:aws:s3:::'"$bucket"'/*"]' \
+  '    }' \
+  '  ]' \
+  '}' > "$reader_policy_file"
 
 create_policy_if_missing() {
   policy_name="$1"
