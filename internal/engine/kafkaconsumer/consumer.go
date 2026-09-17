@@ -15,6 +15,7 @@ import (
 
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/storage/snapshotstore"
 
 	"github.com/segmentio/kafka-go"
 	"gorm.io/gorm"
@@ -36,6 +37,11 @@ type clientMapping struct {
 
 type Engine struct {
 	DB *gorm.DB
+
+	// SnapshotBuilder is nil while the feature flag is disabled. Once enabled,
+	// the builder creates an encrypted outbox payload before the database
+	// transaction commits, so a new log cannot exist without its recovery job.
+	SnapshotBuilder snapshotstore.OutboxBuilder
 
 	sourceSystemCache sync.Map
 	mappingCache      sync.Map
@@ -542,21 +548,43 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// Hash menggunakan fungsi shared agar canonicalization konsisten
 	auditLog.HashValue = hasher.GenerateLogHash(auditLog)
 	auditLog.Status = "HASHED"
+	auditLog.SnapshotStatus = models.SnapshotStatusPending
 
-	if err := e.DB.Create(auditLog).Error; err != nil {
-		return fmt.Errorf("gagal simpan audit log: %w", err)
-	}
-
-	// Update counter cache di client_tables
-	tableNameOnly := tableName
-	if tableNameOnly == "" {
-		if strings.Contains(resource, ":") {
-			tableNameOnly = strings.Split(resource, ":")[0]
-		} else {
-			tableNameOnly = resource
+	var snapshotOutbox *models.SnapshotOutbox
+	if e.SnapshotBuilder != nil {
+		var err error
+		snapshotOutbox, err = e.SnapshotBuilder.Build(*auditLog)
+		if err != nil {
+			return fmt.Errorf("gagal membentuk snapshot outbox untuk log %s: %w", auditLog.LogID, err)
 		}
 	}
-	upsertQuery := `
+
+	// Simpan audit log, pekerjaan snapshot, counter cache, dan Kafka offset
+	// secara atomik. Tanpa transaksi, log dapat terlihat sudah tersimpan
+	// walaupun snapshot recovery atau offset-nya gagal dibuat.
+	//
+	// SnapshotBuilder sengaja membuat payload terenkripsi sebelum transaksi,
+	// tetapi object MinIO baru diunggah oleh worker setelah commit berhasil.
+	err := e.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(auditLog).Error; err != nil {
+			return fmt.Errorf("gagal simpan audit log: %w", err)
+		}
+		if snapshotOutbox != nil {
+			if err := tx.Create(snapshotOutbox).Error; err != nil {
+				return fmt.Errorf("gagal simpan snapshot outbox: %w", err)
+			}
+		}
+
+		// Update counter cache di client_tables.
+		tableNameOnly := tableName
+		if tableNameOnly == "" {
+			if strings.Contains(resource, ":") {
+				tableNameOnly = strings.Split(resource, ":")[0]
+			} else {
+				tableNameOnly = resource
+			}
+		}
+		upsertQuery := `
 		INSERT INTO client_tables (client_id, table_name, row_count, last_action, last_actor, last_updated_at, created_at)
 		VALUES (?, ?, CASE WHEN ? = 'INSERT' THEN 1 ELSE 0 END, ?, ?, ?, NOW())
 		ON CONFLICT (client_id, table_name) DO UPDATE SET
@@ -568,18 +596,25 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 			last_action = EXCLUDED.last_action,
 			last_actor = EXCLUDED.last_actor,
 			last_updated_at = EXCLUDED.last_updated_at
-	`
-	_ = e.DB.Exec(upsertQuery, cfg.ClientID, tableNameOnly, action, action, actor, timestamp)
+		`
+		if err := tx.Exec(upsertQuery, cfg.ClientID, tableNameOnly, action, action, actor, timestamp).Error; err != nil {
+			return fmt.Errorf("gagal memperbarui counter table: %w", err)
+		}
 
-	// Simpan Kafka offset untuk verifikasi Lapis 3
-	kafkaOffset := &models.KafkaOffset{
-		LogID:     auditLog.LogID,
-		Topic:     msg.Topic,
-		Partition: int32(msg.Partition),
-		Offset:    msg.Offset,
-	}
-	if err := e.DB.Create(kafkaOffset).Error; err != nil {
-		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
+		// Simpan Kafka offset untuk verifikasi Lapis 3.
+		kafkaOffset := &models.KafkaOffset{
+			LogID:     auditLog.LogID,
+			Topic:     msg.Topic,
+			Partition: int32(msg.Partition),
+			Offset:    msg.Offset,
+		}
+		if err := tx.Create(kafkaOffset).Error; err != nil {
+			return fmt.Errorf("gagal simpan Kafka offset: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("✅ [KafkaConsumer] Tersimpan → engine=%-10s action=%-8s resource=%s client=%s source_system=%s",

@@ -14,10 +14,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,16 +34,88 @@ import (
 	"go-blockchain-api/internal/engine/aggregator"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/engine/kafkaconsumer"
+	"go-blockchain-api/internal/engine/snapshotworker"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
+	"go-blockchain-api/internal/storage/snapshotstore"
 )
 
-func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService) {
+func snapshotWriterEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_WRITER_ENABLED")), "true")
+}
+
+func snapshotRequiredForAnchor() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true")
+}
+
+func buildSnapshotRuntime() (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
+	if !snapshotWriterEnabled() {
+		return nil, nil, nil, nil
+	}
+
+	minioCfg, err := config.LoadMinIOConfig()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	keyID := strings.TrimSpace(os.Getenv("SNAPSHOT_ENCRYPTION_ACTIVE_KEY_ID"))
+	encodedKey := strings.TrimSpace(os.Getenv("SNAPSHOT_ENCRYPTION_KEY"))
+	cipher, err := snapshotstore.NewCipherFromEncodedKey(keyID, encodedKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	store, err := snapshotstore.NewMinIOStore(minioCfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return snapshotstore.AuditSnapshotOutboxBuilder{Cipher: cipher}, store, cipher, nil
+}
+
+func loadSnapshotWorkerConfig() (snapshotworker.Config, error) {
+	parsePositiveInt := func(name string, fallback int) (int, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			return 0, fmt.Errorf("%s harus berupa bilangan bulat positif", name)
+		}
+		return value, nil
+	}
+
+	maxAttempts, err := parsePositiveInt("SNAPSHOT_MAX_ATTEMPTS", 10)
+	if err != nil {
+		return snapshotworker.Config{}, err
+	}
+	concurrency, err := parsePositiveInt("SNAPSHOT_WORKER_CONCURRENCY", 1)
+	if err != nil {
+		return snapshotworker.Config{}, err
+	}
+	retrySeconds, err := parsePositiveInt("SNAPSHOT_RETRY_BASE_SECONDS", 5)
+	if err != nil {
+		return snapshotworker.Config{}, err
+	}
+	pollSeconds, err := parsePositiveInt("SNAPSHOT_POLL_INTERVAL_SECONDS", 2)
+	if err != nil {
+		return snapshotworker.Config{}, err
+	}
+
+	return snapshotworker.Config{
+		Environment:  os.Getenv("APP_ENV"),
+		MaxAttempts:  maxAttempts,
+		Concurrency:  concurrency,
+		RetryBase:    time.Duration(retrySeconds) * time.Second,
+		PollInterval: time.Duration(pollSeconds) * time.Second,
+	}, nil
+}
+
+func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db}
-	kafkaEngine := &kafkaconsumer.Engine{DB: db}
+	kafkaEngine := &kafkaconsumer.Engine{DB: db, SnapshotBuilder: snapshotBuilder}
 
 	// Ticker pipeline: hasher + aggregator (batch=10) + anchoring setiap 10 detik
 	go func() {
@@ -96,6 +171,25 @@ func main() {
 
 	db := config.ConnectDB()
 
+	snapshotBuilder, snapshotStore, snapshotCipher, err := buildSnapshotRuntime()
+	if err != nil {
+		log.Fatalf("❌ Konfigurasi snapshot writer tidak valid: %v", err)
+	}
+	if snapshotRequiredForAnchor() && snapshotBuilder == nil {
+		log.Fatal("❌ SNAPSHOT_REQUIRED_FOR_ANCHOR=true membutuhkan SNAPSHOT_WRITER_ENABLED=true dan konfigurasi MinIO yang valid")
+	}
+	if snapshotStore != nil {
+		snapshotWorkerConfig, configErr := loadSnapshotWorkerConfig()
+		if configErr != nil {
+			log.Fatalf("❌ Konfigurasi snapshot worker tidak valid: %v", configErr)
+		}
+		worker, workerErr := snapshotworker.New(db, snapshotStore, snapshotWorkerConfig)
+		if workerErr != nil {
+			log.Fatalf("❌ Snapshot worker tidak dapat dibuat: %v", workerErr)
+		}
+		go worker.Run(ctx)
+	}
+
 	fabricSvc, err := blockchain.InitFabricGateway(db)
 	if err != nil {
 		log.Printf("⚠️  Gagal terhubung ke Fabric: %v\n", err)
@@ -103,7 +197,7 @@ func main() {
 		defer fabricSvc.Close()
 	}
 
-	startPipelineWorker(ctx, db, fabricSvc)
+	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder)
 
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, db)
@@ -124,8 +218,10 @@ func main() {
 
 	reportService := report.NewService(auditService)
 	reportHandler := report.NewHandler(reportService)
+	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, snapshotBuilder)
+	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler)
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {

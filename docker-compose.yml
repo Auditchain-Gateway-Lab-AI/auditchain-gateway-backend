@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres-db:
     image: postgres:17-alpine
@@ -21,26 +19,53 @@ services:
       timeout: 5s
       retries: 5
 
-  immudb:
-    image: codenotary/immudb:latest
-    container_name: auditchain-immudb
+  minio:
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    container_name: auditchain-minio
     restart: always
     environment:
-      IMMUDB_ADMIN_PASSWORD: ${IMMUDB_ADMIN_PASSWORD:-rahasia_immudb_ganti_ini}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password-change-me}
     ports:
-      - "3322:3322"   # gRPC — dipakai client Go
-      - "9497:9497"   # metrics/health endpoint
-      - "8081:8080"   # Web Console (bawaan immudb) — akses via http://localhost:8081
+      - "127.0.0.1:9000:9000" # S3 API; jangan dibuka publik di production
+      - "127.0.0.1:9001:9001" # Console; hanya untuk local/staging
+    command: server /data --console-address ":9001"
     volumes:
-      - immudb-data:/var/lib/immudb
+      - minio-data:/data
     networks:
       - gateway-net
     healthcheck:
-      test: ["CMD", "immuadmin", "status"]
-      interval: 10s
+      # Recent MinIO images do not ship curl/wget; the bundled mc readiness
+      # probe is the supported container health check.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  minio-init:
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T17-34-57Z}
+    container_name: auditchain-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-auditchain-recovery}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password-change-me}
+      MINIO_WRITER_USER: ${MINIO_WRITER_USER:-auditchain-writer}
+      MINIO_WRITER_PASSWORD: ${MINIO_WRITER_PASSWORD:-local-writer-password-change-me}
+      MINIO_READER_USER: ${MINIO_READER_USER:-auditchain-reader}
+      MINIO_READER_PASSWORD: ${MINIO_READER_PASSWORD:-local-reader-password-change-me}
+      MINIO_RETENTION_MODE: ${MINIO_RETENTION_MODE:-GOVERNANCE}
+      MINIO_RETENTION_DAYS: ${MINIO_RETENTION_DAYS:-30}
+    volumes:
+      - ./scripts/minio:/bootstrap:ro
+    entrypoint: ["/bin/sh", "/bootstrap/init-bucket.sh"]
+    networks:
+      - gateway-net
 
   api-gateway:
     build: .
@@ -50,14 +75,17 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
-      immudb:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
       - DB_HOST=postgres-db
-      - IMMUDB_HOST=immudb
-      - IMMUDB_PORT=3322
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_USE_TLS=${MINIO_USE_TLS:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-auditchain-recovery}
+      - MINIO_ACCESS_KEY=${MINIO_WRITER_USER:-auditchain-writer}
+      - MINIO_SECRET_KEY=${MINIO_WRITER_PASSWORD:-local-writer-password-change-me}
     volumes:
       - /home/besu/audit_blockchain/organizations:/home/besu/audit_blockchain/organizations:ro
     extra_hosts:
@@ -71,7 +99,7 @@ services:
 
 volumes:
   postgres-data:
-  immudb-data:
+  minio-data:
 
 networks:
   gateway-net:

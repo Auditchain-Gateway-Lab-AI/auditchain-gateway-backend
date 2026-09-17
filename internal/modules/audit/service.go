@@ -7,13 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
-
-	"gorm.io/gorm"
 )
 
 type VerificationResult struct {
@@ -87,6 +88,7 @@ type auditService struct {
 	repo   AuditRepository
 	fabric *blockchain.FabricService
 	agent  *agentverifier.Service
+	db     *gorm.DB
 }
 
 type ResourceLogVerification struct {
@@ -129,6 +131,7 @@ func NewService(repo AuditRepository, fabric *blockchain.FabricService, db *gorm
 		repo:   repo,
 		fabric: fabric,
 		agent:  agentverifier.NewService(db),
+		db:     db,
 	}
 }
 
@@ -340,6 +343,7 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	canonicalizeLog(auditLog)
 	recalculatedHash := hasher.GenerateLogHash(auditLog)
 	if recalculatedHash != auditLog.HashValue {
+		s.recordTamperIncident(*auditLog, "METADATA_HASH_MISMATCH", recalculatedHash)
 		return &VerificationResult{
 			Status:       "failed_local",
 			Message:      "🚨 DATA TERMANIPULASI: Isi data telah diubah di database middleware.",
@@ -359,6 +363,9 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}, nil
 	}
 
+	if s.fabric == nil {
+		return nil, errors.New("fabric_error")
+	}
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	if err != nil {
 		return nil, errors.New("fabric_error")
@@ -380,6 +387,17 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	if len(proofs) > 0 {
 		reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
 	}
+	if auditLog.MerkleRoot != "" && auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+		s.recordTamperIncident(*auditLog, "MERKLE_ROOT_MISMATCH", recalculatedHash)
+		return &VerificationResult{
+			Status:    "failed_onchain",
+			Message:   "🚨 DATA TERMANIPULASI: Merkle root pada database berbeda dari anchor Fabric.",
+			IsValid:   false,
+			LogID:     auditLog.LogID,
+			DBRoot:    auditLog.MerkleRoot,
+			ChainRoot: fabricResponse.MerkleRoot,
+		}, nil
+	}
 
 	verifiedVia := "merkle_proof"
 	if reconstructedRoot != fabricResponse.MerkleRoot {
@@ -387,6 +405,7 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		// level>0 & IsLeft belum tersimpan benar) — supaya tidak false-positive
 		// menandai log lama yang sebenarnya sah sebagai "tampered".
 		if auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+			s.recordTamperIncident(*auditLog, "MERKLE_ROOT_MISMATCH", recalculatedHash)
 			return &VerificationResult{
 				Status:    "failed_onchain",
 				Message:   "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
@@ -529,6 +548,7 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 	canonicalizeLog(&auditLog)
 	recalculated := hasher.GenerateLogHash(&auditLog)
 	if recalculated != auditLog.HashValue {
+		s.recordTamperIncident(auditLog, "METADATA_HASH_MISMATCH", recalculated)
 		return "tampered"
 	}
 
@@ -562,11 +582,57 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 		reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
 	}
 
-	if reconstructedRoot != fabricResponse.MerkleRoot && auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+	if auditLog.MerkleRoot != "" && auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+		s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
 		return "tampered"
+	}
+	if reconstructedRoot != fabricResponse.MerkleRoot {
+		// Legacy batches may have incomplete Merkle proof direction data. The
+		// persisted DB root still matches Fabric, so keep the historical
+		// fallback behavior while treating an actual DB-root mismatch above as
+		// tampering.
+		return "valid"
 	}
 
 	return "valid"
+}
+
+// recordTamperIncident membuat satu incident aktif per log dan jenis deteksi.
+// Verifikasi dashboard dapat dipanggil berkali-kali, sehingga operasi ini
+// harus idempoten dan tidak boleh membuat baris incident baru pada setiap GET.
+func (s *auditService) recordTamperIncident(auditLog models.AuditLog, incidentType, detectedHash string) {
+	if s.db == nil || auditLog.LogID == "" || auditLog.ClientID == "" {
+		return
+	}
+	var existing models.TamperIncident
+	err := s.db.Where(
+		"client_id = ? AND log_id = ? AND incident_type = ? AND status IN ?",
+		auditLog.ClientID,
+		auditLog.LogID,
+		incidentType,
+		[]string{models.IncidentStatusOpen, models.IncidentStatusUnderReview, models.IncidentStatusRecovering},
+	).First(&existing).Error
+	if err == nil {
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return
+	}
+	incident := &models.TamperIncident{
+		ID:           uuid.NewString(),
+		ClientID:     auditLog.ClientID,
+		LogID:        auditLog.LogID,
+		Resource:     auditLog.Resource,
+		IncidentType: incidentType,
+		ExpectedHash: auditLog.HashValue,
+		DetectedHash: detectedHash,
+		Status:       models.IncidentStatusOpen,
+		DetectedAt:   time.Now().UTC(),
+	}
+	// A concurrent verification may win the insert race. The unique/lookup
+	// guard is intentionally best-effort; verification itself remains read-only
+	// from the caller's perspective if this insert fails.
+	_ = s.db.Create(incident).Error
 }
 
 // GetRecentLogsPaginated menggantikan limit-500 lama dengan pagination

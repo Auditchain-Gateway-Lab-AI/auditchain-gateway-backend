@@ -4,6 +4,8 @@ import (
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 	"log"
+	"os"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -16,8 +18,14 @@ type Engine struct {
 func (a *Engine) ProcessBatch(batchSize int) error {
 	var logs []models.AuditLog
 
-	// 1. Ambil log yang siap diagregasi (maksimal sejumlah batchSize)
-	if err := a.DB.Where("status = ?", "HASHED").Order("timestamp asc").Limit(batchSize).Find(&logs).Error; err != nil {
+	// 1. Ambil log yang siap diagregasi (maksimal sejumlah batchSize).
+	// Saat snapshot wajib diaktifkan, log tanpa snapshot tervalidasi tidak
+	// boleh masuk Merkle/Fabric karena tidak dapat dipulihkan kembali.
+	query := a.DB.Where("status = ?", "HASHED")
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true") {
+		query = query.Where("snapshot_status = ?", models.SnapshotStatusVerified)
+	}
+	if err := query.Order("timestamp asc").Limit(batchSize).Find(&logs).Error; err != nil {
 		return err
 	}
 

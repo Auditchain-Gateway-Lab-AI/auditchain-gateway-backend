@@ -29,6 +29,17 @@ type AuditLog struct {
 	BlockchainTxID      *string    `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
 	Status              string     `gorm:"type:varchar(20);default:'RECEIVED'" json:"status"`
 	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp"`
+
+	// Recovery snapshot reference. The payload itself lives in MinIO; these
+	// fields are only the operational index used to read an exact object version.
+	SnapshotStatus        string     `gorm:"type:varchar(30);index;default:'PENDING'" json:"snapshot_status"`
+	SnapshotObjectKey     string     `gorm:"type:text" json:"snapshot_object_key"`
+	SnapshotVersionID     string     `gorm:"type:varchar(255)" json:"snapshot_version_id"`
+	SnapshotChecksum      string     `gorm:"type:varchar(64)" json:"snapshot_checksum"`
+	SnapshotPlaintextHash string     `gorm:"type:varchar(64)" json:"snapshot_plaintext_hash"`
+	SnapshotStoredAt      *time.Time `json:"snapshot_stored_at,omitempty"`
+	SnapshotVerifiedAt    *time.Time `json:"snapshot_verified_at,omitempty"`
+	SnapshotLastError     string     `gorm:"type:text" json:"snapshot_last_error,omitempty"`
 }
 
 type MerkleMetadata struct {
