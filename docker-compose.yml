@@ -28,7 +28,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password-change-me}
     ports:
       - "100.125.142.44:9000:9000" # S3 API; jangan dibuka publik di production
-      - "100.125.142.449001:9001" # Console; hanya untuk local/staging
+      - "100.125.142.44:9001:9001" # Console; hanya untuk local/staging
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
