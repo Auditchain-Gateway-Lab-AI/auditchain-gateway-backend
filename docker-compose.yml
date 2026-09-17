@@ -21,6 +21,26 @@ services:
       timeout: 5s
       retries: 5
 
+  immudb:
+    image: codenotary/immudb:latest
+    container_name: auditchain-immudb
+    restart: always
+    environment:
+      IMMUDB_ADMIN_PASSWORD: ${IMMUDB_ADMIN_PASSWORD:-rahasia_immudb_ganti_ini}
+    ports:
+      - "3322:3322"   # gRPC — dipakai client Go
+      - "9497:9497"   # metrics/health endpoint
+    volumes:
+      - immudb-data:/var/lib/immudb
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "immuadmin", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   api-gateway:
     build: .
     container_name: auditchain-api
@@ -29,10 +49,14 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
+      immudb:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DB_HOST=postgres-db
+      - IMMUDB_HOST=immudb
+      - IMMUDB_PORT=3322
     volumes:
       - /home/besu/audit_blockchain/organizations:/home/besu/audit_blockchain/organizations:ro
     extra_hosts:
@@ -46,6 +70,7 @@ services:
 
 volumes:
   postgres-data:
+  immudb-data:
 
 networks:
   gateway-net:
