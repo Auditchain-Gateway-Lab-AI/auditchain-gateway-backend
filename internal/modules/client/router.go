@@ -39,6 +39,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	dashRoutes := routerGroup.Group("/dashboard", middleware.JWTAuth())
 	{
 		dashRoutes.GET("/my-users", h.GetMyUsersCDC)
+		dashRoutes.GET("/actor-config", h.GetActorConfig)
+		dashRoutes.PATCH("/actor-config", h.UpdateActorConfig)
 	}
 
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)

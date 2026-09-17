@@ -15,6 +15,7 @@ import (
 
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/storage/snapshotstore"
 
 	"github.com/segmentio/kafka-go"
 	"gorm.io/gorm"
@@ -29,10 +30,18 @@ type clientMapping struct {
 	FallbackActorField string
 	ActionField        string
 	ResourceField      string
+	CreateActorField   string
+	UpdateActorField   string
+	DeleteActorField   string
 }
 
 type Engine struct {
 	DB *gorm.DB
+
+	// SnapshotBuilder is nil while the feature flag is disabled. Once enabled,
+	// the builder creates an encrypted outbox payload before the database
+	// transaction commits, so a new log cannot exist without its recovery job.
+	SnapshotBuilder snapshotstore.OutboxBuilder
 
 	sourceSystemCache sync.Map
 	mappingCache      sync.Map
@@ -43,16 +52,14 @@ type Engine struct {
 }
 
 func (e *Engine) resolveClientMapping(clientID string) clientMapping {
-	if cached, ok := e.mappingCache.Load(clientID); ok {
-		return cached.(clientMapping)
-	}
-
 	var m clientMapping
 	if err := e.DB.Table("clients").
-		Select("actor_field, fallback_actor_field, action_field, resource_field").
+		Select("actor_field, fallback_actor_field, create_actor_field, update_actor_field, delete_actor_field, action_field, resource_field").
 		Where("id = ?", clientID).
 		Scan(&m).Error; err == nil {
-		e.mappingCache.Store(clientID, m)
+		// Mapping dapat diubah dari Gateway Portal; baca konfigurasi terbaru
+		// agar perubahan berlaku tanpa restart consumer.
+		return m
 	}
 	return m
 }
@@ -397,29 +404,86 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	actor := userName
 	actorFound := false
+	// Mapping khusus operasi memiliki prioritas di atas mapping umum.
+	operationField := mapping.UpdateActorField
+	if action == "INSERT" {
+		operationField = mapping.CreateActorField
+	}
+	if action == "DELETE" {
+		operationField = mapping.DeleteActorField
+	}
+	if operationField != "" {
+		if value, ok := findFieldInsensitive(payload, operationField); ok && value != nil {
+			if resolved := extractScalarValue(value); resolved != "" {
+				actor, actorFound = resolved, true
+			}
+		}
+	}
 
-	if mapping.ActorField != "" {
+	if !actorFound && mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
-			actor = extractScalarValue(customActor)
-			actorFound = true
+			if resolved := extractScalarValue(customActor); resolved != "" {
+				actor, actorFound = resolved, true
+			}
 		}
 	}
 
 	if !actorFound && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
-			actor = extractScalarValue(fallbackActor)
-			actorFound = true
+			if resolved := extractScalarValue(fallbackActor); resolved != "" {
+				actor, actorFound = resolved, true
+			}
 		}
 	}
 
 	// Auto-detect common actor columns jika admin tidak mensettingnya
 	if !actorFound {
-		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby"}
+		// Prioritaskan deleted_by untuk operasi DELETE
+		commonFields := []string{"updated_by", "deleted_by", "modified_by", "created_by", "actor", "user_id", "username", "author", "userid", "updatedby", "createdby", "deletedby"}
+		if action == "DELETE" {
+			commonFields = []string{"deleted_by", "deletedby", "updated_by", "modified_by", "actor", "user_id", "username", "author", "userid", "updatedby", "created_by", "createdby"}
+		}
 		for _, field := range commonFields {
 			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
 				actor = extractScalarValue(autoActor)
 				actorFound = true
 				break
+			}
+		}
+	}
+
+	// Fallback khusus DELETE: Debezium ExtractNewRecordState menghapus data row
+	// pada event DELETE, sehingga kolom actor (updated_by, dll) tidak tersedia.
+	// Strategi fallback:
+	//   1. Cek "before" state (tersedia jika REPLICA IDENTITY FULL diaktifkan)
+	//   2. Cari actor dari audit log terakhir untuk resource yang sama
+	if !actorFound && (actor == "" || actor == "Unknown") && action == "DELETE" {
+		// Strategi 1: Cari dari "before" payload (jika REPLICA IDENTITY FULL aktif)
+		if before, ok := payload["before"].(map[string]interface{}); ok {
+			deleteActorFields := []string{"deleted_by", "deletedby", "updated_by", "modified_by", "created_by", "actor", "user_id", "username", "author"}
+			for _, field := range deleteActorFields {
+				if val, exists := before[field]; exists && val != nil {
+					resolved := extractScalarValue(val)
+					if resolved != "" {
+						actor = resolved
+						actorFound = true
+						log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari 'before' state: field=%s, actor=%s", field, actor)
+						break
+					}
+				}
+			}
+		}
+
+		// Strategi 2: Fallback ke audit log terakhir untuk resource yang sama
+		if !actorFound {
+			var lastLog models.AuditLog
+			if err := e.DB.Where(
+				"client_id = ? AND resource = ? AND actor != 'Unknown' AND actor != ''",
+				cfg.ClientID, resource,
+			).Order("timestamp DESC").First(&lastLog).Error; err == nil && lastLog.Actor != "" {
+				actor = lastLog.Actor
+				actorFound = true
+				log.Printf("🔍 [KafkaConsumer] DELETE actor resolved dari histori audit log: actor=%s, resource=%s", actor, resource)
 			}
 		}
 	}
@@ -484,21 +548,43 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// Hash menggunakan fungsi shared agar canonicalization konsisten
 	auditLog.HashValue = hasher.GenerateLogHash(auditLog)
 	auditLog.Status = "HASHED"
+	auditLog.SnapshotStatus = models.SnapshotStatusPending
 
-	if err := e.DB.Create(auditLog).Error; err != nil {
-		return fmt.Errorf("gagal simpan audit log: %w", err)
-	}
-
-	// Update counter cache di client_tables
-	tableNameOnly := tableName
-	if tableNameOnly == "" {
-		if strings.Contains(resource, ":") {
-			tableNameOnly = strings.Split(resource, ":")[0]
-		} else {
-			tableNameOnly = resource
+	var snapshotOutbox *models.SnapshotOutbox
+	if e.SnapshotBuilder != nil {
+		var err error
+		snapshotOutbox, err = e.SnapshotBuilder.Build(*auditLog)
+		if err != nil {
+			return fmt.Errorf("gagal membentuk snapshot outbox untuk log %s: %w", auditLog.LogID, err)
 		}
 	}
-	upsertQuery := `
+
+	// Simpan audit log, pekerjaan snapshot, counter cache, dan Kafka offset
+	// secara atomik. Tanpa transaksi, log dapat terlihat sudah tersimpan
+	// walaupun snapshot recovery atau offset-nya gagal dibuat.
+	//
+	// SnapshotBuilder sengaja membuat payload terenkripsi sebelum transaksi,
+	// tetapi object MinIO baru diunggah oleh worker setelah commit berhasil.
+	err := e.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(auditLog).Error; err != nil {
+			return fmt.Errorf("gagal simpan audit log: %w", err)
+		}
+		if snapshotOutbox != nil {
+			if err := tx.Create(snapshotOutbox).Error; err != nil {
+				return fmt.Errorf("gagal simpan snapshot outbox: %w", err)
+			}
+		}
+
+		// Update counter cache di client_tables.
+		tableNameOnly := tableName
+		if tableNameOnly == "" {
+			if strings.Contains(resource, ":") {
+				tableNameOnly = strings.Split(resource, ":")[0]
+			} else {
+				tableNameOnly = resource
+			}
+		}
+		upsertQuery := `
 		INSERT INTO client_tables (client_id, table_name, row_count, last_action, last_actor, last_updated_at, created_at)
 		VALUES (?, ?, CASE WHEN ? = 'INSERT' THEN 1 ELSE 0 END, ?, ?, ?, NOW())
 		ON CONFLICT (client_id, table_name) DO UPDATE SET
@@ -510,18 +596,25 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 			last_action = EXCLUDED.last_action,
 			last_actor = EXCLUDED.last_actor,
 			last_updated_at = EXCLUDED.last_updated_at
-	`
-	_ = e.DB.Exec(upsertQuery, cfg.ClientID, tableNameOnly, action, action, actor, timestamp)
+		`
+		if err := tx.Exec(upsertQuery, cfg.ClientID, tableNameOnly, action, action, actor, timestamp).Error; err != nil {
+			return fmt.Errorf("gagal memperbarui counter table: %w", err)
+		}
 
-	// Simpan Kafka offset untuk verifikasi Lapis 3
-	kafkaOffset := &models.KafkaOffset{
-		LogID:     auditLog.LogID,
-		Topic:     msg.Topic,
-		Partition: int32(msg.Partition),
-		Offset:    msg.Offset,
-	}
-	if err := e.DB.Create(kafkaOffset).Error; err != nil {
-		log.Printf("⚠️  [KafkaConsumer] Gagal simpan offset untuk log %s: %v", auditLog.LogID, err)
+		// Simpan Kafka offset untuk verifikasi Lapis 3.
+		kafkaOffset := &models.KafkaOffset{
+			LogID:     auditLog.LogID,
+			Topic:     msg.Topic,
+			Partition: int32(msg.Partition),
+			Offset:    msg.Offset,
+		}
+		if err := tx.Create(kafkaOffset).Error; err != nil {
+			return fmt.Errorf("gagal simpan Kafka offset: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("✅ [KafkaConsumer] Tersimpan → engine=%-10s action=%-8s resource=%s client=%s source_system=%s",

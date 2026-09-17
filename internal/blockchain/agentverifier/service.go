@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// AuditTrailRecord adalah respons dari endpoint GET /verify/:id di Agent.
+// AuditTrailRecord adalah respons dari endpoint GET /verify/<table>/<id> di Agent.
 // Field-field ini mencerminkan kolom tabel audit_trail di DB klien.
 type AuditTrailRecord struct {
 	Found    bool                   `json:"found"`
@@ -55,7 +55,7 @@ type Service struct {
 	db *gorm.DB
 }
 
-// ResourceRecord adalah response dari endpoint /verify-resource di Agent
+// ResourceRecord adalah response dari endpoint /verify/<table>/<id> di Agent.
 type ResourceRecord struct {
 	Found     bool                   `json:"found"`
 	Table     string                 `json:"table"`
@@ -75,7 +75,7 @@ func NewService(db *gorm.DB) *Service {
 //     Jika kosong → log bukan dari Agent, lapis ini dilewati.
 //  2. Ambil AgentConfig klien dari DB.
 //     Jika belum dikonfigurasi → lapis ini dilewati.
-//  3. Panggil GET <agent_url>/verify/<source_record_id>.
+//  3. Panggil GET <agent_url>/verify/<table>/<source_record_id>.
 //  4. Bandingkan field kunci: tabel↔resource, operasi↔action, app_user/db_user↔actor,
 //     serta metadata (data_lama+data_baru) ↔ metadata di log.
 func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, error) {
@@ -115,9 +115,23 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 	return &VerifyResult{IsMatch: true, SourceFound: false, AgentUsed: false}, nil
 }
 
-// verifyViaAuditTrail — mode SIMRS, query ke /verify/<audit_trail_id>
+// verifyViaAuditTrail — mode SIMRS, query ke /verify/<table>/<source_record_id>
 func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.AuditLog) (*VerifyResult, error) {
-	agentRec, err := s.fetchFromAgent(cfg, auditLog.SourceRecordID)
+	tableName := auditLog.Resource
+	recordID := auditLog.SourceRecordID
+	if strings.Contains(tableName, ":") {
+		parts := strings.SplitN(tableName, ":", 2)
+		tableName = parts[0]
+		if len(parts) == 2 && parts[1] != "" {
+			// Endpoint Agent membutuhkan ID row pada tabel, bukan audit_trail_id.
+			recordID = parts[1]
+		}
+	}
+	if tableName == "" || recordID == "" {
+		return nil, fmt.Errorf("resource tabel untuk verifikasi Agent kosong")
+	}
+
+	agentRec, err := s.fetchFromAgent(cfg, tableName, recordID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent: %w", err)
 	}
@@ -159,7 +173,7 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	tableName := parts[0]
 	resourceID := parts[1]
 
-	// Panggil Agent: GET /verify-resource/<table>/<id>
+	// Panggil Agent: GET /verify/<table>/<id>
 	resourceRec, err := s.fetchResourceFromAgent(cfg, tableName, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent untuk resource: %w", err)
@@ -211,14 +225,14 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	}, nil
 }
 
-// fetchResourceFromAgent memanggil GET <agent_url>/verify-resource/<table>/<id>
+// fetchResourceFromAgent memanggil GET <agent_url>/verify/<table>/<id>
 func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s/%s", cfg.AgentURL, tableName, resourceID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, resourceID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -310,14 +324,14 @@ func (s *Service) loadAgentConfig(clientID string) (*models.AgentConfig, error) 
 	return &cfg, err
 }
 
-// fetchFromAgent memanggil GET <agent_url>/verify/<source_record_id>
-func (s *Service) fetchFromAgent(cfg *models.AgentConfig, sourceRecordID string) (*AuditTrailRecord, error) {
+// fetchFromAgent memanggil GET <agent_url>/verify/<table>/<source_record_id>
+func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecordID string) (*AuditTrailRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s", cfg.AgentURL, sourceRecordID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, sourceRecordID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -352,6 +366,10 @@ func (s *Service) fetchFromAgent(cfg *models.AgentConfig, sourceRecordID string)
 	}
 
 	return &rec, nil
+}
+
+func agentVerifyURL(agentURL, tableName, resourceID string) string {
+	return fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(agentURL, "/"), tableName, resourceID)
 }
 
 // compareFields membandingkan field-field penting antara AuditLog di middleware

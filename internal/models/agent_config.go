@@ -8,7 +8,7 @@ import (
 )
 
 // AgentConfig menyimpan URL dan token Agent milik masing-masing klien.
-// Gateway menggunakan ini untuk memanggil GET /verify/:source_record_id
+// Gateway menggunakan ini untuk memanggil GET /verify/:table/:source_record_id
 // ke Agent saat verifikasi Lapis 3.
 type AgentConfig struct {
 	ID       string `gorm:"primaryKey;type:varchar(36)" json:"id"`
@@ -23,10 +23,12 @@ type AgentConfig struct {
 	Hostname    string `gorm:"type:varchar(100)" json:"hostname"`
 
 	// Informasi Database Klien (auto-filled dari install.sh telemetry)
-	DBEngine        string `gorm:"type:varchar(50)" json:"db_engine"`         // postgres, mysql, oracle, sqlserver, mongodb
-	DBName          string `gorm:"type:varchar(100)" json:"db_name"`          // Nama database yang diaudit
-	DBTables        string `gorm:"type:text" json:"db_tables"`                // Daftar tabel yang dimonitor (comma-separated)
-	ConnectorStatus string `gorm:"type:varchar(50)" json:"connector_status"`  // running, skipped, failed_xxx
+	DBEngine        string `gorm:"type:varchar(50)" json:"db_engine"`        // postgres, mysql, oracle, sqlserver, mongodb
+	DBName          string `gorm:"type:varchar(100)" json:"db_name"`         // Nama database yang diaudit
+	DBTables        string `gorm:"type:text" json:"db_tables"`               // Daftar tabel yang dimonitor (comma-separated)
+	ConnectorStatus string `gorm:"type:varchar(50)" json:"connector_status"` // running, skipped, failed_xxx
+	UserSyncStatus  string `gorm:"type:varchar(50)" json:"user_sync_status"` // ok, failed, skipped
+	UserSyncMessage string `gorm:"type:text" json:"user_sync_message"`       // detail warning/error sync user table
 
 	// Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)
 	UserTableName  string `gorm:"type:varchar(100)" json:"user_table_name"`

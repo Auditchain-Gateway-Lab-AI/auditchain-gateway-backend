@@ -1,6 +1,6 @@
 # 🛡️ AuditChain Gateway
 
-AuditChain Gateway adalah *middleware* dan API Gateway berskala *Enterprise* yang menerima, memproses, dan mengunci log audit dari berbagai sistem klien (rumah sakit/SIMRS, data geospasial, dsb.) secara *immutable* (tidak dapat diubah) ke dalam jaringan **Hyperledger Fabric Blockchain**.
+AuditChain Gateway adalah *Middleware* dan API Gateway berskala *Enterprise* yang menerima, memproses, dan mengunci log audit dari berbagai sistem klien (rumah sakit/SIMRS, data geospasial, dsb.) secara *immutable* (tidak dapat diubah) ke dalam jaringan **Hyperledger Fabric Blockchain**.
 
 Sistem ini menggunakan arsitektur **multi-tenant (SaaS)**, ingestion via **Change Data Capture (CDC)** per klien, struktur data **Merkle Tree**, dan verifikasi berlapis untuk memastikan integritas data (Anti-Tampering) dengan performa *high-throughput*.
 
@@ -123,6 +123,23 @@ FABRIC_CERT_PATH=./crypto-config/users/Admin@org1/msp/signcerts/cert.pem
 FABRIC_KEY_PATH=./crypto-config/users/Admin@org1/msp/keystore/priv_key.pem
 FABRIC_CHANNEL=audit-channel
 FABRIC_CHAINCODE=audit-contract
+
+# MinIO Recovery Vault (Compose overrides endpoint to minio:9000 internally)
+MINIO_ENDPOINT=localhost:9000
+MINIO_BUCKET=auditchain-recovery
+MINIO_ACCESS_KEY=auditchain-writer
+MINIO_SECRET_KEY=ganti-dengan-secret-writer
+MINIO_USE_TLS=false
+APP_ENV=local
+RECOVERY_ENABLED=false
+SNAPSHOT_WRITER_ENABLED=false
+SNAPSHOT_REQUIRED_FOR_ANCHOR=false
+SNAPSHOT_WORKER_CONCURRENCY=1
+SNAPSHOT_MAX_ATTEMPTS=10
+SNAPSHOT_RETRY_BASE_SECONDS=5
+SNAPSHOT_POLL_INTERVAL_SECONDS=2
+SNAPSHOT_ENCRYPTION_ACTIVE_KEY_ID=key-2026-01
+SNAPSHOT_ENCRYPTION_KEY=ganti-dengan-key-32-byte-base64-atau-hex
 ```
 
 ### Menjalankan Aplikasi
@@ -147,9 +164,18 @@ Swagger UI tersedia di `http://localhost:8080/swagger/index.html`.
 ### Menjalankan via Docker
 
 ```bash
-docker-compose up -d --build      # Build + jalankan gateway + PostgreSQL
+docker-compose up -d --build      # Build + jalankan gateway, PostgreSQL, dan MinIO
 docker-compose logs -f api-gateway
 ```
+
+MinIO lokal tersedia pada S3 API `http://localhost:9000` dan console `http://localhost:9001`.
+Bucket `auditchain-recovery` dibuat oleh service initializer dengan versioning dan Object Lock.
+Jangan mengaktifkan `SNAPSHOT_WRITER_ENABLED` sebelum secret MinIO dan encryption key lokal sudah diganti.
+Aktifkan `RECOVERY_ENABLED=true` hanya setelah snapshot writer, role approval, dan smoke test recovery tervalidasi.
+Jika `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`, `SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan menolak start bila tidak.
+
+Recovery MVP memulihkan audit log target yang rusak dari snapshot MinIO yang dipilih.
+Pemulihan langsung ke database operasional klien (write-back lintas event, misalnya memilih V1 untuk menggantikan V3) tetap memerlukan Agent adapter terotorisasi dan menjadi fase lanjutan.
 
 ---
 
@@ -172,6 +198,15 @@ docker-compose logs -f api-gateway
 | `GET` | `/api/dashboard/fabric/:anchor_id` | 🔐 JWT | Ambil data raw dari Fabric World State |
 | `POST` | `/api/dashboard/verify-data` | 🔐 JWT | Verifikasi integritas data aktual vs audit trail |
 | `GET` | `/api/dashboard/inventory` | 🔐 JWT | Daftar resource unik yang termonitor |
+| `GET` | `/api/dashboard/recovery/incidents` | 🔐 JWT | Daftar tamper incident |
+| `GET` | `/api/dashboard/recovery/incidents/:id` | 🔐 JWT | Detail tamper incident |
+| `GET` | `/api/dashboard/recovery/resources/:resource/versions` | 🔐 JWT | Daftar snapshot recovery terverifikasi |
+| `GET` | `/api/dashboard/recovery/requests` | 🔐 JWT | Daftar recovery request, opsional filter `status` |
+| `GET` | `/api/dashboard/recovery/requests/:id` | 🔐 JWT | Detail recovery request |
+| `POST` | `/api/dashboard/recovery/requests` | 🔐 JWT | Membuat permintaan recovery |
+| `POST` | `/api/dashboard/recovery/requests/:id/approve` | 🔐 Admin JWT | Menyetujui recovery |
+| `POST` | `/api/dashboard/recovery/requests/:id/reject` | 🔐 Admin JWT | Menolak recovery |
+| `POST` | `/api/dashboard/recovery/requests/:id/execute` | 🔐 Admin JWT | Menjalankan recovery terverifikasi |
 | `POST` | `/api/dashboard/agent/config` | 🔐 JWT | Registrasi/update konfigurasi Universal Agent klien |
 | `GET` | `/api/dashboard/agent/ping` | 🔐 JWT | Cek konektivitas Agent klien |
 

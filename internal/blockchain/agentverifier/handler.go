@@ -2,6 +2,7 @@ package agentverifier
 
 import (
 	"net/http"
+	"strings"
 
 	"go-blockchain-api/internal/middleware"
 	"go-blockchain-api/internal/models"
@@ -123,7 +124,7 @@ func (h *Handler) PingAgent(c *gin.Context) {
 	}
 
 	client := &http.Client{Timeout: 3e9}
-	resp, err := client.Get(cfg.AgentURL + "/health")
+	resp, err := client.Get(strings.TrimRight(cfg.AgentURL, "/") + "/health")
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"reachable": false,

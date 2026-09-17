@@ -28,6 +28,28 @@ Dokumentasi ini menjelaskan endpoint API **Admin Panel** pada AuditChain Gateway
 | `POST` | `/api/agent/telemetry` | Public | Public callback telemetri dari `install.sh` |
 | `GET` | `/install.sh` | Public | Download file script installer 1-command |
 
+## 2.1 Recovery Snapshot MinIO
+
+Audit log baru dapat memiliki snapshot terenkripsi pada MinIO Recovery Vault.
+PostgreSQL menyimpan index `object_key`, `version_id`, checksum, dan status snapshot;
+payload recovery tidak disimpan sebagai plaintext di MinIO.
+Endpoint recovery aktif hanya jika `RECOVERY_ENABLED=true`.
+
+| Method | Endpoint | Auth | Keterangan |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/api/dashboard/recovery/incidents` | JWT | Daftar insiden tamper |
+| `GET` | `/api/dashboard/recovery/incidents/:id` | JWT | Detail insiden |
+| `GET` | `/api/dashboard/recovery/resources/:resource/versions` | JWT | Daftar versi snapshot terverifikasi |
+| `GET` | `/api/dashboard/recovery/requests` | JWT | Daftar request recovery |
+| `GET` | `/api/dashboard/recovery/requests/:id` | JWT | Detail request recovery |
+| `POST` | `/api/dashboard/recovery/requests` | JWT | Meminta recovery dengan idempotency key |
+| `POST` | `/api/dashboard/recovery/requests/:id/approve` | JWT Admin | Approval recovery |
+| `POST` | `/api/dashboard/recovery/requests/:id/reject` | JWT Admin | Reject recovery |
+| `POST` | `/api/dashboard/recovery/requests/:id/execute` | JWT Admin | Verifikasi hash/Merkle/Fabric lalu pulihkan audit log |
+
+Implementasi MVP hanya menulis kembali audit log target di Gateway setelah snapshot versi yang dipilih lolos dekripsi, hash, Merkle proof, dan verifikasi anchor Fabric. Menulis kembali record pada database operasional klien belum diaktifkan; jalur tersebut memerlukan Agent adapter dengan izin write-back yang eksplisit.
+Body request recovery: `incident_id`, `selected_log_id`, `reason`, dan `idempotency_key`. Untuk MVP, `selected_log_id` wajib sama dengan `log_id` pada incident target.
+
 ---
 
 ## 2. Skema Database Utama

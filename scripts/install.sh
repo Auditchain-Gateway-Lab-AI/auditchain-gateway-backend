@@ -296,6 +296,28 @@ print(json.dumps(config))
                 "ALTER PUBLICATION ${PUB_NAME} ADD TABLE ${DETECTED_USER_TABLE};" 2>/dev/null || true
         }
         echo -e "${GREEN}✓ Publication '${PUB_NAME}' diupdate.${NC}"
+
+        # REPLICA IDENTITY FULL: agar DELETE event menyertakan data row lengkap
+        echo -e "${BLUE}🔧 Mengaktifkan REPLICA IDENTITY FULL untuk tabel yang dimonitor...${NC}"
+        FIX_ALL_TABLES="${CURRENT_TABLES}"
+        if [ -n "$DETECTED_USER_TABLE" ]; then
+            FIX_ALL_TABLES="${FIX_ALL_TABLES},${DETECTED_USER_TABLE}"
+        fi
+        IFS=',' read -ra _RI_TABLES <<< "$FIX_ALL_TABLES"
+        for _ri_tbl in "${_RI_TABLES[@]}"; do
+            _ri_tbl=$(echo "$_ri_tbl" | xargs)
+            [ -z "$_ri_tbl" ] && continue
+            PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
+                "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || \
+            {
+                PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "postgres|pg|db" | head -1 || true)
+                [ -n "$PG_CONTAINER" ] && docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -c \
+                    "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || \
+                sudo -u postgres psql -d "$DB_NAME" -c \
+                    "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+            }
+        done
+        echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
     fi
 
     # 7. Trigger sinkronisasi user
@@ -486,6 +508,11 @@ services:
   debezium:
     image: quay.io/debezium/connect:2.7
     restart: unless-stopped
+    # Docker Linux tidak menyediakan host.docker.internal secara default.
+    # Mapping ini memungkinkan Debezium menjangkau PostgreSQL aplikasi yang
+    # berjalan di project Docker lain melalui port host yang dipublish.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /etc/auditchain/jdbc-drivers/ojdbc8.jar:/kafka/connect/debezium-connector-oracle/ojdbc8.jar
     ports:
@@ -523,6 +550,8 @@ SELECTED_DB_ENGINE=""
 SELECTED_DB_NAME=""
 SELECTED_TABLES=""
 CONNECTOR_SETUP_STATUS="skipped"
+USER_SYNC_STATUS="skipped"
+USER_SYNC_MESSAGE=""
 
 HAS_POSTGRES=false
 HAS_MYSQL=false
@@ -968,6 +997,16 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 fi
                 if [ -n "$PG_DOCKER_CONTAINER" ]; then
                     PG_IS_DOCKER=true
+
+                    # Debezium berjalan di container lain. `localhost` akan
+                    # menunjuk ke container Debezium sendiri, bukan ke
+                    # PostgreSQL aplikasi. Gunakan host gateway dan port
+                    # PostgreSQL yang dipublish oleh container aplikasi.
+                    PG_MAPPED_PORT=$(docker port "$PG_DOCKER_CONTAINER" 5432/tcp 2>/dev/null | sed -n '1s/.*://p')
+                    if [ -n "$PG_MAPPED_PORT" ]; then
+                        DB_PORT="$PG_MAPPED_PORT"
+                    fi
+                    DB_HOST="host.docker.internal"
                 fi
             fi
 
@@ -1025,7 +1064,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 TBL_BARE=$(echo "$DETECTED_USER_TABLE" | awk -F. '{print $2}')
                 if [ -z "$TBL_BARE" ]; then TBL_BARE="$DETECTED_USER_TABLE"; fi
-                RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    RAW_COLS=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                else
+                    RAW_COLS=$(sudo -u postgres psql -d "$TARGET_DB" --no-align --tuples-only -c "SELECT column_name FROM information_schema.columns WHERE table_name = '${TBL_BARE}';" 2>/dev/null || true)
+                fi
                 while IFS= read -r col; do
                     if echo "$col" | grep -qiE "username|email|nama|login|name"; then
                         DETECTED_USER_COL="$col"
@@ -1158,8 +1201,9 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
 
         AGENT_DB_USER="auditchain_agent"
         AGENT_DB_PASS=$(openssl rand -hex 12 2>/dev/null || echo "ac_pwd_$(date +%s)")
-        # Set default port hanya jika belum di-set manual
-        if [ "$MANUAL_MODE" = false ]; then
+        # Set default port hanya jika belum di-set manual. Jangan menimpa
+        # host/port PostgreSQL yang berjalan di Docker project lain.
+        if [ "$MANUAL_MODE" = false ] && [ "$PG_IS_DOCKER" != true ]; then
             DB_PORT="5432"
             [ "$CHOSEN_ENGINE" = "mysql" ] && DB_PORT="3306"
             [ "$CHOSEN_ENGINE" = "sqlserver" ] && DB_PORT="1433"
@@ -1167,8 +1211,14 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             [ "$CHOSEN_ENGINE" = "oracle" ] && DB_PORT="1521"
         fi
 
-        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP
-        if [ "$MANUAL_MODE" = false ]; then
+        # Gunakan DB_HOST dari manual entry, atau deteksi Docker bridge IP.
+        # PostgreSQL Docker memakai host.docker.internal yang sudah dipetakan
+        # pada service Debezium di docker-compose di atas.
+        if [ "$PG_IS_DOCKER" = true ]; then
+            DB_HOST="host.docker.internal"
+            PG_MAPPED_PORT=$(docker port "$PG_DOCKER_CONTAINER" 5432/tcp 2>/dev/null | sed -n '1s/.*://p')
+            [ -n "$PG_MAPPED_PORT" ] && DB_PORT="$PG_MAPPED_PORT"
+        elif [ "$MANUAL_MODE" = false ]; then
             DB_HOST=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
         fi
 
@@ -1265,7 +1315,17 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                                     # Restart container PostgreSQL via compose
                                     echo -e "${YELLOW}   Me-restart PostgreSQL container (recreate agar wal_level aktif)...${NC}"
                                     (cd "$PG_COMPOSE_DIR" && docker compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker-compose up -d --force-recreate "$PG_SERVICE" 2>/dev/null || docker restart "$PG_DOCKER_CONTAINER" 2>/dev/null || true)
-                                    sleep 5
+
+                                    # Container dapat berganti ID saat recreate.
+                                    # Tunggu sampai PostgreSQL siap menerima query,
+                                    # bukan hanya menunggu sejumlah detik tetap.
+                                    for _ in $(seq 1 12); do
+                                        PG_DOCKER_CONTAINER=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | awk 'tolower($0) ~ /postgres/ {print $1; exit}')
+                                        if [ -n "$PG_DOCKER_CONTAINER" ] && docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SELECT 1;" 2>/dev/null | grep -q '^1$'; then
+                                            break
+                                        fi
+                                        sleep 2
+                                    done
 
                                     # Verifikasi
                                     NEW_WAL=$(docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -tAc "SHOW wal_level;" 2>/dev/null || echo "unknown")
@@ -1393,6 +1453,18 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "  - Membuat publication khusus tabel terpilih..."
             docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "CREATE PUBLICATION dbz_publication FOR TABLE ${CHOSEN_TABLES};" >/dev/null 2>&1 || true
             
+            # REPLICA IDENTITY FULL: agar PostgreSQL mengirim data row lengkap
+            # pada event DELETE, sehingga Debezium bisa menyertakan kolom actor
+            # (updated_by, deleted_by, dll) dalam payload CDC.
+            echo -e "  - Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih..."
+            IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+            for _ri_tbl in "${_RI_TABLES[@]}"; do
+                _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                [ -z "$_ri_tbl" ] && continue
+                docker exec "$PG_DOCKER_CONTAINER" psql -U postgres -d "$TARGET_DB" -c "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" >/dev/null 2>&1 || true
+            done
+            echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
+            
             echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
         else
             # Non-Docker: tanya user apakah mau buat otomatis
@@ -1425,6 +1497,17 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
                 else
                     echo -e "${GREEN}✓ Publication CDC berhasil dibuat.${NC}"
                 fi
+
+                # REPLICA IDENTITY FULL: agar PostgreSQL mengirim data row lengkap
+                # pada event DELETE, sehingga Debezium bisa menyertakan kolom actor.
+                echo -e "Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih..."
+                IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+                for _ri_tbl in "${_RI_TABLES[@]}"; do
+                    _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                    [ -z "$_ri_tbl" ] && continue
+                    sudo -u postgres psql -p "$DB_PORT" -d "$TARGET_DB" -c "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+                done
+                echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
             elif [ "$CHOSEN_ENGINE" = "mysql" ]; then
                 echo -e "\nMembuat user database '${AGENT_DB_USER}' dengan hak akses replication..."
                 if mysql --no-defaults -e "CREATE USER IF NOT EXISTS '${AGENT_DB_USER}'@'%' IDENTIFIED BY 'temp_pass'; ALTER USER '${AGENT_DB_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${AGENT_DB_PASS}'; GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${AGENT_DB_USER}'@'%'; FLUSH PRIVILEGES;" 2>/dev/null || \
@@ -1468,7 +1551,11 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             echo -e "\n${BLUE}🔌 Menguji koneksi ke ${DB_HOST}:${DB_PORT}/${TARGET_DB} sebagai '${AGENT_DB_USER}'...${NC}"
 
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
-                TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                if [ "$PG_IS_DOCKER" = true ]; then
+                    TEST_RESULT=$(docker exec "$PG_DOCKER_CONTAINER" psql -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                else
+                    TEST_RESULT=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c "SELECT 1;" --no-align --tuples-only 2>&1 || true)
+                fi
                 if echo "$TEST_RESULT" | grep -q "^1$"; then
                     CONN_OK=true
                     echo -e "${GREEN}✓ Koneksi berhasil! Kredensial & Jaringan valid.${NC}"
@@ -1616,6 +1703,16 @@ SELECTED_DB_ENGINE="$CHOSEN_ENGINE"
             if ensure_postgres_publication; then
                 PUBLICATION_READY=true
                 echo -e "${GREEN}✓ Publication 'dbz_publication' siap untuk tabel terpilih.${NC}"
+
+                # REPLICA IDENTITY FULL: agar DELETE event menyertakan data row lengkap
+                echo -e "${BLUE}🔧 Mengaktifkan REPLICA IDENTITY FULL untuk tabel terpilih...${NC}"
+                IFS=',' read -ra _RI_TABLES <<< "$CHOSEN_TABLES"
+                for _ri_tbl in "${_RI_TABLES[@]}"; do
+                    _ri_tbl=$(echo "$_ri_tbl" | xargs)
+                    [ -z "$_ri_tbl" ] && continue
+                    postgres_admin_query "ALTER TABLE ${_ri_tbl} REPLICA IDENTITY FULL;" 2>/dev/null || true
+                done
+                echo -e "${GREEN}✓ REPLICA IDENTITY FULL diaktifkan.${NC}"
             else
                 echo -e "${RED}✗ Publication PostgreSQL tidak dapat dibuat/diverifikasi. Connector Debezium tidak akan dijalankan.${NC}"
                 echo -e "${YELLOW}Gunakan kredensial pemilik tabel/superuser PostgreSQL, lalu ulangi installer.${NC}"
@@ -1904,15 +2001,15 @@ EOF
         sync_user_table_cdc() {
             local sync_ok=false
             local pg_container="${PG_DOCKER_CONTAINER:-}"
+            local sync_error=""
 
             echo -e "${BLUE}🔄 Memaksa sinkronisasi data user...${NC}"
             if [ "$CHOSEN_ENGINE" = "postgres" ]; then
                 # Prioritas: koneksi TCP yang dipakai connector. Ini bekerja
                 # untuk PostgreSQL native, eksternal, maupun Docker host.
-                if command -v psql >/dev/null 2>&1 && \
-                    PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
-                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" >/dev/null; then
-                    sync_ok=true
+                if command -v psql >/dev/null 2>&1; then
+                    sync_error=$(PGPASSWORD="$AGENT_DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$AGENT_DB_USER" -d "$TARGET_DB" -c \
+                    "UPDATE ${DETECTED_USER_TABLE} SET ${DETECTED_USER_COL} = ${DETECTED_USER_COL};" 2>&1 >/dev/null) && sync_ok=true || true
                 fi
 
                 # Fallback untuk database PostgreSQL yang hanya dapat
@@ -1941,11 +2038,17 @@ EOF
             fi
 
             if [ "$sync_ok" = true ]; then
+                USER_SYNC_STATUS="ok"
+                USER_SYNC_MESSAGE="User table CDC sync event triggered"
                 echo -e "${GREEN}✓ Event CDC tabel user berhasil dipicu.${NC}"
                 return 0
             fi
 
             echo -e "${RED}✗ Gagal memicu event CDC tabel user. Tidak akan mengklaim sinkronisasi berhasil.${NC}"
+            USER_SYNC_STATUS="failed"
+            USER_SYNC_MESSAGE=$(echo "${sync_error:-unknown error}" | tr '\n' ' ' | sed "s/\"/'/g")
+            echo -e "${YELLOW}   Dampak: actor dapat tampil Unknown sampai tabel user berubah secara natural.${NC}"
+            echo -e "${YELLOW}   Detail: ${USER_SYNC_MESSAGE}${NC}"
             return 1
         }
 
@@ -1975,6 +2078,8 @@ DB_ENGINE="${SELECTED_DB_ENGINE}"
 DB_NAME="${SELECTED_DB_NAME}"
 DB_TABLES="${SELECTED_TABLES}"
 CONNECTOR_STATUS="${CONNECTOR_SETUP_STATUS}"
+USER_SYNC_STATUS="${USER_SYNC_STATUS}"
+USER_SYNC_MESSAGE="${USER_SYNC_MESSAGE}"
 EOF
 chmod 600 /etc/auditchain/agent.env
 
@@ -2000,6 +2105,8 @@ PAYLOAD=$(cat <<EOF
   "db_name": "${SELECTED_DB_NAME}",
   "db_tables": "${SELECTED_TABLES}",
   "connector_status": "${CONNECTOR_SETUP_STATUS}",
+  "user_sync_status": "${USER_SYNC_STATUS}",
+  "user_sync_message": "${USER_SYNC_MESSAGE}",
   "user_table_name": "${DETECTED_USER_TABLE}",
   "user_column_name": "${DETECTED_USER_COL}"
 }
@@ -2040,6 +2147,7 @@ echo "  • Kafka Broker Host  : ${KAFKA_BROKERS}"
 echo "  • Agent Server URL   : ${AGENT_SERVER_URL}"
 echo "  • Database Monitored : ${SELECTED_DB_ENGINE} -> ${SELECTED_DB_NAME}"
 echo "  • Connector Status   : ${CONNECTOR_SETUP_STATUS}"
+echo "  • User Sync Status   : ${USER_SYNC_STATUS}"
 echo "  • Status Dashboard   : Pending Verification by Admin 🟡"
 echo " --------------------------------------------------------------------"
 echo -e "${BLUE}Silakan hubungi Admin AuditChain untuk pengaktifan koneksi resmi.${NC}\n"
