@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres-db:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: auditchain-postgres
     restart: always
     environment:
@@ -21,6 +21,27 @@ services:
       timeout: 5s
       retries: 5
 
+  immudb:
+    image: codenotary/immudb:latest
+    container_name: auditchain-immudb
+    restart: always
+    environment:
+      IMMUDB_ADMIN_PASSWORD: ${IMMUDB_ADMIN_PASSWORD:-rahasia_immudb_ganti_ini}
+    ports:
+      - "3322:3322"   # gRPC — dipakai client Go
+      - "9497:9497"   # metrics/health endpoint
+      - "8081:8080"   # Web Console (bawaan immudb) — akses via http://localhost:8081
+    volumes:
+      - immudb-data:/var/lib/immudb
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "immuadmin", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   api-gateway:
     build: .
     container_name: auditchain-api
@@ -29,21 +50,28 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
+      immudb:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - DB_HOST=postgres-db
+      - IMMUDB_HOST=immudb
+      - IMMUDB_PORT=3322
     volumes:
       - /home/besu/audit_blockchain/organizations:/home/besu/audit_blockchain/organizations:ro
     extra_hosts:
-      - "peer0.audit.example.com:192.168.11.94"
-      - "orderer.example.com:192.168.11.94"
+      - "peer0.org1.audit.example.com:100.125.142.44"
+      - "peer0.org2.audit.example.com:100.126.175.124"
+      - "peer0.org3.audit.example.com:100.103.85.7"
+      - "orderer.audit.example.com:100.125.142.44"
     networks:
       - gateway-net
       - fabric-net
 
 volumes:
   postgres-data:
+  immudb-data:
 
 networks:
   gateway-net:

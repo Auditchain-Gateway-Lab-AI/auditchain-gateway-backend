@@ -19,7 +19,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 
 COPY --from=builder /app/gateway-app .
-
+COPY --from=builder /app/scripts ./scripts
 # PENTING: Jangan COPY .env ke image!
 # Secret diinjeksikan via --env-file atau Docker secrets saat runtime:
 #   docker run --env-file .env auditchain-api

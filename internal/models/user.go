@@ -11,8 +11,9 @@ type User struct {
 	ID string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 
 	// 👇 TAMBAHAN SAAS: FK ke tabel Client
-	ClientID string `gorm:"type:varchar(36);not null;index" json:"client_id"`
+	ClientID *string `gorm:"type:varchar(36);index" json:"client_id"`
 
+	FullName  string         `gorm:"type:varchar(120)" json:"full_name"`
 	Username  string         `gorm:"uniqueIndex;not null" json:"username"`
 	Password  string         `gorm:"not null" json:"-"`
 	Role      string         `gorm:"not null;default:'Auditor'" json:"role"`

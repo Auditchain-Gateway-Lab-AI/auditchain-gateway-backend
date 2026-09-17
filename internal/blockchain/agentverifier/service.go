@@ -9,17 +9,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"go-blockchain-api/internal/models"
 
 	"gorm.io/gorm"
-
-	"strings"
 )
 
-// AuditTrailRecord adalah respons dari endpoint GET /verify/:id di Agent.
+// AuditTrailRecord adalah respons dari endpoint GET /verify/<table>/<id> di Agent.
 // Field-field ini mencerminkan kolom tabel audit_trail di DB klien.
 type AuditTrailRecord struct {
 	Found    bool                   `json:"found"`
@@ -54,7 +55,7 @@ type Service struct {
 	db *gorm.DB
 }
 
-// ResourceRecord adalah response dari endpoint /verify-resource di Agent
+// ResourceRecord adalah response dari endpoint /verify/<table>/<id> di Agent.
 type ResourceRecord struct {
 	Found     bool                   `json:"found"`
 	Table     string                 `json:"table"`
@@ -74,7 +75,7 @@ func NewService(db *gorm.DB) *Service {
 //     Jika kosong → log bukan dari Agent, lapis ini dilewati.
 //  2. Ambil AgentConfig klien dari DB.
 //     Jika belum dikonfigurasi → lapis ini dilewati.
-//  3. Panggil GET <agent_url>/verify/<source_record_id>.
+//  3. Panggil GET <agent_url>/verify/<table>/<source_record_id>.
 //  4. Bandingkan field kunci: tabel↔resource, operasi↔action, app_user/db_user↔actor,
 //     serta metadata (data_lama+data_baru) ↔ metadata di log.
 func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, error) {
@@ -88,6 +89,16 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 
 	if !cfg.IsActive {
 		return &VerifyResult{IsMatch: true, SourceFound: false, AgentUsed: false}, nil
+	}
+
+	if cfg.AgentURL == "" {
+		return &VerifyResult{IsMatch: true, AgentUsed: false}, nil
+	}
+
+	// Jika AgentURL mengarah ke port 8083 (Debezium Native CDC), kita tahu ini bukan Custom Agent Lapis 3.
+	// Debezium tidak memiliki endpoint /verify, sehingga kita skip verifikasi agent untuk klien ini.
+	if strings.Contains(cfg.AgentURL, ":8083") {
+		return &VerifyResult{IsMatch: true, AgentUsed: false}, nil
 	}
 
 	// Mode 1: SIMRS — verifikasi via audit_trail_id (source_record_id)
@@ -104,9 +115,23 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 	return &VerifyResult{IsMatch: true, SourceFound: false, AgentUsed: false}, nil
 }
 
-// verifyViaAuditTrail — mode SIMRS, query ke /verify/<audit_trail_id>
+// verifyViaAuditTrail — mode SIMRS, query ke /verify/<table>/<source_record_id>
 func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.AuditLog) (*VerifyResult, error) {
-	agentRec, err := s.fetchFromAgent(cfg, auditLog.SourceRecordID)
+	tableName := auditLog.Resource
+	recordID := auditLog.SourceRecordID
+	if strings.Contains(tableName, ":") {
+		parts := strings.SplitN(tableName, ":", 2)
+		tableName = parts[0]
+		if len(parts) == 2 && parts[1] != "" {
+			// Endpoint Agent membutuhkan ID row pada tabel, bukan audit_trail_id.
+			recordID = parts[1]
+		}
+	}
+	if tableName == "" || recordID == "" {
+		return nil, fmt.Errorf("resource tabel untuk verifikasi Agent kosong")
+	}
+
+	agentRec, err := s.fetchFromAgent(cfg, tableName, recordID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent: %w", err)
 	}
@@ -148,7 +173,7 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	tableName := parts[0]
 	resourceID := parts[1]
 
-	// Panggil Agent: GET /verify-resource/<table>/<id>
+	// Panggil Agent: GET /verify/<table>/<id>
 	resourceRec, err := s.fetchResourceFromAgent(cfg, tableName, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent untuk resource: %w", err)
@@ -200,14 +225,14 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	}, nil
 }
 
-// fetchResourceFromAgent memanggil GET <agent_url>/verify-resource/<table>/<id>
+// fetchResourceFromAgent memanggil GET <agent_url>/verify/<table>/<id>
 func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s/%s", cfg.AgentURL, tableName, resourceID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, resourceID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -265,18 +290,24 @@ func (s *Service) compareResourceData(auditLog *models.AuditLog, rec *ResourceRe
 	}
 
 	for key, logVal := range logMeta {
-		if skipFields[key] {
+		if skipFields[strings.ToLower(key)] {
 			continue
 		}
 		agentVal, exists := rec.Data[key]
 		if !exists {
 			continue
 		}
-		if fmt.Sprintf("%v", logVal) != fmt.Sprintf("%v", agentVal) {
+
+		strLogVal := formatValueToString(logVal)
+		strAgentVal := formatValueToString(agentVal)
+
+		strLogVal, strAgentVal = tryNormalizeTimeMatch(strLogVal, strAgentVal)
+
+		if strLogVal != strAgentVal {
 			diffs = append(diffs, Discrepancy{
 				Field:   key,
-				InLog:   fmt.Sprintf("%v", logVal),
-				InAgent: fmt.Sprintf("%v", agentVal),
+				InLog:   strLogVal,
+				InAgent: strAgentVal,
 			})
 		}
 	}
@@ -293,14 +324,14 @@ func (s *Service) loadAgentConfig(clientID string) (*models.AgentConfig, error) 
 	return &cfg, err
 }
 
-// fetchFromAgent memanggil GET <agent_url>/verify/<source_record_id>
-func (s *Service) fetchFromAgent(cfg *models.AgentConfig, sourceRecordID string) (*AuditTrailRecord, error) {
+// fetchFromAgent memanggil GET <agent_url>/verify/<table>/<source_record_id>
+func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecordID string) (*AuditTrailRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
-	url := fmt.Sprintf("%s/verify/%s", cfg.AgentURL, sourceRecordID)
+	url := agentVerifyURL(cfg.AgentURL, tableName, sourceRecordID)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -335,6 +366,10 @@ func (s *Service) fetchFromAgent(cfg *models.AgentConfig, sourceRecordID string)
 	}
 
 	return &rec, nil
+}
+
+func agentVerifyURL(agentURL, tableName, resourceID string) string {
+	return fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(agentURL, "/"), tableName, resourceID)
 }
 
 // compareFields membandingkan field-field penting antara AuditLog di middleware
@@ -401,6 +436,75 @@ func (s *Service) compareFields(auditLog *models.AuditLog, agent *AuditTrailReco
 	}
 
 	return diffs
+}
+
+func formatValueToString(val interface{}) string {
+	if val == nil {
+		return "null"
+	}
+
+	switch v := val.(type) {
+	case float64:
+		if v == math.Trunc(v) {
+			return fmt.Sprintf("%.0f", v)
+		}
+		return fmt.Sprintf("%g", v)
+	case json.Number:
+		return v.String()
+	case string:
+		return v
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func tryNormalizeTimeMatch(strLog, strAgent string) (string, string) {
+	if strLog == strAgent {
+		return strLog, strAgent
+	}
+
+	var timeLog, timeAgent time.Time
+	var errLog, errAgent error
+
+	// Coba parse Agent time sebagai ISO-8601 (RFC3339)
+	timeAgent, errAgent = time.Parse(time.RFC3339, strAgent)
+	if errAgent != nil {
+		return strLog, strAgent
+	}
+
+	// Parse Log time
+	timeLog, errLog = time.Parse(time.RFC3339, strLog)
+	if errLog != nil {
+		// Coba parse sebagai angka epoch (dari Debezium)
+		epochFloat, err := strconv.ParseFloat(strLog, 64)
+		if err == nil {
+			if epochFloat > 1e14 {
+				// Microseconds
+				timeLog = time.Unix(0, int64(epochFloat*1000)).UTC()
+			} else if epochFloat > 1e11 {
+				// Milliseconds
+				timeLog = time.UnixMilli(int64(epochFloat)).UTC()
+			} else {
+				// Seconds
+				timeLog = time.Unix(int64(epochFloat), 0).UTC()
+			}
+		} else {
+			return strLog, strAgent
+		}
+	}
+
+	// Bandingkan selisih waktu
+	diff := timeLog.Sub(timeAgent)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	// Jika selisih max 1 detik (toleransi presisi/pembulatan), anggap cocok
+	if diff <= time.Second {
+		return timeAgent.Format(time.RFC3339), strAgent
+	}
+
+	return strLog, strAgent
 }
 
 func normalizeJSON(raw string) string {

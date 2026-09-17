@@ -468,12 +468,12 @@ Menggunakan Debezium CDC (Oracle/PostgreSQL) dengan `ExtractNewRecordState` (SMT
 
 **Mode 1: SIMRS (via audit_trail)**
 - Trigger: `source_record_id` terisi pada AuditLog
-- Agent endpoint: `GET <agent_url>/verify/<source_record_id>`
+- Agent endpoint: `GET <agent_url>/verify/<table>/<source_record_id>`
 - Bandingkan: `tabel↔resource`, `operasi↔action`, `app_user/db_user↔actor`, `data_lama+data_baru↔metadata`
 
 **Mode 2: Satu Peta (via resource lookup)**
 - Trigger: `resource` mengandung `:` (format `tabel:id`)
-- Agent endpoint: `GET <agent_url>/verify-resource/<table>/<id>`
+- Agent endpoint: `GET <agent_url>/verify/<table>/<id>`
 - Untuk INSERT/UPDATE: baris harus ada, metadata harus cocok
 - Untuk DELETE: baris tidak boleh ada
 
