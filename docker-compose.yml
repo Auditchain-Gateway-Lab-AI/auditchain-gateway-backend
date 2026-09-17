@@ -30,6 +30,7 @@ services:
     ports:
       - "3322:3322"   # gRPC — dipakai client Go
       - "9497:9497"   # metrics/health endpoint
+      - "8081:8080"   # Web Console (bawaan immudb) — akses via http://localhost:8081
     volumes:
       - immudb-data:/var/lib/immudb
     networks:
