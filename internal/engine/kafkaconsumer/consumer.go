@@ -1010,23 +1010,12 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	// Invalidate actor cache agar resolusi langsung pakai data terbaru
 	e.actorCache.Delete(cfg.ClientID + ":" + lookupKey)
 
-	// Backfill: update audit_logs yang masih menyimpan UUID sebagai actor
-	// Prioritas: Email > FullName > Username
-	resolvedName := email
-	if resolvedName == "" {
-		resolvedName = fullName
-	}
-	if resolvedName == "" {
-		resolvedName = username
-	}
-	if resolvedName != "" && lookupKey != "" && looksLikeGeneratedID(lookupKey) {
-		result := e.DB.Model(&models.AuditLog{}).Where(
-			"client_id = ? AND actor = ?", cfg.ClientID, lookupKey,
-		).Update("actor", resolvedName)
-		if result.RowsAffected > 0 {
-			log.Printf("🔄 [KafkaConsumer] Backfill: %d audit log(s) actor '%s' → '%s'", result.RowsAffected, lookupKey, resolvedName)
-		}
-	}
+	// AuditLog bersifat immutable setelah ditulis dan hash-nya dibuat. Jangan
+	// melakukan backfill actor dengan mengubah baris audit_logs di sini:
+	// actor adalah bagian dari formula hash, sehingga perubahan belakangan
+	// akan membuat log sah terlihat tampered dan tidak lagi cocok dengan
+	// anchor Fabric. Resolusi nama hanya berlaku saat event baru diproses;
+	// histori lama tetap menyimpan actor asli yang ikut di-hash.
 }
 
 // looksLikeGeneratedID mendeteksi apakah string terlihat seperti CUID, UUID, atau ID acak lainnya
