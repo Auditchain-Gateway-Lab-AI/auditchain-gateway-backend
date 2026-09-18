@@ -39,10 +39,33 @@ func ConnectDB() *gorm.DB {
 		log.Fatalf("Gagal migrasi database: %v", err)
 	}
 
+	// Satu log boleh memiliki banyak incident historis (misalnya setelah
+	// recovery dan kemudian tamper lagi), tetapi hanya boleh ada satu incident
+	// yang masih aktif untuk kombinasi client/log/jenis yang sama. GORM tidak
+	// dapat mengekspresikan partial unique index ini melalui tag model, dan
+	// index lama yang mencakup kolom status akan gagal saat incident baru
+	// ditutup menjadi RESOLVED setelah incident RESOLVED sebelumnya sudah ada.
+	if err := ensureTamperIncidentActiveIndex(db); err != nil {
+		log.Fatalf("Gagal menyiapkan index incident tamper aktif: %v", err)
+	}
+
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {
 		log.Printf("Gagal mengubah kolom users.client_id menjadi nullable: %v", err)
 	}
 
 	return db
+}
+
+func ensureTamperIncidentActiveIndex(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_tamper_active").Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			CREATE UNIQUE INDEX idx_tamper_active
+			ON tamper_incidents (client_id, log_id, incident_type)
+			WHERE status IN ('OPEN', 'UNDER_REVIEW', 'RECOVERING')
+		`).Error
+	})
 }

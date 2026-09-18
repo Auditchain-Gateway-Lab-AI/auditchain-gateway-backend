@@ -50,14 +50,14 @@ type SnapshotOutbox struct {
 
 type TamperIncident struct {
 	ID              string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	ClientID        string     `gorm:"type:varchar(36);not null;index;uniqueIndex:idx_tamper_active" json:"client_id"`
-	LogID           string     `gorm:"type:varchar(100);not null;index;uniqueIndex:idx_tamper_active" json:"log_id"`
+	ClientID        string     `gorm:"type:varchar(36);not null;index" json:"client_id"`
+	LogID           string     `gorm:"type:varchar(100);not null;index" json:"log_id"`
 	Resource        string     `gorm:"type:varchar(255);not null;index" json:"resource"`
-	IncidentType    string     `gorm:"type:varchar(80);not null;uniqueIndex:idx_tamper_active" json:"incident_type"`
+	IncidentType    string     `gorm:"type:varchar(80);not null;index" json:"incident_type"`
 	ExpectedHash    string     `gorm:"type:varchar(64)" json:"expected_hash"`
 	DetectedHash    string     `gorm:"type:varchar(64)" json:"detected_hash"`
 	TamperedPayload []byte     `gorm:"type:bytea" json:"-"`
-	Status          string     `gorm:"type:varchar(30);not null;index;default:'OPEN';uniqueIndex:idx_tamper_active" json:"status"`
+	Status          string     `gorm:"type:varchar(30);not null;index;default:'OPEN'" json:"status"`
 	DetectedAt      time.Time  `gorm:"autoCreateTime;index" json:"detected_at"`
 	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
 }
