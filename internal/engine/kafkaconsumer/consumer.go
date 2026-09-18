@@ -976,12 +976,13 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	rawJSON, _ := json.Marshal(payload)
 
 	var clientUser models.ClientUser
-	err := e.DB.Where("client_id = ? AND username = ?", cfg.ClientID, lookupKey).First(&clientUser).Error
+	err := e.DB.Where("client_id = ? AND user_id = ?", cfg.ClientID, lookupKey).First(&clientUser).Error
 	if err != nil {
 		// Insert
 		newUser := models.ClientUser{
 			ClientID:    cfg.ClientID,
-			Username:    lookupKey, // Simpan ID (UUID/CUID) agar bisa di-resolve nanti
+			UserID:      lookupKey,
+			Username:    username,
 			Email:       email,
 			FullName:    fullName,
 			SourceTable: tableName,
@@ -1036,8 +1037,20 @@ var (
 )
 
 func looksLikeGeneratedID(val string) bool {
+	// Mengizinkan Numeric ID (Auto Increment) seperti "118" untuk diteruskan ke proses resolusi (query ke client_users)
+	isNumeric := true
+	for _, c := range val {
+		if c < '0' || c > '9' {
+			isNumeric = false
+			break
+		}
+	}
+	if isNumeric && len(val) > 0 {
+		return true
+	}
+
 	if len(val) < 16 {
-		return false // Terlalu pendek, kemungkinan bukan generated ID
+		return false // Terlalu pendek untuk string acak, kemungkinan bukan CUID/UUID
 	}
 	lower := strings.ToLower(val)
 	return cuidPattern.MatchString(lower) || uuidPattern.MatchString(lower) || hexIDPattern.MatchString(lower)
@@ -1053,16 +1066,16 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 		return cached.(string)
 	}
 
-	// Cari di client_users: cocokkan actorID dengan username (yang biasanya berisi UUID/CUID)
+	// Cari di client_users: cocokkan actorID dengan user_id
 	var user models.ClientUser
-	result := e.DB.Where("client_id = ? AND username = ?", clientID, actorID).Limit(1).Find(&user)
+	result := e.DB.Where("client_id = ? AND user_id = ?", clientID, actorID).Limit(1).Find(&user)
 	if result.Error != nil {
 		log.Printf("⚠️  [KafkaConsumer] Gagal mencari actor '%s' di client_users: %v", actorID, result.Error)
 		return ""
 	}
 	if result.RowsAffected == 0 {
 		// Fallback: coba cari di raw_data (mungkin ID disimpan dengan key berbeda)
-		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di username='%s', coba cari di raw_data...", actorID)
+		log.Printf("🔎 [DEBUG] resolveActorName: tidak ditemukan di user_id='%s', coba cari di raw_data...", actorID)
 		fallbackResult := e.DB.Where("client_id = ? AND CAST(raw_data AS TEXT) LIKE ?", clientID, "%"+actorID+"%").Limit(1).Find(&user)
 		if fallbackResult.Error != nil {
 			log.Printf("⚠️  [KafkaConsumer] Gagal fallback actor '%s' di raw_data: %v", actorID, fallbackResult.Error)
@@ -1079,7 +1092,7 @@ func (e *Engine) resolveActorName(clientID, actorID string) string {
 		log.Printf("✅ [DEBUG] resolveActorName: DITEMUKAN via raw_data fallback untuk actorID='%s'", actorID)
 	}
 
-	// Prioritas: Email > FullName > Username (tetap CUID)
+	// Prioritas: Email > FullName > Username
 	resolved := ""
 	if user.Email != "" {
 		resolved = user.Email

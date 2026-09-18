@@ -10,7 +10,8 @@ import (
 type ClientUser struct {
 	ID          uint           `gorm:"primaryKey;autoIncrement" json:"id"`
 	ClientID    string         `gorm:"type:varchar(36);not null;index:idx_client_user,unique" json:"client_id"`
-	Username    string         `gorm:"type:varchar(255);not null;index:idx_client_user,unique" json:"username"`
+	UserID      string         `gorm:"type:varchar(255);not null;index:idx_client_user,unique" json:"user_id"`
+	Username    string         `gorm:"type:varchar(255)" json:"username"`
 	Email       string         `gorm:"type:varchar(255)" json:"email"`
 	FullName    string         `gorm:"type:varchar(255)" json:"full_name"`
 	SourceTable string         `gorm:"type:varchar(255)" json:"source_table"` // Nama tabel asal, contoh "public.users"
