@@ -2,6 +2,14 @@ package models
 
 import "time"
 
+const (
+	IntegrityStatusNotChecked  = "NOT_CHECKED"
+	IntegrityStatusValid       = "VALID"
+	IntegrityStatusTampered    = "TAMPERED"
+	IntegrityStatusPending     = "PENDING"
+	IntegrityStatusUnreachable = "UNREACHABLE"
+)
+
 // AuditLog merepresentasikan struktur metadata log transaksi
 type AuditLog struct {
 	LogID    string `gorm:"primaryKey;type:varchar(100)" json:"log_id"`
@@ -40,6 +48,12 @@ type AuditLog struct {
 	SnapshotStoredAt      *time.Time `json:"snapshot_stored_at,omitempty"`
 	SnapshotVerifiedAt    *time.Time `json:"snapshot_verified_at,omitempty"`
 	SnapshotLastError     string     `gorm:"type:text" json:"snapshot_last_error,omitempty"`
+
+	// Integrity verification is an operational cache and is never part of the
+	// canonical hash formula.
+	IntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"integrity_status"`
+	IntegrityCheckedAt *time.Time `gorm:"index" json:"integrity_checked_at,omitempty"`
+	IntegrityError     string     `gorm:"type:text" json:"integrity_error,omitempty"`
 }
 
 type MerkleMetadata struct {

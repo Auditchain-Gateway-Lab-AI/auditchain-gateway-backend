@@ -35,6 +35,7 @@ import (
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/engine/snapshotworker"
+	"go-blockchain-api/internal/engine/tamperscanner"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
@@ -49,6 +50,14 @@ func snapshotWriterEnabled() bool {
 
 func snapshotRequiredForAnchor() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true")
+}
+
+func recoveryEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("RECOVERY_ENABLED")), "true")
+}
+
+func tamperScannerEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAMPER_SCANNER_ENABLED")), "true")
 }
 
 func buildSnapshotRuntime() (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
@@ -109,6 +118,39 @@ func loadSnapshotWorkerConfig() (snapshotworker.Config, error) {
 		Concurrency:  concurrency,
 		RetryBase:    time.Duration(retrySeconds) * time.Second,
 		PollInterval: time.Duration(pollSeconds) * time.Second,
+	}, nil
+}
+
+func loadTamperScannerConfig() (tamperscanner.Config, error) {
+	parsePositiveInt := func(name string, fallback int) (int, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			return 0, fmt.Errorf("%s harus berupa bilangan bulat positif", name)
+		}
+		return value, nil
+	}
+
+	intervalSeconds, err := parsePositiveInt("TAMPER_SCAN_INTERVAL_SECONDS", 300)
+	if err != nil {
+		return tamperscanner.Config{}, err
+	}
+	batchSize, err := parsePositiveInt("TAMPER_SCAN_BATCH_SIZE", 100)
+	if err != nil {
+		return tamperscanner.Config{}, err
+	}
+	concurrency, err := parsePositiveInt("TAMPER_SCAN_CONCURRENCY", 2)
+	if err != nil {
+		return tamperscanner.Config{}, err
+	}
+	return tamperscanner.Config{
+		Enabled:     tamperScannerEnabled(),
+		Interval:    time.Duration(intervalSeconds) * time.Second,
+		BatchSize:   batchSize,
+		Concurrency: concurrency,
 	}, nil
 }
 
@@ -196,12 +238,33 @@ func main() {
 	} else {
 		defer fabricSvc.Close()
 	}
+	if snapshotRequiredForAnchor() && fabricSvc == nil {
+		log.Fatal("❌ SNAPSHOT_REQUIRED_FOR_ANCHOR=true membutuhkan koneksi Fabric yang valid")
+	}
+	if recoveryEnabled() && (snapshotStore == nil || snapshotCipher == nil || snapshotBuilder == nil || fabricSvc == nil) {
+		log.Fatal("❌ RECOVERY_ENABLED=true membutuhkan MinIO, encryption key, snapshot builder, dan Fabric yang valid")
+	}
+	if tamperScannerEnabled() && fabricSvc == nil {
+		log.Fatal("❌ TAMPER_SCANNER_ENABLED=true membutuhkan koneksi Fabric yang valid")
+	}
 
 	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder)
 
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, db)
 	auditHandler := audit.NewHandler(auditService)
+	if tamperScannerEnabled() {
+		scannerConfig, configErr := loadTamperScannerConfig()
+		if configErr != nil {
+			log.Fatalf("❌ Konfigurasi tamper scanner tidak valid: %v", configErr)
+		}
+		scanner, scannerErr := tamperscanner.New(db, auditService, scannerConfig)
+		if scannerErr != nil {
+			log.Fatalf("❌ Tamper scanner tidak dapat dibuat: %v", scannerErr)
+		}
+		go scanner.Run(ctx)
+		log.Printf("🔍 Tamper scanner aktif; interval=%s batch=%d concurrency=%d", scannerConfig.Interval, scannerConfig.BatchSize, scannerConfig.Concurrency)
+	}
 
 	authRepo := auth.NewRepository(db)
 	authService := auth.NewService(authRepo)

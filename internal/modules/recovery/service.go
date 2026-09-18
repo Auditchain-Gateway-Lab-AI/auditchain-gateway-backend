@@ -47,6 +47,41 @@ type VersionView struct {
 	SnapshotObjectKey  string     `json:"snapshot_object_key"`
 	SnapshotVersionID  string     `json:"snapshot_version_id"`
 	SnapshotVerifiedAt *time.Time `json:"snapshot_verified_at,omitempty"`
+	IntegrityStatus    string     `json:"integrity_status"`
+}
+
+type CandidateView struct {
+	LogID                 string     `json:"log_id"`
+	SnapshotObjectKey     string     `json:"snapshot_object_key"`
+	SnapshotVersionID     string     `json:"snapshot_version_id"`
+	SnapshotChecksum      string     `json:"snapshot_checksum"`
+	SnapshotPlaintextHash string     `json:"snapshot_plaintext_hash"`
+	SnapshotVerifiedAt    *time.Time `json:"snapshot_verified_at,omitempty"`
+	Eligible              bool       `json:"eligible"`
+	Reason                string     `json:"reason,omitempty"`
+}
+
+type SnapshotPreview struct {
+	Actor                string      `json:"actor"`
+	Action               string      `json:"action"`
+	Resource             string      `json:"resource"`
+	Timestamp            time.Time   `json:"timestamp"`
+	DBTimestamp          *time.Time  `json:"db_timestamp,omitempty"`
+	SourceSystem         string      `json:"source_system"`
+	AuthorizationContext string      `json:"authorization_context"`
+	SourceRecordID       string      `json:"source_record_id,omitempty"`
+	Metadata             interface{} `json:"metadata"`
+}
+
+type PreflightResult struct {
+	Status          string          `json:"status"`
+	Recoverable     bool            `json:"recoverable"`
+	LogID           string          `json:"log_id"`
+	SnapshotHash    string          `json:"snapshot_hash"`
+	MerkleRoot      string          `json:"merkle_root"`
+	AnchorID        string          `json:"anchor_id"`
+	ObjectVersionID string          `json:"object_version_id"`
+	SnapshotPreview SnapshotPreview `json:"snapshot_preview"`
 }
 
 type CreateRequestInput struct {
@@ -133,9 +168,114 @@ func (s *Service) ListVersions(ctx context.Context, clientID, resource string) (
 			SnapshotObjectKey:  log.SnapshotObjectKey,
 			SnapshotVersionID:  log.SnapshotVersionID,
 			SnapshotVerifiedAt: log.SnapshotVerifiedAt,
+			IntegrityStatus:    log.IntegrityStatus,
 		})
 	}
 	return versions, nil
+}
+
+func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID string) ([]CandidateView, error) {
+	var incident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	var logRow models.AuditLog
+	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", incident.LogID, clientID).First(&logRow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("snapshot_not_found")
+		}
+		return nil, err
+	}
+	candidate := CandidateView{
+		LogID:                 logRow.LogID,
+		SnapshotObjectKey:     logRow.SnapshotObjectKey,
+		SnapshotVersionID:     logRow.SnapshotVersionID,
+		SnapshotChecksum:      logRow.SnapshotChecksum,
+		SnapshotPlaintextHash: logRow.SnapshotPlaintextHash,
+		SnapshotVerifiedAt:    logRow.SnapshotVerifiedAt,
+		Eligible:              logRow.SnapshotStatus == models.SnapshotStatusVerified && logRow.SnapshotObjectKey != "" && logRow.SnapshotVersionID != "" && logRow.SnapshotChecksum != "" && logRow.SnapshotPlaintextHash != "" && logRow.BlockchainTxID != nil && strings.TrimSpace(*logRow.BlockchainTxID) != "" && logRow.MerkleRoot != "",
+	}
+	if !candidate.Eligible {
+		switch {
+		case logRow.SnapshotStatus != models.SnapshotStatusVerified:
+			candidate.Reason = "snapshot_belum_verified"
+		case logRow.SnapshotObjectKey == "" || logRow.SnapshotVersionID == "":
+			candidate.Reason = "snapshot_reference_missing"
+		case logRow.SnapshotChecksum == "":
+			candidate.Reason = "snapshot_checksum_missing"
+		case logRow.SnapshotPlaintextHash == "":
+			candidate.Reason = "snapshot_plaintext_hash_missing"
+		case logRow.BlockchainTxID == nil || strings.TrimSpace(*logRow.BlockchainTxID) == "":
+			candidate.Reason = "anchor_missing"
+		case logRow.MerkleRoot == "":
+			candidate.Reason = "merkle_root_missing"
+		}
+	}
+	return []CandidateView{candidate}, nil
+}
+
+func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*PreflightResult, error) {
+	var incident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	if incident.Status == models.IncidentStatusResolved || incident.Status == models.IncidentStatusDismissed {
+		return nil, errors.New("incident_closed")
+	}
+	var logRow models.AuditLog
+	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", incident.LogID, clientID).First(&logRow).Error; err != nil {
+		return nil, errors.New("snapshot_not_found")
+	}
+	if logRow.SnapshotStatus != models.SnapshotStatusVerified {
+		return nil, errors.New("snapshot_belum_verified")
+	}
+	request := &models.RecoveryRequest{
+		ClientID:              clientID,
+		TargetLogID:           incident.LogID,
+		SelectedLogID:         incident.LogID,
+		SnapshotObjectKey:     logRow.SnapshotObjectKey,
+		SnapshotVersionID:     logRow.SnapshotVersionID,
+		SnapshotChecksum:      logRow.SnapshotChecksum,
+		SnapshotPlaintextHash: logRow.SnapshotPlaintextHash,
+		ExpectedMerkleRoot:    logRow.MerkleRoot,
+	}
+	if logRow.BlockchainTxID != nil {
+		request.AnchorID = *logRow.BlockchainTxID
+	}
+	snapshot, anchorRoot, _, err := s.validateSnapshot(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	var metadata interface{}
+	if err := json.Unmarshal(snapshot.Metadata, &metadata); err != nil {
+		return nil, fmt.Errorf("snapshot_metadata_invalid: %w", err)
+	}
+	return &PreflightResult{
+		Status:          "VALID",
+		Recoverable:     true,
+		LogID:           snapshot.LogID,
+		SnapshotHash:    snapshot.HashValue,
+		MerkleRoot:      anchorRoot,
+		AnchorID:        request.AnchorID,
+		ObjectVersionID: request.SnapshotVersionID,
+		SnapshotPreview: SnapshotPreview{
+			Actor:                snapshot.Actor,
+			Action:               snapshot.Action,
+			Resource:             snapshot.Resource,
+			Timestamp:            snapshot.Timestamp,
+			DBTimestamp:          snapshot.DBTimestamp,
+			SourceSystem:         snapshot.SourceSystem,
+			AuthorizationContext: snapshot.AuthorizationContext,
+			SourceRecordID:       snapshot.SourceRecordID,
+			Metadata:             metadata,
+		},
+	}, nil
 }
 
 func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, input CreateRequestInput) (*models.RecoveryRequest, error) {
@@ -171,8 +311,24 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 	if selected.SnapshotObjectKey == "" || selected.SnapshotVersionID == "" {
 		return nil, errors.New("snapshot_reference_missing")
 	}
+	if selected.SnapshotChecksum == "" {
+		return nil, errors.New("snapshot_checksum_missing")
+	}
+	if selected.SnapshotPlaintextHash == "" {
+		return nil, errors.New("snapshot_plaintext_hash_missing")
+	}
 	if selected.LogID != incident.LogID {
 		return nil, errors.New("cross_log_recovery_not_allowed")
+	}
+	anchorID := ""
+	if selected.BlockchainTxID != nil {
+		anchorID = strings.TrimSpace(*selected.BlockchainTxID)
+	}
+	if anchorID == "" {
+		return nil, errors.New("anchor_missing")
+	}
+	if strings.TrimSpace(selected.MerkleRoot) == "" {
+		return nil, errors.New("merkle_root_missing")
 	}
 
 	request := &models.RecoveryRequest{
@@ -183,11 +339,20 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		SelectedLogID:     selected.LogID,
 		SnapshotObjectKey: selected.SnapshotObjectKey,
 		SnapshotVersionID: selected.SnapshotVersionID,
-		RequestedBy:       userID,
-		Reason:            strings.TrimSpace(input.Reason),
-		Status:            models.RecoveryStatusPendingApproval,
-		IdempotencyKey:    strings.TrimSpace(input.IdempotencyKey),
-		BeforeHash:        selected.HashValue,
+		SnapshotChecksum:  selected.SnapshotChecksum,
+		SnapshotPlaintextHash: func() string {
+			if selected.SnapshotPlaintextHash != "" {
+				return selected.SnapshotPlaintextHash
+			}
+			return selected.HashValue
+		}(),
+		AnchorID:           anchorID,
+		ExpectedMerkleRoot: selected.MerkleRoot,
+		RequestedBy:        userID,
+		Reason:             strings.TrimSpace(input.Reason),
+		Status:             models.RecoveryStatusPendingApproval,
+		IdempotencyKey:     strings.TrimSpace(input.IdempotencyKey),
+		BeforeHash:         selected.HashValue,
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(request).Error; err != nil {
@@ -285,23 +450,9 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 }
 
 func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryRequest, executorID string) error {
-	payload, info, err := s.store.GetVersion(ctx, request.SnapshotObjectKey, request.SnapshotVersionID)
+	snapshot, anchorRoot, _, err := s.validateSnapshot(ctx, request)
 	if err != nil {
-		return fmt.Errorf("snapshot_read_failed: %w", err)
-	}
-	if info.VersionID != request.SnapshotVersionID {
-		return errors.New("snapshot_version_mismatch")
-	}
-	plaintext, err := s.cipher.Decrypt(payload)
-	if err != nil {
-		return fmt.Errorf("snapshot_decrypt_failed: %w", err)
-	}
-	snapshot, err := snapshotstore.ParseAuditSnapshot(plaintext)
-	if err != nil {
-		return fmt.Errorf("snapshot_invalid: %w", err)
-	}
-	if snapshot.LogID != request.TargetLogID || snapshot.ClientID != request.ClientID {
-		return errors.New("cross_log_recovery_not_allowed")
+		return err
 	}
 
 	reconstructed := models.AuditLog{
@@ -320,11 +471,6 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 	if hasher.GenerateLogHash(&reconstructed) != snapshot.HashValue {
 		return errors.New("snapshot_hash_mismatch")
 	}
-	anchorRoot, err := s.verifyAnchor(ctx, snapshot.HashValue, request.TargetLogID, request.ClientID)
-	if err != nil {
-		return err
-	}
-
 	now := time.Now().UTC()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var target models.AuditLog
@@ -340,20 +486,28 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			return fmt.Errorf("enkripsi bukti tampered gagal: %w", err)
 		}
 		updates := map[string]interface{}{
-			"actor":                 reconstructed.Actor,
-			"action":                reconstructed.Action,
-			"resource":              reconstructed.Resource,
-			"timestamp":             reconstructed.Timestamp,
-			"db_timestamp":          reconstructed.DBTimestamp,
-			"source_system":         reconstructed.SourceSystem,
-			"authorization_context": reconstructed.AuthorizationContext,
-			"source_record_id":      reconstructed.SourceRecordID,
-			"metadata":              reconstructed.Metadata,
-			"hash_value":            snapshot.HashValue,
-			"merkle_root":           anchorRoot,
-			"snapshot_status":       models.SnapshotStatusVerified,
-			"snapshot_last_error":   "",
-			"status":                "ANCHORED",
+			"actor":                   reconstructed.Actor,
+			"action":                  reconstructed.Action,
+			"resource":                reconstructed.Resource,
+			"timestamp":               reconstructed.Timestamp,
+			"db_timestamp":            reconstructed.DBTimestamp,
+			"source_system":           reconstructed.SourceSystem,
+			"authorization_context":   reconstructed.AuthorizationContext,
+			"source_record_id":        reconstructed.SourceRecordID,
+			"metadata":                reconstructed.Metadata,
+			"hash_value":              snapshot.HashValue,
+			"merkle_root":             anchorRoot,
+			"blockchain_tx_id":        request.AnchorID,
+			"snapshot_status":         models.SnapshotStatusVerified,
+			"snapshot_object_key":     request.SnapshotObjectKey,
+			"snapshot_version_id":     request.SnapshotVersionID,
+			"snapshot_checksum":       request.SnapshotChecksum,
+			"snapshot_plaintext_hash": request.SnapshotPlaintextHash,
+			"snapshot_last_error":     "",
+			"integrity_status":        models.IntegrityStatusValid,
+			"integrity_checked_at":    now,
+			"integrity_error":         "",
+			"status":                  "ANCHORED",
 		}
 		if err := tx.Model(&target).Updates(updates).Error; err != nil {
 			return fmt.Errorf("restore audit log gagal: %w", err)
@@ -385,6 +539,7 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			Metadata:             fmt.Sprintf(`{"event":"RECOVERY","request_id":%q,"incident_id":%q,"target_log_id":%q,"selected_log_id":%q,"before_hash":%q,"after_hash":%q}`, request.ID, request.IncidentID, request.TargetLogID, request.SelectedLogID, request.BeforeHash, snapshot.HashValue),
 			Status:               "HASHED",
 			SnapshotStatus:       models.SnapshotStatusPending,
+			IntegrityStatus:      models.IntegrityStatusNotChecked,
 		}
 		recoveryLog.HashValue = hasher.GenerateLogHash(&recoveryLog)
 		if err := tx.Create(&recoveryLog).Error; err != nil {
@@ -411,12 +566,85 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 	})
 }
 
-func (s *Service) verifyAnchor(ctx context.Context, hash, logID, clientID string) (string, error) {
+func (s *Service) validateSnapshot(ctx context.Context, request *models.RecoveryRequest) (snapshotstore.AuditSnapshot, string, snapshotstore.ObjectInfo, error) {
+	if s.store == nil || s.cipher == nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("recovery_storage_unavailable")
+	}
+	if request == nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("invalid_request")
+	}
+	if request.SnapshotObjectKey == "" || request.SnapshotVersionID == "" {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_reference_missing")
+	}
+	payload, info, err := s.store.GetVersion(ctx, request.SnapshotObjectKey, request.SnapshotVersionID)
+	if err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, fmt.Errorf("snapshot_read_failed: %w", err)
+	}
+	if info.VersionID != request.SnapshotVersionID {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_version_mismatch")
+	}
+	if request.SnapshotChecksum == "" {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_checksum_missing")
+	}
+	if strings.TrimSpace(request.SnapshotPlaintextHash) == "" {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_plaintext_hash_missing")
+	}
+	if strings.TrimSpace(request.AnchorID) == "" {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("anchor_missing")
+	}
+	if strings.TrimSpace(request.ExpectedMerkleRoot) == "" {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("merkle_root_missing")
+	}
+	if info.ChecksumSHA != request.SnapshotChecksum {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_checksum_mismatch")
+	}
+	plaintext, err := s.cipher.Decrypt(payload)
+	if err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, fmt.Errorf("snapshot_decrypt_failed: %w", err)
+	}
+	snapshot, err := snapshotstore.ParseAuditSnapshot(plaintext)
+	if err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, fmt.Errorf("snapshot_invalid: %w", err)
+	}
+	if snapshot.LogID != request.TargetLogID || snapshot.LogID != request.SelectedLogID || snapshot.ClientID != request.ClientID {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("cross_log_recovery_not_allowed")
+	}
+	if request.SnapshotPlaintextHash != "" && snapshot.HashValue != request.SnapshotPlaintextHash {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_plaintext_hash_mismatch")
+	}
+	reconstructed := models.AuditLog{
+		LogID:                snapshot.LogID,
+		ClientID:             snapshot.ClientID,
+		Actor:                snapshot.Actor,
+		Action:               snapshot.Action,
+		Resource:             snapshot.Resource,
+		Timestamp:            snapshot.Timestamp,
+		DBTimestamp:          snapshot.DBTimestamp,
+		SourceSystem:         snapshot.SourceSystem,
+		AuthorizationContext: snapshot.AuthorizationContext,
+		Metadata:             string(snapshot.Metadata),
+		SourceRecordID:       snapshot.SourceRecordID,
+	}
+	if hasher.GenerateLogHash(&reconstructed) != snapshot.HashValue {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_hash_mismatch")
+	}
+	anchorRoot, err := s.verifyAnchor(ctx, snapshot.HashValue, request.TargetLogID, request.ClientID, request.AnchorID, request.ExpectedMerkleRoot)
+	if err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, err
+	}
+	return snapshot, anchorRoot, info, nil
+}
+
+func (s *Service) verifyAnchor(ctx context.Context, hash, logID, clientID, requestedAnchorID, expectedRoot string) (string, error) {
 	var logRow models.AuditLog
 	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", logID, clientID).First(&logRow).Error; err != nil {
 		return "", errors.New("target_log_not_found")
 	}
-	if logRow.BlockchainTxID == nil || *logRow.BlockchainTxID == "" {
+	anchorID := strings.TrimSpace(requestedAnchorID)
+	if anchorID == "" && logRow.BlockchainTxID != nil {
+		anchorID = strings.TrimSpace(*logRow.BlockchainTxID)
+	}
+	if anchorID == "" {
 		return "", errors.New("anchor_missing")
 	}
 	var proofs []models.MerkleProof
@@ -430,7 +658,7 @@ func (s *Service) verifyAnchor(ctx context.Context, hash, logID, clientID string
 	if s.fabric == nil {
 		return "", errors.New("fabric_unavailable")
 	}
-	raw, err := s.fabric.GetAnchorFromLedger(*logRow.BlockchainTxID)
+	raw, err := s.fabric.GetAnchorFromLedger(anchorID)
 	if err != nil {
 		return "", fmt.Errorf("fabric_read_failed: %w", err)
 	}
@@ -439,6 +667,9 @@ func (s *Service) verifyAnchor(ctx context.Context, hash, logID, clientID string
 	}
 	if err := json.Unmarshal([]byte(raw), &anchor); err != nil {
 		return "", fmt.Errorf("fabric_anchor_invalid: %w", err)
+	}
+	if strings.TrimSpace(expectedRoot) != "" && anchor.MerkleRoot != expectedRoot {
+		return "", errors.New("merkle_root_mismatch")
 	}
 	reconstructedRoot := crypto.ReconstructMerkleRoot(hash, proofData)
 	if reconstructedRoot != anchor.MerkleRoot {

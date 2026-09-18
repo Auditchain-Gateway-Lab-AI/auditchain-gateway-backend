@@ -18,6 +18,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	{
 		readRoutes.GET("/incidents", h.ListIncidents)
 		readRoutes.GET("/incidents/:id", h.GetIncident)
+		readRoutes.GET("/incidents/:id/candidates", h.ListCandidates)
+		readRoutes.POST("/incidents/:id/preflight", h.Preflight)
 		readRoutes.GET("/resources/:resource/versions", h.ListVersions)
 		readRoutes.GET("/requests", h.ListRequests)
 		readRoutes.GET("/requests/:id", h.GetRequest)

@@ -65,6 +65,32 @@ func (h *Handler) GetIncident(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": incident})
 }
 
+func (h *Handler) ListCandidates(c *gin.Context) {
+	clientID, ok := h.clientID(c)
+	if !ok {
+		return
+	}
+	candidates, err := h.Service.ListCandidates(c.Request.Context(), clientID, c.Param("id"))
+	if err != nil {
+		h.respondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": candidates})
+}
+
+func (h *Handler) Preflight(c *gin.Context) {
+	clientID, ok := h.clientID(c)
+	if !ok {
+		return
+	}
+	result, err := h.Service.Preflight(c.Request.Context(), clientID, c.Param("id"))
+	if err != nil {
+		h.respondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *Handler) ListVersions(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -169,7 +195,7 @@ func (h *Handler) respondServiceError(c *gin.Context, err error) {
 	switch {
 	case serviceErrorCode(err, "incident_not_found"), serviceErrorCode(err, "request_not_found"), serviceErrorCode(err, "snapshot_not_found"):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Data recovery tidak ditemukan."})
-	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"):
+	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "snapshot_belum_verified"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "snapshot_checksum_missing"), serviceErrorCode(err, "snapshot_plaintext_hash_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"), serviceErrorCode(err, "anchor_missing"), serviceErrorCode(err, "merkle_root_missing"):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case serviceErrorCode(err, "recovery_storage_unavailable"), serviceErrorCode(err, "fabric_unavailable"):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
