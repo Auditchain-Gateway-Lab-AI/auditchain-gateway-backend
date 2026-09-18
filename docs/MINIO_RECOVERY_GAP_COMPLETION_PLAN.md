@@ -79,6 +79,11 @@ dan approval admin.
 Semua endpoint berada di bawah /api/dashboard/recovery dan memerlukan JWT.
 Endpoint approve, reject, dan execute memerlukan role admin.
 
+Admin dapat memilih tenant secara eksplisit dengan query `client_id`, misalnya
+`GET /api/dashboard/recovery/incidents?client_id=<client-id>`. Query ini hanya
+dihormati untuk token ber-role `admin`; user biasa selalu dibatasi pada
+`client_id` yang terdapat di tokennya.
+
 ### Kandidat recovery
 
 ~~~text

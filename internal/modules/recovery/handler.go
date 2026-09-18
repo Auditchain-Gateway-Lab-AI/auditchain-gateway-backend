@@ -17,12 +17,25 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) clientID(c *gin.Context) (string, bool) {
 	value, exists := c.Get("client_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client tidak ditemukan pada token."})
-		return "", false
-	}
 	clientID, ok := value.(string)
-	if !ok || clientID == "" {
+	if !ok {
+		clientID = ""
+	}
+	clientID = strings.TrimSpace(clientID)
+
+	// Admin gateway boleh memilih tenant secara eksplisit, sama seperti
+	// endpoint dashboard audit/report. Ini dibutuhkan untuk admin global yang
+	// tokennya memiliki client_id default tetapi harus menangani incident milik
+	// client lain. User biasa tetap selalu terikat pada client_id tokennya.
+	if roleValue, hasRole := c.Get("role"); hasRole {
+		if role, roleOK := roleValue.(string); roleOK && strings.EqualFold(strings.TrimSpace(role), "admin") {
+			if requestedClientID := strings.TrimSpace(c.Query("client_id")); requestedClientID != "" {
+				return requestedClientID, true
+			}
+		}
+	}
+
+	if !exists || clientID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client pada token tidak valid."})
 		return "", false
 	}
