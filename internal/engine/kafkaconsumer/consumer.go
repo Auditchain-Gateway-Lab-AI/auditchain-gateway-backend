@@ -543,6 +543,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		// — konsisten dengan normalisasi di generateLogHash
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
+		IntegrityStatus:      models.IntegrityStatusNotChecked,
 	}
 
 	// Hash menggunakan fungsi shared agar canonicalization konsisten

@@ -59,7 +59,7 @@ services:
       MINIO_WRITER_PASSWORD: ${MINIO_WRITER_PASSWORD:-local-writer-password-change-me}
       MINIO_READER_USER: ${MINIO_READER_USER:-auditchain-reader}
       MINIO_READER_PASSWORD: ${MINIO_READER_PASSWORD:-local-reader-password-change-me}
-      MINIO_RETENTION_MODE: ${MINIO_RETENTION_MODE:-GOVERNANCE}
+      MINIO_RETENTION_MODE: ${MINIO_RETENTION_MODE:-COMPLIANCE}
       MINIO_RETENTION_DAYS: ${MINIO_RETENTION_DAYS:-30}
     volumes:
       - ./scripts/minio:/bootstrap:ro

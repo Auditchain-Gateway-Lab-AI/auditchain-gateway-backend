@@ -132,6 +132,7 @@ func Normalize(input RawLogInput) (*models.AuditLog, error) {
 		AuthorizationContext: string(authCtxBytes),
 		Metadata:             string(metaBytes),
 		Status:               "RECEIVED",
+		IntegrityStatus:      models.IntegrityStatusNotChecked,
 	}
 
 	return standardLog, nil

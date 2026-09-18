@@ -13,6 +13,7 @@ import (
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
+	"go-blockchain-api/internal/engine/tamperscanner"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 )
@@ -69,6 +70,10 @@ type RecentLogsResult struct {
 type Service interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error)
+	// VerifyGatewayIntegrity checks only the AuditChain PostgreSQL row against
+	// its local hash and Fabric anchor. It deliberately does not contact the
+	// client database or Agent and is used by the scheduled tamper scanner.
+	VerifyGatewayIntegrity(logID, clientID string) (string, error)
 	GetFabricRecord(anchorID string) (map[string]interface{}, error)
 	VerifyDataIntegrity(resource, clientID string, rawData *map[string]interface{}) (*DataVerificationResult, error)
 
@@ -326,6 +331,187 @@ func isHashStillPending(auditLog *models.AuditLog) bool {
 // Verifikasi Kafka (Layer 3) SENGAJA DIHAPUS — cukup DB (off-chain) dan
 // Fabric (on-chain) saja sesuai keputusan terbaru.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
+	result, err := s.verifyLogIntegrity(logID, clientID)
+	status := models.IntegrityStatusUnreachable
+	if err == nil && result != nil {
+		switch result.Status {
+		case "success":
+			status = models.IntegrityStatusValid
+		case "pending":
+			status = models.IntegrityStatusPending
+		case "failed_local", "failed_onchain", "failed_source":
+			status = models.IntegrityStatusTampered
+		}
+	}
+	if result != nil {
+		s.persistIntegrityStatus(result.LogID, clientID, status, err)
+	}
+	return result, err
+}
+
+// VerifyGatewayIntegrity is the scanner-safe verification path. It checks
+// only the gateway database row, Merkle proof, and Fabric anchor. Client-side
+// Agent verification is intentionally outside this path.
+func (s *auditService) VerifyGatewayIntegrity(logID, clientID string) (string, error) {
+	auditLog, err := s.repo.GetLogByID(logID, clientID)
+	if err != nil {
+		return models.IntegrityStatusUnreachable, errors.New("log_not_found")
+	}
+	result := s.VerifyGatewayIntegrityBatch([]models.AuditLog{*auditLog})[logID]
+	return result.Status, result.Err
+}
+
+// VerifyGatewayIntegrityBatch verifies a scanner batch while caching Fabric
+// anchor reads by anchor ID. This avoids querying the same Merkle root once
+// per log when a batch contains many siblings from one anchored tree.
+func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[string]tamperscanner.BatchVerificationResult {
+	results := make(map[string]tamperscanner.BatchVerificationResult, len(logs))
+	type anchorResult struct {
+		root string
+		err  error
+	}
+	anchors := make(map[string]anchorResult)
+
+	for _, input := range logs {
+		auditLog := input
+		result := tamperscanner.BatchVerificationResult{Status: models.IntegrityStatusUnreachable}
+		if isHashStillPending(&auditLog) {
+			result.Status = models.IntegrityStatusPending
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			continue
+		}
+
+		canonicalizeLog(&auditLog)
+		recalculated := hasher.GenerateLogHash(&auditLog)
+		if recalculated != auditLog.HashValue {
+			result.Status = models.IntegrityStatusTampered
+			s.recordTamperIncident(auditLog, "METADATA_HASH_MISMATCH", recalculated)
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			continue
+		}
+
+		if auditLog.Status != "ANCHORED" || auditLog.BlockchainTxID == nil || strings.TrimSpace(*auditLog.BlockchainTxID) == "" {
+			result.Status = models.IntegrityStatusPending
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			continue
+		}
+		if s.fabric == nil {
+			result.Err = errors.New("fabric_unavailable")
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			continue
+		}
+
+		anchorID := strings.TrimSpace(*auditLog.BlockchainTxID)
+		anchor, cached := anchors[anchorID]
+		if !cached {
+			anchor = anchorResult{}
+			raw, err := s.fabric.GetAnchorFromLedger(anchorID)
+			if err != nil {
+				anchor.err = fmt.Errorf("fabric_read_failed: %w", err)
+			} else {
+				var fabricResponse struct {
+					MerkleRoot string `json:"merkle_root"`
+				}
+				if err := json.Unmarshal([]byte(raw), &fabricResponse); err != nil || strings.TrimSpace(fabricResponse.MerkleRoot) == "" {
+					if err == nil {
+						err = errors.New("merkle_root kosong")
+					}
+					anchor.err = fmt.Errorf("fabric_anchor_invalid: %w", err)
+				} else {
+					anchor.root = fabricResponse.MerkleRoot
+				}
+			}
+			anchors[anchorID] = anchor
+		}
+		if anchor.err != nil {
+			result.Err = anchor.err
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			continue
+		}
+
+		if auditLog.MerkleRoot == "" || auditLog.MerkleRoot != anchor.root {
+			result.Status = models.IntegrityStatusTampered
+			s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			continue
+		}
+
+		proofs, err := s.repo.GetProofsByHash(auditLog.HashValue)
+		if err != nil {
+			result.Err = fmt.Errorf("merkle_proof_read_failed: %w", err)
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			continue
+		}
+		for _, proof := range proofs {
+			if proof.MerkleRoot != "" && proof.MerkleRoot != anchor.root {
+				result.Status = models.IntegrityStatusTampered
+				s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", recalculated)
+				break
+			}
+		}
+		if result.Status == models.IntegrityStatusTampered {
+			results[auditLog.LogID] = result
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			continue
+		}
+
+		reconstructedRoot := auditLog.HashValue
+		if len(proofs) > 0 {
+			reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
+		}
+		if reconstructedRoot != anchor.root {
+			result.Status = models.IntegrityStatusTampered
+			s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", reconstructedRoot)
+		} else {
+			result.Status = models.IntegrityStatusValid
+		}
+		results[auditLog.LogID] = result
+		s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+	}
+	return results
+}
+
+func integrityStatusModelValue(status string) string {
+	switch status {
+	case "valid":
+		return models.IntegrityStatusValid
+	case "tampered":
+		return models.IntegrityStatusTampered
+	case "pending":
+		return models.IntegrityStatusPending
+	case "unreachable":
+		return models.IntegrityStatusUnreachable
+	default:
+		return models.IntegrityStatusNotChecked
+	}
+}
+
+func (s *auditService) persistIntegrityStatus(logID, clientID, status string, verificationErr error) {
+	if s.db == nil || logID == "" || clientID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	message := ""
+	if verificationErr != nil {
+		message = verificationErr.Error()
+	}
+	_ = s.db.Model(&models.AuditLog{}).
+		Where("log_id = ? AND client_id = ?", logID, clientID).
+		Updates(map[string]interface{}{
+			"integrity_status":     status,
+			"integrity_checked_at": now,
+			"integrity_error":      message,
+		}).Error
+}
+
+func (s *auditService) verifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
@@ -660,7 +846,7 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 		pageSize = 200
 	}
 
-	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true}
+	validFilter := map[string]bool{"valid": true, "tampered": true, "unreachable": true, "pending": true, "not_checked": true}
 	clientDBEngine, err := s.repo.GetClientDBEngine(clientID)
 	if err != nil {
 		return nil, err
@@ -718,9 +904,13 @@ func (s *auditService) GetRecentLogsPaginated(clientID string, page, pageSize in
 
 		items := make([]RecentLogItem, 0, len(logs))
 		for _, l := range logs {
+			integrityStatus := strings.ToLower(strings.TrimSpace(l.IntegrityStatus))
+			if integrityStatus == "" {
+				integrityStatus = "not_checked"
+			}
 			items = append(items, RecentLogItem{
 				AuditLog:        l,
-				IntegrityStatus: "not_checked",
+				IntegrityStatus: integrityStatus,
 				DBEngine:        normalizedClientDBEngine,
 			})
 		}
