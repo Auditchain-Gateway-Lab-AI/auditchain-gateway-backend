@@ -1,6 +1,7 @@
 package aggregator
 
 import (
+	"fmt"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
 	"log"
@@ -61,8 +62,23 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 			// Update status log menjadi siap dikirim ke blockchain
 			logItem.MerkleRoot = merkleResult.Root
 			logItem.Status = "AGGREGATED"
-			if err := tx.Save(&logItem).Error; err != nil {
-				return err
+			// Jangan memakai Save(&logItem) di sini. Snapshot worker dapat
+			// menyelesaikan outbox secara bersamaan setelah batch ini dibaca;
+			// Save akan menulis seluruh struct lama dan berpotensi mengembalikan
+			// snapshot_status/object_key/version_id ke nilai stale (PENDING/kosong)
+			// walaupun outbox sudah COMPLETED. Update field yang memang dimiliki
+			// aggregator saja agar referensi snapshot tidak pernah tertimpa.
+			result := tx.Model(&models.AuditLog{}).
+				Where("log_id = ? AND status = ?", logItem.LogID, "HASHED").
+				Updates(map[string]interface{}{
+					"merkle_root": merkleResult.Root,
+					"status":      "AGGREGATED",
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("audit log %s tidak lagi berstatus HASHED saat agregasi", logItem.LogID)
 			}
 
 			// Ambil dan simpan bukti sibling (Merkle Proof) ke database
