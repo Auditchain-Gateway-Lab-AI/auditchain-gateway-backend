@@ -330,6 +330,12 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 	if strings.TrimSpace(selected.MerkleRoot) == "" {
 		return nil, errors.New("merkle_root_missing")
 	}
+	beforeHash := strings.TrimSpace(incident.DetectedHash)
+	if beforeHash == "" {
+		// Incident lama mungkin tidak memiliki detected_hash. Tetap bekukan
+		// hash expected sebagai fallback agar request legacy tidak rusak.
+		beforeHash = selected.HashValue
+	}
 
 	request := &models.RecoveryRequest{
 		ID:                uuid.NewString(),
@@ -352,7 +358,7 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		Reason:             strings.TrimSpace(input.Reason),
 		Status:             models.RecoveryStatusPendingApproval,
 		IdempotencyKey:     strings.TrimSpace(input.IdempotencyKey),
-		BeforeHash:         selected.HashValue,
+		BeforeHash:         beforeHash,
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(request).Error; err != nil {
@@ -536,10 +542,14 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			Timestamp:            now,
 			SourceSystem:         "AuditChain Gateway",
 			AuthorizationContext: "recovery_request:" + request.ID,
-			Metadata:             fmt.Sprintf(`{"event":"RECOVERY","request_id":%q,"incident_id":%q,"target_log_id":%q,"selected_log_id":%q,"before_hash":%q,"after_hash":%q}`, request.ID, request.IncidentID, request.TargetLogID, request.SelectedLogID, request.BeforeHash, snapshot.HashValue),
-			Status:               "HASHED",
-			SnapshotStatus:       models.SnapshotStatusPending,
-			IntegrityStatus:      models.IntegrityStatusNotChecked,
+			// Event RECOVERY harus membawa metadata hasil pemulihan yang sama
+			// persis dengan snapshot target. Detail workflow tetap tersedia
+			// melalui recovery_requests (request.ID), tamper_incidents, dan
+			// authorization_context; jangan mencampurnya ke metadata canonical.
+			Metadata:        reconstructed.Metadata,
+			Status:          "HASHED",
+			SnapshotStatus:  models.SnapshotStatusPending,
+			IntegrityStatus: models.IntegrityStatusNotChecked,
 		}
 		recoveryLog.HashValue = hasher.GenerateLogHash(&recoveryLog)
 		if err := tx.Create(&recoveryLog).Error; err != nil {
