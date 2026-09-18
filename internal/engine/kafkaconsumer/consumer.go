@@ -414,7 +414,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	}
 	if operationField != "" {
 		if value, ok := findFieldInsensitive(payload, operationField); ok && value != nil {
-			if resolved := extractScalarValue(value); resolved != "" {
+			if resolved := extractScalarValue(operationField, value); resolved != "" {
 				actor, actorFound = resolved, true
 			}
 		}
@@ -422,7 +422,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	if !actorFound && mapping.ActorField != "" {
 		if customActor, ok := findFieldInsensitive(payload, mapping.ActorField); ok && customActor != nil {
-			if resolved := extractScalarValue(customActor); resolved != "" {
+			if resolved := extractScalarValue(mapping.ActorField, customActor); resolved != "" {
 				actor, actorFound = resolved, true
 			}
 		}
@@ -430,7 +430,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 	if !actorFound && mapping.FallbackActorField != "" {
 		if fallbackActor, ok := findFieldInsensitive(payload, mapping.FallbackActorField); ok && fallbackActor != nil {
-			if resolved := extractScalarValue(fallbackActor); resolved != "" {
+			if resolved := extractScalarValue(mapping.FallbackActorField, fallbackActor); resolved != "" {
 				actor, actorFound = resolved, true
 			}
 		}
@@ -445,7 +445,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		}
 		for _, field := range commonFields {
 			if autoActor, ok := findFieldInsensitive(payload, field); ok && autoActor != nil {
-				actor = extractScalarValue(autoActor)
+				actor = extractScalarValue(field, autoActor)
 				actorFound = true
 				break
 			}
@@ -463,7 +463,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 			deleteActorFields := []string{"deleted_by", "deletedby", "updated_by", "modified_by", "created_by", "actor", "user_id", "username", "author"}
 			for _, field := range deleteActorFields {
 				if val, exists := before[field]; exists && val != nil {
-					resolved := extractScalarValue(val)
+					resolved := extractScalarValue(field, val)
 					if resolved != "" {
 						actor = resolved
 						actorFound = true
@@ -644,7 +644,7 @@ func findPrimaryKey(payload map[string]interface{}, pkField string) string {
 		if !ok || val == nil {
 			continue
 		}
-		return extractScalarValue(val)
+		return extractScalarValue(key, val)
 	}
 
 	if rowID, ok := payload["__row_id"].(string); ok && rowID != "" {
@@ -694,9 +694,40 @@ func findFieldInsensitive(payload map[string]interface{}, field string) (interfa
 	return nil, false
 }
 
-func extractScalarValue(val interface{}) string {
+func isNumericColumn(key string) bool {
+	k := strings.ToLower(key)
+	if k == "user_input" || k == "user_updated" || k == "user_inserted" || k == "id_unit" {
+		return true
+	}
+	if k == "id" || strings.HasPrefix(k, "id_") || strings.HasSuffix(k, "_id") || strings.HasSuffix(k, "id") {
+		return true
+	}
+	return false
+}
+
+func decodeOracleNumberBase64(s string) (string, bool) {
+	if len(s) == 0 || len(s) > 12 { // base64 pendek saja
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil || len(decoded) == 0 || len(decoded) > 8 {
+		return "", false
+	}
+	var result int64
+	for _, b := range decoded {
+		result = result*256 + int64(b)
+	}
+	return fmt.Sprintf("%d", result), true
+}
+
+func extractScalarValue(key string, val interface{}) string {
 	switch v := val.(type) {
 	case string:
+		if isNumericColumn(key) {
+			if decoded, ok := decodeOracleNumberBase64(v); ok {
+				return decoded
+			}
+		}
 		return v
 	case float64:
 		if v == float64(int64(v)) {
@@ -788,26 +819,33 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 			continue
 		}
 
-		meta[lowerK] = normalizeFieldValue(v)
+		meta[lowerK] = normalizeFieldValue(lowerK, v)
 	}
 	return meta
 }
 
-func normalizeFieldValue(val interface{}) interface{} {
+func normalizeFieldValue(key string, val interface{}) interface{} {
 	switch v := val.(type) {
+	case string:
+		if isNumericColumn(key) {
+			if decoded, ok := decodeOracleNumberBase64(v); ok {
+				return decoded
+			}
+		}
+		return v
 	case map[string]interface{}:
 		if _, hasValue := v["value"]; hasValue {
-			return extractScalarValue(v)
+			return extractScalarValue(key, v)
 		}
 		result := make(map[string]interface{})
 		for k, inner := range v {
-			result[k] = normalizeFieldValue(inner)
+			result[k] = normalizeFieldValue(k, inner)
 		}
 		return result
 	case []interface{}:
 		result := make([]interface{}, len(v))
 		for i, item := range v {
-			result[i] = normalizeFieldValue(item)
+			result[i] = normalizeFieldValue(key, item)
 		}
 		return result
 	default:
@@ -871,7 +909,7 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	idCandidates := []string{"id", "user_id", "userid", "uid"}
 	for _, idc := range idCandidates {
 		if idRaw, ok := findFieldInsensitive(payload, idc); ok && idRaw != nil {
-			userID = extractScalarValue(idRaw)
+			userID = extractScalarValue(idc, idRaw)
 			if userID != "" {
 				break
 			}
@@ -882,7 +920,7 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	username := ""
 	if userCol != "" {
 		if usernameRaw, ok := findFieldInsensitive(payload, userCol); ok && usernameRaw != nil {
-			username = extractScalarValue(usernameRaw)
+			username = extractScalarValue(userCol, usernameRaw)
 		}
 	}
 
@@ -901,13 +939,13 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 	// Coba cari email dan fullname
 	email := ""
 	if emailRaw, ok := findFieldInsensitive(payload, "email"); ok {
-		email = extractScalarValue(emailRaw)
+		email = extractScalarValue("email", emailRaw)
 	}
 
 	fullName := ""
 	for _, nameField := range []string{"name", "nama", "full_name", "fullname", "display_name"} {
 		if nameRaw, ok := findFieldInsensitive(payload, nameField); ok {
-			fullName = extractScalarValue(nameRaw)
+			fullName = extractScalarValue(nameField, nameRaw)
 			if fullName != "" {
 				break
 			}
@@ -919,10 +957,10 @@ func (e *Engine) processClientUserCDC(payload DebeziumOracleMessage, cfg models.
 		firstName := ""
 		lastName := ""
 		if fnRaw, ok := findFieldInsensitive(payload, "first_name"); ok && fnRaw != nil {
-			firstName = extractScalarValue(fnRaw)
+			firstName = extractScalarValue("first_name", fnRaw)
 		}
 		if lnRaw, ok := findFieldInsensitive(payload, "last_name"); ok && lnRaw != nil {
-			lastName = extractScalarValue(lnRaw)
+			lastName = extractScalarValue("last_name", lnRaw)
 		}
 		combined := strings.TrimSpace(firstName + " " + lastName)
 		if combined != "" {
