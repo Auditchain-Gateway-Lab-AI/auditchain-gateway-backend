@@ -11,6 +11,23 @@ reader_user="${MINIO_READER_USER:?MINIO_READER_USER is required}"
 reader_password="${MINIO_READER_PASSWORD:?MINIO_READER_PASSWORD is required}"
 retention_mode="${MINIO_RETENTION_MODE:?MINIO_RETENTION_MODE is required}"
 retention_days="${MINIO_RETENTION_DAYS:?MINIO_RETENTION_DAYS is required}"
+app_env="${APP_ENV:-local}"
+
+case "$retention_mode" in
+  COMPLIANCE|GOVERNANCE) ;;
+  *) echo "MINIO_RETENTION_MODE must be COMPLIANCE or GOVERNANCE" >&2; exit 1 ;;
+esac
+case "$retention_days" in
+  ''|*[!0-9]*) echo "MINIO_RETENTION_DAYS must be a positive integer" >&2; exit 1 ;;
+esac
+if [ "$retention_days" -le 0 ]; then
+  echo "MINIO_RETENTION_DAYS must be greater than zero" >&2
+  exit 1
+fi
+if [ "$app_env" = "production" ] && [ "$retention_mode" != "COMPLIANCE" ]; then
+  echo "production requires MINIO_RETENTION_MODE=COMPLIANCE" >&2
+  exit 1
+fi
 
 mc alias set local "$endpoint" "$root_user" "$root_password" >/dev/null
 

@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go-blockchain-api/internal/config"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/storage/snapshotstore"
@@ -28,6 +29,7 @@ type Service struct {
 	cipher          *snapshotstore.Cipher
 	fabric          FabricReader
 	snapshotBuilder snapshotstore.OutboxBuilder
+	recoveryCutoff  *time.Time
 }
 
 type IncidentFilter struct {
@@ -99,6 +101,25 @@ func NewService(db *gorm.DB, store snapshotstore.SnapshotStore, cipher *snapshot
 	return &Service{db: db, store: store, cipher: cipher, fabric: fabric, snapshotBuilder: builder}
 }
 
+// SetRecoveryCutoff limits recovery operations to audit rows created after
+// the snapshot pipeline was enabled. Legacy rows remain visible to integrity
+// verification but cannot be selected for MinIO recovery.
+func (s *Service) SetRecoveryCutoff(cutoff *time.Time) {
+	if cutoff == nil {
+		s.recoveryCutoff = nil
+		return
+	}
+	value := cutoff.UTC()
+	s.recoveryCutoff = &value
+}
+
+func (s *Service) inRecoveryScope(logRow *models.AuditLog) bool {
+	if logRow == nil {
+		return false
+	}
+	return config.InRecoveryScope(logRow.DBTimestamp, s.recoveryCutoff)
+}
+
 func (s *Service) ListIncidents(ctx context.Context, clientID string, filter IncidentFilter) ([]models.TamperIncident, error) {
 	query := s.db.WithContext(ctx).Where("client_id = ?", clientID).Order("detected_at DESC")
 	if strings.TrimSpace(filter.Status) != "" {
@@ -149,6 +170,12 @@ func (s *Service) ListVersions(ctx context.Context, clientID, resource string) (
 	var logs []models.AuditLog
 	if err := s.db.WithContext(ctx).
 		Where("client_id = ? AND resource = ? AND snapshot_status = ?", clientID, resource, models.SnapshotStatusVerified).
+		Scopes(func(db *gorm.DB) *gorm.DB {
+			if s.recoveryCutoff == nil {
+				return db
+			}
+			return db.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *s.recoveryCutoff)
+		}).
 		Order("timestamp ASC").
 		Find(&logs).Error; err != nil {
 		return nil, err
@@ -198,6 +225,11 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 		SnapshotVerifiedAt:    logRow.SnapshotVerifiedAt,
 		Eligible:              logRow.SnapshotStatus == models.SnapshotStatusVerified && logRow.SnapshotObjectKey != "" && logRow.SnapshotVersionID != "" && logRow.SnapshotChecksum != "" && logRow.SnapshotPlaintextHash != "" && logRow.BlockchainTxID != nil && strings.TrimSpace(*logRow.BlockchainTxID) != "" && logRow.MerkleRoot != "",
 	}
+	if !s.inRecoveryScope(&logRow) {
+		candidate.Eligible = false
+		candidate.Reason = "legacy_recovery_out_of_scope"
+		return []CandidateView{candidate}, nil
+	}
 	if !candidate.Eligible {
 		switch {
 		case logRow.SnapshotStatus != models.SnapshotStatusVerified:
@@ -231,6 +263,9 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 	var logRow models.AuditLog
 	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", incident.LogID, clientID).First(&logRow).Error; err != nil {
 		return nil, errors.New("snapshot_not_found")
+	}
+	if !s.inRecoveryScope(&logRow) {
+		return nil, errors.New("legacy_recovery_out_of_scope")
 	}
 	if logRow.SnapshotStatus != models.SnapshotStatusVerified {
 		return nil, errors.New("snapshot_belum_verified")
@@ -307,6 +342,9 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 			return nil, errors.New("snapshot_not_found")
 		}
 		return nil, err
+	}
+	if !s.inRecoveryScope(&selected) {
+		return nil, errors.New("legacy_recovery_out_of_scope")
 	}
 	if selected.SnapshotObjectKey == "" || selected.SnapshotVersionID == "" {
 		return nil, errors.New("snapshot_reference_missing")
@@ -594,12 +632,6 @@ func (s *Service) validateSnapshot(ctx context.Context, request *models.Recovery
 	if err != nil {
 		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, fmt.Errorf("snapshot_read_failed: %w", err)
 	}
-	if info.VersionID != request.SnapshotVersionID {
-		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_version_mismatch")
-	}
-	if request.SnapshotChecksum == "" {
-		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_checksum_missing")
-	}
 	if strings.TrimSpace(request.SnapshotPlaintextHash) == "" {
 		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_plaintext_hash_missing")
 	}
@@ -609,8 +641,8 @@ func (s *Service) validateSnapshot(ctx context.Context, request *models.Recovery
 	if strings.TrimSpace(request.ExpectedMerkleRoot) == "" {
 		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("merkle_root_missing")
 	}
-	if info.ChecksumSHA != request.SnapshotChecksum {
-		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_checksum_mismatch")
+	if err := snapshotstore.ValidateObjectInfo(info, request.SnapshotObjectKey, request.SnapshotVersionID, request.SnapshotChecksum); err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, err
 	}
 	plaintext, err := s.cipher.Decrypt(payload)
 	if err != nil {
@@ -620,11 +652,8 @@ func (s *Service) validateSnapshot(ctx context.Context, request *models.Recovery
 	if err != nil {
 		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, fmt.Errorf("snapshot_invalid: %w", err)
 	}
-	if snapshot.LogID != request.TargetLogID || snapshot.LogID != request.SelectedLogID || snapshot.ClientID != request.ClientID {
-		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("cross_log_recovery_not_allowed")
-	}
-	if request.SnapshotPlaintextHash != "" && snapshot.HashValue != request.SnapshotPlaintextHash {
-		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, errors.New("snapshot_plaintext_hash_mismatch")
+	if err := validateSnapshotIdentity(snapshot, request); err != nil {
+		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, err
 	}
 	reconstructed := models.AuditLog{
 		LogID:                snapshot.LogID,
@@ -647,6 +676,22 @@ func (s *Service) validateSnapshot(ctx context.Context, request *models.Recovery
 		return snapshotstore.AuditSnapshot{}, "", snapshotstore.ObjectInfo{}, err
 	}
 	return snapshot, anchorRoot, info, nil
+}
+
+func validateSnapshotIdentity(snapshot snapshotstore.AuditSnapshot, request *models.RecoveryRequest) error {
+	if request == nil {
+		return errors.New("invalid_request")
+	}
+	if snapshot.LogID != request.TargetLogID || snapshot.LogID != request.SelectedLogID || snapshot.ClientID != request.ClientID {
+		return errors.New("cross_log_recovery_not_allowed")
+	}
+	if request.SnapshotPlaintextHash == "" {
+		return errors.New("snapshot_plaintext_hash_missing")
+	}
+	if snapshot.HashValue != request.SnapshotPlaintextHash {
+		return errors.New("snapshot_plaintext_hash_mismatch")
+	}
+	return nil
 }
 
 func (s *Service) verifyAnchor(ctx context.Context, hash, logID, clientID, requestedAnchorID, expectedRoot string) (string, error) {

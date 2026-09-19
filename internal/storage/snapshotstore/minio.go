@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -155,4 +156,26 @@ func validatePayloadSize(size, max int64) error {
 func checksumSHA256(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
+}
+
+// ValidateObjectInfo checks the immutable reference captured in a recovery
+// request. Recovery callers must use this before decrypting or applying a
+// snapshot so a different object version cannot be substituted silently.
+func ValidateObjectInfo(info ObjectInfo, expectedKey, expectedVersion, expectedChecksum string) error {
+	if strings.TrimSpace(expectedKey) == "" || strings.TrimSpace(expectedVersion) == "" {
+		return errors.New("snapshot_reference_missing")
+	}
+	if info.Key != expectedKey {
+		return errors.New("snapshot_key_mismatch")
+	}
+	if info.VersionID != expectedVersion {
+		return errors.New("snapshot_version_mismatch")
+	}
+	if strings.TrimSpace(expectedChecksum) == "" {
+		return errors.New("snapshot_checksum_missing")
+	}
+	if info.ChecksumSHA != expectedChecksum {
+		return errors.New("snapshot_checksum_mismatch")
+	}
+	return nil
 }
