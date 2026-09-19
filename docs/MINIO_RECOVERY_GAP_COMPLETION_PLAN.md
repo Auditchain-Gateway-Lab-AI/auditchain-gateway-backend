@@ -232,7 +232,8 @@ Estimasi satu developer, satu hari kerja intensif, dengan rollout bertahap:
 11. Pastikan database client tidak pernah disentuh.
 
 Event `RECOVERY` merupakan audit event baru, tetapi kolom `metadata`-nya harus
-identik dengan metadata snapshot yang dipulihkan. Detail workflow recovery
+identik dengan metadata snapshot yang dipulihkan dan actor sumbernya harus
+mengikuti actor pada snapshot. Detail workflow recovery
 (request, incident, target log, dan hash sebelum/sesudah) ditelusuri melalui
 `recovery_requests`, `tamper_incidents`, dan `authorization_context`, bukan
 dengan mengganti metadata canonical menjadi envelope workflow.
