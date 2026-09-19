@@ -76,14 +76,16 @@ type SnapshotPreview struct {
 }
 
 type PreflightResult struct {
-	Status          string          `json:"status"`
-	Recoverable     bool            `json:"recoverable"`
-	LogID           string          `json:"log_id"`
-	SnapshotHash    string          `json:"snapshot_hash"`
-	MerkleRoot      string          `json:"merkle_root"`
-	AnchorID        string          `json:"anchor_id"`
-	ObjectVersionID string          `json:"object_version_id"`
-	SnapshotPreview SnapshotPreview `json:"snapshot_preview"`
+	Status           string          `json:"status"`
+	Recoverable      bool            `json:"recoverable"`
+	LogID            string          `json:"log_id"`
+	CurrentHash      string          `json:"current_hash"`
+	CurrentIntegrity string          `json:"current_integrity"`
+	SnapshotHash     string          `json:"snapshot_hash"`
+	MerkleRoot       string          `json:"merkle_root"`
+	AnchorID         string          `json:"anchor_id"`
+	ObjectVersionID  string          `json:"object_version_id"`
+	SnapshotPreview  SnapshotPreview `json:"snapshot_preview"`
 }
 
 type CreateRequestInput struct {
@@ -287,18 +289,28 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 	if err != nil {
 		return nil, err
 	}
+	currentHash := hasher.GenerateLogHash(&logRow)
+	needsRecovery := currentHash != snapshot.HashValue || strings.TrimSpace(logRow.HashValue) != snapshot.HashValue
+	preflightStatus := "VALID"
+	currentIntegrity := models.IntegrityStatusTampered
+	if !needsRecovery {
+		preflightStatus = "NO_RECOVERY_REQUIRED"
+		currentIntegrity = models.IntegrityStatusValid
+	}
 	var metadata interface{}
 	if err := json.Unmarshal(snapshot.Metadata, &metadata); err != nil {
 		return nil, fmt.Errorf("snapshot_metadata_invalid: %w", err)
 	}
 	return &PreflightResult{
-		Status:          "VALID",
-		Recoverable:     true,
-		LogID:           snapshot.LogID,
-		SnapshotHash:    snapshot.HashValue,
-		MerkleRoot:      anchorRoot,
-		AnchorID:        request.AnchorID,
-		ObjectVersionID: request.SnapshotVersionID,
+		Status:           preflightStatus,
+		Recoverable:      needsRecovery,
+		LogID:            snapshot.LogID,
+		CurrentHash:      currentHash,
+		CurrentIntegrity: currentIntegrity,
+		SnapshotHash:     snapshot.HashValue,
+		MerkleRoot:       anchorRoot,
+		AnchorID:         request.AnchorID,
+		ObjectVersionID:  request.SnapshotVersionID,
 		SnapshotPreview: SnapshotPreview{
 			Actor:                snapshot.Actor,
 			Action:               snapshot.Action,
@@ -394,9 +406,20 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		ExpectedMerkleRoot: selected.MerkleRoot,
 		RequestedBy:        userID,
 		Reason:             strings.TrimSpace(input.Reason),
-		Status:             models.RecoveryStatusPendingApproval,
+		Status:             models.RecoveryStatusPendingExecution,
 		IdempotencyKey:     strings.TrimSpace(input.IdempotencyKey),
 		BeforeHash:         beforeHash,
+	}
+	// The client-facing button must never create a request based only on a
+	// cached preflight response. Verify the exact MinIO version and Fabric
+	// anchor again before persisting the request, then ensure the current
+	// PostgreSQL row still differs from the trusted snapshot.
+	snapshot, _, _, err := s.validateSnapshot(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureTargetNeedsRecovery(ctx, request, snapshot.HashValue); err != nil {
+		return nil, err
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(request).Error; err != nil {
@@ -411,10 +434,14 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 }
 
 func (s *Service) Approve(ctx context.Context, clientID, requestID, approverID string) (*models.RecoveryRequest, error) {
+	// Deprecated: approval is no longer exposed by the client-operated API.
+	// Keep the service method for backwards compatibility with legacy callers.
 	return s.transitionRequest(ctx, clientID, requestID, approverID, models.RecoveryStatusApproved, models.RecoveryStatusPendingApproval)
 }
 
 func (s *Service) Reject(ctx context.Context, clientID, requestID, approverID string) (*models.RecoveryRequest, error) {
+	// Deprecated: rejection is no longer exposed by the client-operated API.
+	// Keep the service method for backwards compatibility with legacy callers.
 	return s.transitionRequest(ctx, clientID, requestID, approverID, models.RecoveryStatusRejected, models.RecoveryStatusPendingApproval)
 }
 
@@ -467,7 +494,7 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 			}
 			return err
 		}
-		if request.Status != models.RecoveryStatusApproved {
+		if !isClientExecutableStatus(request.Status) {
 			return errors.New("invalid_request_state")
 		}
 		if err := tx.Model(&request).Update("status", models.RecoveryStatusExecuting).Error; err != nil {
@@ -491,6 +518,38 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 	}
 	request.Status = models.RecoveryStatusSucceeded
 	return &request, nil
+}
+
+// isClientExecutableStatus accepts the new client-operated state and the two
+// approval-era states so requests created before this deployment are not
+// stranded. New requests always use PENDING_EXECUTION.
+func isClientExecutableStatus(status string) bool {
+	switch status {
+	case models.RecoveryStatusPendingExecution,
+		models.RecoveryStatusPendingApproval,
+		models.RecoveryStatusApproved:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) ensureTargetNeedsRecovery(ctx context.Context, request *models.RecoveryRequest, expectedHash string) error {
+	if request == nil {
+		return errors.New("invalid_request")
+	}
+	var target models.AuditLog
+	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("target_log_not_found")
+		}
+		return err
+	}
+	actualHash := hasher.GenerateLogHash(&target)
+	if actualHash == expectedHash && strings.TrimSpace(target.HashValue) == expectedHash {
+		return errors.New("recovery_not_required")
+	}
+	return nil
 }
 
 func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryRequest, executorID string) error {
@@ -520,6 +579,10 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 		var target models.AuditLog
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error; err != nil {
 			return errors.New("target_log_not_found")
+		}
+		currentHash := hasher.GenerateLogHash(&target)
+		if currentHash == snapshot.HashValue && strings.TrimSpace(target.HashValue) == snapshot.HashValue {
+			return errors.New("recovery_not_required")
 		}
 		tamperedPayload, err := json.Marshal(target)
 		if err != nil {

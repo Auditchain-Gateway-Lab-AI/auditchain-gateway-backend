@@ -53,3 +53,26 @@ func TestServiceRecoveryCutoffKeepsLegacyOutOfScope(t *testing.T) {
 		t.Fatal("new audit log unexpectedly excluded from recovery scope")
 	}
 }
+
+func TestClientExecutableStatus(t *testing.T) {
+	for _, status := range []string{
+		models.RecoveryStatusPendingExecution,
+		models.RecoveryStatusPendingApproval,
+		models.RecoveryStatusApproved,
+	} {
+		if !isClientExecutableStatus(status) {
+			t.Fatalf("status %q should be executable by an authenticated client user", status)
+		}
+	}
+
+	for _, status := range []string{
+		models.RecoveryStatusRejected,
+		models.RecoveryStatusExecuting,
+		models.RecoveryStatusSucceeded,
+		models.RecoveryStatusFailedVerification,
+	} {
+		if isClientExecutableStatus(status) {
+			t.Fatalf("terminal/in-flight status %q must not be executable", status)
+		}
+	}
+}

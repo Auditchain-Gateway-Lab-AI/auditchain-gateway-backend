@@ -43,9 +43,7 @@ Endpoint recovery aktif hanya jika `RECOVERY_ENABLED=true`.
 | `GET` | `/api/dashboard/recovery/requests` | JWT | Daftar request recovery |
 | `GET` | `/api/dashboard/recovery/requests/:id` | JWT | Detail request recovery |
 | `POST` | `/api/dashboard/recovery/requests` | JWT | Meminta recovery dengan idempotency key |
-| `POST` | `/api/dashboard/recovery/requests/:id/approve` | JWT Admin | Approval recovery |
-| `POST` | `/api/dashboard/recovery/requests/:id/reject` | JWT Admin | Reject recovery |
-| `POST` | `/api/dashboard/recovery/requests/:id/execute` | JWT Admin | Verifikasi hash/Merkle/Fabric lalu pulihkan audit log |
+| `POST` | `/api/dashboard/recovery/requests/:id/execute` | JWT Client | Verifikasi PostgreSQL/MinIO/Merkle/Fabric lalu pulihkan audit log |
 
 Implementasi MVP hanya menulis kembali audit log target di Gateway setelah snapshot versi yang dipilih lolos dekripsi, hash, Merkle proof, dan verifikasi anchor Fabric. Menulis kembali record pada database operasional klien belum diaktifkan; jalur tersebut memerlukan Agent adapter dengan izin write-back yang eksplisit.
 Body request recovery: `incident_id`, `selected_log_id`, `reason`, dan `idempotency_key`. Untuk MVP, `selected_log_id` wajib sama dengan `log_id` pada incident target.

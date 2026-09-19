@@ -22,6 +22,11 @@ const (
 	IncidentStatusResolved    = "RESOLVED"
 	IncidentStatusDismissed   = "DISMISSED"
 
+	// Recovery is client-operated. A request is ready to be executed by the
+	// authenticated user that belongs to the owning client; no platform-admin
+	// approval is required. The approval-related values remain for backwards
+	// compatibility with requests created by older deployments.
+	RecoveryStatusPendingExecution   = "PENDING_EXECUTION"
 	RecoveryStatusPendingApproval    = "PENDING_APPROVAL"
 	RecoveryStatusApproved           = "APPROVED"
 	RecoveryStatusRejected           = "REJECTED"
@@ -81,7 +86,7 @@ type RecoveryRequest struct {
 	ApprovedBy            string     `gorm:"type:varchar(36)" json:"approved_by,omitempty"`
 	ExecutedBy            string     `gorm:"type:varchar(36)" json:"executed_by,omitempty"`
 	Reason                string     `gorm:"type:text;not null" json:"reason"`
-	Status                string     `gorm:"type:varchar(35);not null;index;default:'PENDING_APPROVAL'" json:"status"`
+	Status                string     `gorm:"type:varchar(35);not null;index;default:'PENDING_EXECUTION'" json:"status"`
 	IdempotencyKey        string     `gorm:"type:varchar(100);not null;uniqueIndex:idx_recovery_idempotency" json:"idempotency_key"`
 	BeforeHash            string     `gorm:"type:varchar(64)" json:"before_hash,omitempty"`
 	AfterHash             string     `gorm:"type:varchar(64)" json:"after_hash,omitempty"`

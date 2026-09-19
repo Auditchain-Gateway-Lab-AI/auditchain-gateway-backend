@@ -16,7 +16,7 @@ func recoveryTestContext(path string) *gin.Context {
 	return ctx
 }
 
-func TestClientIDAdminCanOverrideTenant(t *testing.T) {
+func TestClientIDAlwaysUsesTokenTenant(t *testing.T) {
 	h := &Handler{}
 	ctx := recoveryTestContext("/api/dashboard/recovery/incidents?client_id=morbis-client")
 	ctx.Set("client_id", "admin-default-client")
@@ -24,10 +24,10 @@ func TestClientIDAdminCanOverrideTenant(t *testing.T) {
 
 	clientID, ok := h.clientID(ctx)
 	if !ok {
-		t.Fatal("expected admin tenant override to be accepted")
+		t.Fatal("expected token tenant to be accepted")
 	}
-	if clientID != "morbis-client" {
-		t.Fatalf("client_id = %q, want %q", clientID, "morbis-client")
+	if clientID != "admin-default-client" {
+		t.Fatalf("client_id = %q, want token client_id %q", clientID, "admin-default-client")
 	}
 }
 

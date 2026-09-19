@@ -48,6 +48,13 @@ func ConnectDB() *gorm.DB {
 	if err := ensureTamperIncidentActiveIndex(db); err != nil {
 		log.Fatalf("Gagal menyiapkan index incident tamper aktif: %v", err)
 	}
+	// New recovery requests are self-service: a client user may execute after
+	// the preflight checks, without a platform-admin approval transition.
+	// Keep the database default aligned with the model for any future insert
+	// that does not explicitly set Status. Existing legacy rows are preserved.
+	if err := db.Exec("ALTER TABLE recovery_requests ALTER COLUMN status SET DEFAULT 'PENDING_EXECUTION'").Error; err != nil {
+		log.Fatalf("Gagal menyiapkan default status recovery request: %v", err)
+	}
 
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {

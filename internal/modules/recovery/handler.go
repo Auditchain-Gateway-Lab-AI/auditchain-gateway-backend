@@ -23,18 +23,6 @@ func (h *Handler) clientID(c *gin.Context) (string, bool) {
 	}
 	clientID = strings.TrimSpace(clientID)
 
-	// Admin gateway boleh memilih tenant secara eksplisit, sama seperti
-	// endpoint dashboard audit/report. Ini dibutuhkan untuk admin global yang
-	// tokennya memiliki client_id default tetapi harus menangani incident milik
-	// client lain. User biasa tetap selalu terikat pada client_id tokennya.
-	if roleValue, hasRole := c.Get("role"); hasRole {
-		if role, roleOK := roleValue.(string); roleOK && strings.EqualFold(strings.TrimSpace(role), "admin") {
-			if requestedClientID := strings.TrimSpace(c.Query("client_id")); requestedClientID != "" {
-				return requestedClientID, true
-			}
-		}
-	}
-
 	if !exists || clientID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client pada token tidak valid."})
 		return "", false
@@ -208,7 +196,7 @@ func (h *Handler) respondServiceError(c *gin.Context, err error) {
 	switch {
 	case serviceErrorCode(err, "incident_not_found"), serviceErrorCode(err, "request_not_found"), serviceErrorCode(err, "snapshot_not_found"):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Data recovery tidak ditemukan."})
-	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "legacy_recovery_out_of_scope"), serviceErrorCode(err, "snapshot_belum_verified"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "snapshot_checksum_missing"), serviceErrorCode(err, "snapshot_plaintext_hash_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"), serviceErrorCode(err, "anchor_missing"), serviceErrorCode(err, "merkle_root_missing"):
+	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "legacy_recovery_out_of_scope"), serviceErrorCode(err, "snapshot_belum_verified"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "snapshot_checksum_missing"), serviceErrorCode(err, "snapshot_plaintext_hash_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"), serviceErrorCode(err, "anchor_missing"), serviceErrorCode(err, "merkle_root_missing"), serviceErrorCode(err, "recovery_not_required"):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case serviceErrorCode(err, "recovery_storage_unavailable"), serviceErrorCode(err, "fabric_unavailable"):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})

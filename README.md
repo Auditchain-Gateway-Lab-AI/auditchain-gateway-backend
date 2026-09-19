@@ -171,7 +171,8 @@ docker-compose logs -f api-gateway
 MinIO lokal tersedia pada S3 API `http://localhost:9000` dan console `http://localhost:9001`.
 Bucket `auditchain-recovery` dibuat oleh service initializer dengan versioning dan Object Lock.
 Jangan mengaktifkan `SNAPSHOT_WRITER_ENABLED` sebelum secret MinIO dan encryption key lokal sudah diganti.
-Aktifkan `RECOVERY_ENABLED=true` hanya setelah snapshot writer, role approval, dan smoke test recovery tervalidasi.
+Aktifkan `RECOVERY_ENABLED=true` hanya setelah snapshot writer, validasi
+client-scope, dan smoke test recovery tervalidasi.
 Jika `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`, `SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan menolak start bila tidak.
 
 Recovery MVP memulihkan audit log target yang rusak dari snapshot MinIO yang dipilih.
@@ -204,9 +205,7 @@ Pemulihan langsung ke database operasional klien (write-back lintas event, misal
 | `GET` | `/api/dashboard/recovery/requests` | 🔐 JWT | Daftar recovery request, opsional filter `status` |
 | `GET` | `/api/dashboard/recovery/requests/:id` | 🔐 JWT | Detail recovery request |
 | `POST` | `/api/dashboard/recovery/requests` | 🔐 JWT | Membuat permintaan recovery |
-| `POST` | `/api/dashboard/recovery/requests/:id/approve` | 🔐 Admin JWT | Menyetujui recovery |
-| `POST` | `/api/dashboard/recovery/requests/:id/reject` | 🔐 Admin JWT | Menolak recovery |
-| `POST` | `/api/dashboard/recovery/requests/:id/execute` | 🔐 Admin JWT | Menjalankan recovery terverifikasi |
+| `POST` | `/api/dashboard/recovery/requests/:id/execute` | 🔐 Client JWT | Menjalankan recovery terverifikasi |
 | `POST` | `/api/dashboard/agent/config` | 🔐 JWT | Registrasi/update konfigurasi Universal Agent klien |
 | `GET` | `/api/dashboard/agent/ping` | 🔐 JWT | Cek konektivitas Agent klien |
 
