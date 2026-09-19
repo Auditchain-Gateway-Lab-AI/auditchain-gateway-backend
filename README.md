@@ -16,7 +16,7 @@ Sistem ini menggunakan arsitektur **multi-tenant (SaaS)**, ingestion via **Chang
   2. **Layer 2** — Re-hashing lokal terhadap PostgreSQL
   3. **Layer 3** — Verifikasi live ke *Universal Agent* yang berjalan di premise klien (`POST /verify/<table>/<id>`), hanya dijalankan untuk log **terbaru** per resource
   4. **Layer 4** — Rekonstruksi Merkle Proof dan pencocokan terhadap ledger Hyperledger Fabric
-- **📊 Dashboard API:** Statistik, riwayat transaksi dengan pagination sungguhan, inventaris resource, verifikasi per-log/per-resource/per-range waktu, dan status integritas granular (`valid` / `tampered` / `pending` / `unreachable`) dengan detail `chain_issues` (mis. `merkle_mismatch`, `client_mismatch:<log_id>`).
+- **📊 Dashboard API:** Statistik, riwayat transaksi dengan pagination sungguhan, inventaris resource, verifikasi per-log/per-resource/per-range waktu, dan status integritas granular (`valid` / `tampered` / `pending` / `unreachable`) dengan detail `chain_issues` (mis. `merkle_mismatch`, `client_mismatch:<log_id>`). Status Gateway/Fabric (`integrity_status`/`chain_status`) dipisahkan dari konektivitas Agent (`agent_status`) dan status workflow recovery (`recovery_status`), sehingga Agent client yang offline tidak salah ditampilkan sebagai kerusakan snapshot.
 - **📚 Interaktif API Docs:** Terintegrasi dengan **Swagger UI** untuk pengujian dan dokumentasi endpoint.
 
 ---
@@ -210,6 +210,21 @@ Pemulihan langsung ke database operasional klien (write-back lintas event, misal
 | `GET` | `/api/dashboard/agent/ping` | 🔐 JWT | Cek konektivitas Agent klien |
 
 > Catatan: dua endpoint `logs/by-resource` dan `verify-resource` direncanakan digabung menjadi satu endpoint, namun masih tertunda menunggu penyelesaian debugging konfigurasi Agent.
+
+### Kontrak status riwayat resource
+
+Pada response `GET /api/dashboard/verify-resource/:resource`, setiap item log
+memiliki tiga dimensi status yang independen:
+
+- `integrity_status` / `chain_status`: validasi PostgreSQL Gateway, Merkle
+  proof, dan anchor Fabric (`valid`, `tampered`, `pending`, `unreachable`).
+- `agent_status`: pemeriksaan live ke Agent client untuk log terbaru
+  (`matched`, `mismatch`, `unreachable`, `not_configured`); status ini tidak
+  menurunkan status Gateway/Fabric.
+- `recovery_status`: provenance recovery (`not_recovered`, `pending`,
+  `recovered`, `failed`). Saat request recovery berhasil, item target tetap
+  `integrity_status=valid` dan dapat diberi badge `recovered` meskipun Agent
+  sedang tidak dapat dihubungi.
 
 ---
 
