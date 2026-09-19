@@ -534,9 +534,13 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 		}
 
 		recoveryLog := models.AuditLog{
-			LogID:                uuid.NewString(),
-			ClientID:             request.ClientID,
-			Actor:                executorID,
+			LogID:    uuid.NewString(),
+			ClientID: request.ClientID,
+			// Actor pada event recovery mengikuti actor sumber dari snapshot,
+			// sehingga data hasil recovery tetap konsisten dengan event asli.
+			// Identitas operator recovery tetap dicatat pada recovery_requests
+			// (executed_by) dan ditelusuri melalui authorization_context.
+			Actor:                reconstructed.Actor,
 			Action:               "RECOVERY",
 			Resource:             restored.Resource,
 			Timestamp:            now,
