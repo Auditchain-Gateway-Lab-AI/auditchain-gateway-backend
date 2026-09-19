@@ -26,10 +26,12 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		readRoutes.POST("/requests", h.CreateRequest)
 	}
 
-	adminRoutes := routerGroup.Group("/dashboard/recovery", middleware.AdminAuth())
+	// Recovery is self-service for an authenticated client user. The JWT
+	// client_id is enforced by Handler.clientID, so a user cannot operate on a
+	// different tenant by supplying a query parameter. Platform administrators
+	// are intentionally not part of this workflow.
+	clientRecoveryRoutes := routerGroup.Group("/dashboard/recovery", middleware.JWTAuth())
 	{
-		adminRoutes.POST("/requests/:id/approve", h.Approve)
-		adminRoutes.POST("/requests/:id/reject", h.Reject)
-		adminRoutes.POST("/requests/:id/execute", h.Execute)
+		clientRecoveryRoutes.POST("/requests/:id/execute", h.Execute)
 	}
 }

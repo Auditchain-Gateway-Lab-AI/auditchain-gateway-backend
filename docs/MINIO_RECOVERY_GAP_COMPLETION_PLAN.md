@@ -81,17 +81,15 @@ tamper_incident aktif secara idempoten. Saat Fabric tidak tersedia, status
 menjadi UNREACHABLE dan tidak dibuat incident palsu.
 
 Scanner tidak menjalankan recovery otomatis. Recovery selalu memerlukan request
-dan approval admin.
+yang dibuat oleh user client dan eksekusi eksplisit oleh user client dalam
+tenant yang sama. Tidak ada approval platform-admin dalam workflow ini.
 
 ## Kontrak API untuk dashboard
 
 Semua endpoint berada di bawah /api/dashboard/recovery dan memerlukan JWT.
-Endpoint approve, reject, dan execute memerlukan role admin.
-
-Admin dapat memilih tenant secara eksplisit dengan query `client_id`, misalnya
-`GET /api/dashboard/recovery/incidents?client_id=<client-id>`. Query ini hanya
-dihormati untuk token ber-role `admin`; user biasa selalu dibatasi pada
-`client_id` yang terdapat di tokennya.
+Semua operasi recovery dibatasi pada `client_id` yang terdapat di token user;
+query `client_id` tidak dapat digunakan untuk berpindah tenant. Platform-admin
+tidak menjadi bagian dari workflow recovery.
 
 ### Kandidat recovery
 
@@ -131,6 +129,8 @@ Preflight tidak mengubah PostgreSQL. Response valid:
   "status": "VALID",
   "recoverable": true,
   "log_id": "1789651685834089911",
+  "current_hash": "hash-yang-dihitung-dari-postgresql",
+  "current_integrity": "TAMPERED",
   "snapshot_hash": "sha3-audit-hash",
   "merkle_root": "merkle-root",
   "anchor_id": "anchor-id",
@@ -147,8 +147,11 @@ Preflight tidak mengubah PostgreSQL. Response valid:
 }
 ~~~
 
-Execute tetap melakukan seluruh validasi ulang. Hasil preflight tidak menjadi
-izin permanen apabila object, database, atau anchor berubah setelahnya.
+`current_hash` pada preflight adalah hash yang dihitung ulang dari row
+PostgreSQL saat itu. Recovery hanya `recoverable=true` jika row saat ini
+berbeda dari snapshot tepercaya. Execute tetap melakukan seluruh validasi
+ulang. Hasil preflight tidak menjadi izin permanen apabila object, database,
+atau anchor berubah setelahnya.
 
 Endpoint existing tetap dipakai:
 
@@ -159,8 +162,6 @@ GET  /resources/{resource}/versions
 GET  /requests
 GET  /requests/{id}
 POST /requests
-POST /requests/{id}/approve
-POST /requests/{id}/reject
 POST /requests/{id}/execute
 ~~~
 
@@ -231,7 +232,7 @@ Estimasi satu developer, satu hari kerja intensif, dengan rollout bertahap:
 | H+6:00–7:30 | Unit/integration test dan build image | Backend lulus verifikasi |
 | H+7:30–9:15 | Deploy flag nonaktif, smoke-test Compliance, migrasi retention | Storage terlindungi |
 | H+9:15–10:00 | Rekonsiliasi snapshot dan anchoring gate | Tidak ada anchor tanpa snapshot |
-| H+10:00–11:00 | E2E tamper → preflight → approval → recovery | Recovery server terbukti |
+| H+10:00–11:00 | E2E tamper → preflight → client request → recovery | Recovery server terbukti |
 | H+11:00–12:00 | Monitoring, API handoff, dan runbook | Handoff frontend/server |
 
 ## Acceptance test
@@ -241,7 +242,7 @@ Estimasi satu developer, satu hari kerja intensif, dengan rollout bertahap:
 3. Ubah metadata langsung di PostgreSQL AuditChain.
 4. Tunggu scanner menandai TAMPERED dan membuat incident.
 5. Jalankan preflight dan pastikan snapshot MinIO cocok dengan Fabric.
-6. Buat request, approve sebagai admin, lalu execute.
+6. Buat request sebagai user client, lalu execute tanpa approval platform-admin.
 7. Pastikan metadata kembali ke snapshot asli.
 8. Pastikan hash hasil recovery cocok dengan anchor Fabric.
 9. Pastikan evidence tampered tersimpan terenkripsi.
@@ -259,9 +260,8 @@ mengikuti actor pada snapshot. Detail workflow recovery
 dengan mengganti metadata canonical menjadi envelope workflow.
 
 Failure test wajib meliputi checksum berbeda, Version ID salah, ciphertext rusak,
-client/log ID berbeda, Merkle Proof salah, Fabric unavailable, request tanpa
-approval, idempotency duplicate, akses non-admin, dan percobaan delete object
-COMPLIANCE.
+client/log ID berbeda, Merkle Proof salah, Fabric unavailable, request lintas
+client, idempotency duplicate, dan percobaan delete object COMPLIANCE.
 
 ## Hard stop rollout
 

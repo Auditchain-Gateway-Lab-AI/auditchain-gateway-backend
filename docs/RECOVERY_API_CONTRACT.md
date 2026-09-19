@@ -1,8 +1,8 @@
 # Recovery API Contract
 
 Semua endpoint menggunakan prefix `/api` dan JWT `Authorization: Bearer <token>`.
-Tambahkan `?client_id=<client-id>` hanya untuk token admin global. User biasa
-selalu dibatasi pada `client_id` di tokennya.
+Semua user selalu dibatasi pada `client_id` di tokennya. Parameter query
+`client_id` tidak dapat digunakan untuk berpindah tenant pada workflow recovery.
 
 ## Read dan preflight
 
@@ -12,7 +12,7 @@ GET  /api/dashboard/recovery/incidents/:incident_id
 GET  /api/dashboard/recovery/incidents/:incident_id/candidates
 POST /api/dashboard/recovery/incidents/:incident_id/preflight
 GET  /api/dashboard/recovery/resources/:resource/versions
-GET  /api/dashboard/recovery/requests?status=PENDING_APPROVAL
+GET  /api/dashboard/recovery/requests?status=PENDING_EXECUTION
 GET  /api/dashboard/recovery/requests/:request_id
 ```
 
@@ -28,14 +28,15 @@ incident. Kandidat legacy sebelum `RECOVERY_CUTOFF_AT` dikembalikan dengan:
 
 Preflight tidak mengubah PostgreSQL. Status `VALID` berarti exact object
 version, ciphertext checksum, AES-GCM, snapshot hash, Merkle proof, dan anchor
-Fabric semuanya cocok.
+Fabric semuanya cocok serta row PostgreSQL saat ini berbeda dari snapshot.
+Response juga memuat `current_hash` dan `current_integrity`. Jika snapshot dan
+row PostgreSQL sudah sama, statusnya `NO_RECOVERY_REQUIRED` dan `recoverable`
+bernilai `false`.
 
-## Request dan workflow admin
+## Request dan workflow client
 
 ```text
 POST /api/dashboard/recovery/requests
-POST /api/dashboard/recovery/requests/:request_id/approve
-POST /api/dashboard/recovery/requests/:request_id/reject
 POST /api/dashboard/recovery/requests/:request_id/execute
 ```
 
@@ -50,11 +51,12 @@ Body request:
 }
 ```
 
-Approve, reject, dan execute hanya dapat dilakukan oleh role `admin`. Execute
-selalu mengulang seluruh validasi snapshot; hasil preflight bukan izin permanen.
+Request baru berstatus `PENDING_EXECUTION`. User client dapat menjalankan
+execute tanpa approval platform-admin. Execute selalu mengulang seluruh
+validasi snapshot, hash PostgreSQL, Merkle proof, dan anchor Fabric; hasil
+preflight bukan izin permanen.
 
 Recovery yang berhasil menghasilkan status `SUCCEEDED`, memulihkan target
 AuditChain PostgreSQL, menyimpan bukti tampered terenkripsi, menutup incident,
 dan membuat event `RECOVERY` baru. Database operasional client tidak pernah
 diubah.
-

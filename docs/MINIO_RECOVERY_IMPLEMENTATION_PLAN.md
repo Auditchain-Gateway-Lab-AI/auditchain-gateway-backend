@@ -1,5 +1,10 @@
 # Implementation Plan dan Timeline MinIO Recovery
 
+> Catatan workflow terbaru: bagian dokumen yang masih menyebut approval
+> platform-admin adalah rancangan historis. Implementasi aktif memakai
+> self-service recovery oleh user client yang terikat pada `client_id` token;
+> lihat `MINIO_RECOVERY_GAP_COMPLETION_PLAN.md` dan `RECOVERY_API_CONTRACT.md`.
+
 ## 1. Informasi Dokumen
 
 | Item | Nilai |
