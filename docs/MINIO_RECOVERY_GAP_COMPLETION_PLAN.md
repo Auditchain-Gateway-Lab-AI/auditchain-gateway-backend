@@ -19,6 +19,7 @@ atau diubah oleh recovery.
 | Object Lock COMPLIANCE | Implemented for new scope | Object baru memakai COMPLIANCE 30 hari; object legacy tidak dimigrasikan karena berada di luar recovery scope. |
 | Dashboard Recovery Center | Out of scope | Dikerjakan pada repository frontend terpisah. |
 | Legacy recovery boundary | Implemented in code | `RECOVERY_CUTOFF_AT` membatasi recovery pada log baru; history lama tetap dapat diverifikasi tetapi tidak dipulihkan dari MinIO. |
+| Status Agent vs Gateway vs recovery | Implemented | `chain_status`/`integrity_status` hanya merepresentasikan Gateway + Fabric; `agent_status` berdiri sendiri; `recovery_status` menandai `not_recovered`, `pending`, `recovered`, atau `failed`. Agent offline tidak lagi membuat log Gateway yang valid tampil sebagai `unreachable`. |
 
 ## Urutan validasi recovery
 

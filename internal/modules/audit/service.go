@@ -107,7 +107,17 @@ type ResourceLogVerification struct {
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
 	ChainStatus     string `json:"chain_status"`     // Alias untuk kompabilitas frontend
-	IsLatest        bool   `json:"is_latest"`
+	// RecoveryStatus adalah status workflow recovery untuk log target ini.
+	// Status ini sengaja dipisah dari IntegrityStatus: Agent client yang tidak
+	// dapat dihubungi tidak boleh membuat log yang sudah pulih terlihat rusak.
+	//   not_recovered — belum ada request recovery
+	//   pending       — request recovery masih berjalan
+	//   recovered     — request recovery berhasil dieksekusi
+	//   failed        — request recovery terakhir gagal/ditolak
+	RecoveryStatus     string     `json:"recovery_status"`
+	RecoveryRequestID  string     `json:"recovery_request_id,omitempty"`
+	RecoveryExecutedAt *time.Time `json:"recovery_executed_at,omitempty"`
+	IsLatest           bool       `json:"is_latest"`
 
 	// AgentStatus HANYA relevan untuk log_id = log terbaru pada resource ini
 	// (IsLatest=true). Agent cuma bisa membaca kondisi TERKINI data klien,
@@ -1021,13 +1031,11 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 		item := s.classifyResourceLog(auditLog, i == lastIndex)
 		result.Logs = append(result.Logs, item)
 
-		// baseIntegrityFailed dicek terpisah dari item.IntegrityStatus supaya
+		// baseIntegrityFailed dicek terpisah dari AgentStatus supaya
 		// "log_integrity_failed" hanya dilaporkan untuk kegagalan Layer 2/4
-		// yang sesungguhnya — bukan ikut ter-flag saat penyebabnya murni
-		// client_mismatch (yang juga bisa membuat item.IntegrityStatus jadi
-		// "tampered" lewat classifyResourceLog, lihat baseStatus vs AgentStatus
-		// di sana).
-		baseIntegrityFailed := s.classifyIntegrity(auditLog) == "tampered"
+		// yang sesungguhnya. Ketidaktersediaan Agent adalah status operasional
+		// client dan tidak mengubah integritas Gateway/Fabric.
+		baseIntegrityFailed := item.IntegrityStatus == "tampered"
 		if baseIntegrityFailed {
 			chainIssues = append(chainIssues, fmt.Sprintf("log_integrity_failed:%s", auditLog.LogID))
 		}
@@ -1035,7 +1043,9 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 			chainIssues = append(chainIssues, fmt.Sprintf("client_mismatch:%s", auditLog.LogID))
 		}
 
-		switch item.IntegrityStatus {
+		// Agregasi chain hanya memakai status Gateway/Fabric. AgentStatus
+		// sengaja tidak ikut menentukan chain_status.
+		switch item.ChainStatus {
 		case "tampered":
 			hasTampered = true
 		case "unreachable":
@@ -1043,6 +1053,9 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 		case "pending":
 			hasPending = true
 		}
+	}
+	if err := s.enrichRecoveryStatuses(clientID, result.Logs); err != nil {
+		return nil, err
 	}
 
 	switch {
@@ -1075,6 +1088,9 @@ func (s *auditService) GetTableResources(tableName, clientID string) ([]Resource
 		item := s.classifyResourceLog(auditLog, false)
 		results = append(results, item)
 	}
+	if err := s.enrichRecoveryStatuses(clientID, results); err != nil {
+		return nil, err
+	}
 
 	return results, nil
 }
@@ -1099,6 +1115,7 @@ func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 // berubah secara sah setelah log itu dibuat.
 func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bool) ResourceLogVerification {
 	baseStatus := s.classifyIntegrity(auditLog)
+	integrityStatus, chainStatus := resourceGatewayStatuses(baseStatus, "skipped_historical")
 
 	item := ResourceLogVerification{
 		LogID:           auditLog.LogID,
@@ -1109,8 +1126,9 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
 		LastUpdatedAt:   formatPgTimestamp(auditLog.Timestamp),
 		HashValue:       auditLog.HashValue,
-		IntegrityStatus: baseStatus,
-		ChainStatus:     baseStatus,
+		IntegrityStatus: integrityStatus,
+		ChainStatus:     chainStatus,
+		RecoveryStatus:  recoveryDisplayNotRecovered,
 		IsLatest:        isLatest,
 		AgentStatus:     "skipped_historical",
 	}
@@ -1134,20 +1152,108 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 		}
 	}
 
-	switch {
-	case baseStatus == "tampered":
-		item.IntegrityStatus = "tampered"
-		item.ChainStatus = "tampered"
-	case baseStatus == "unreachable" || item.AgentStatus == "unreachable":
-		item.IntegrityStatus = "unreachable"
-		item.ChainStatus = "unreachable"
-	case baseStatus == "pending":
-		item.IntegrityStatus = "pending"
-		item.ChainStatus = "pending"
-	default:
-		item.IntegrityStatus = "valid"
-		item.ChainStatus = "valid"
-	}
+	// AgentStatus hanya menjelaskan verifikasi Layer 3 terhadap database
+	// operasional client. Jangan pernah menurunkan status integritas/chain
+	// Gateway ketika Agent sedang offline; validasi Gateway/Fabric tetap sah.
+	item.IntegrityStatus, item.ChainStatus = resourceGatewayStatuses(baseStatus, item.AgentStatus)
 
 	return item
+}
+
+const (
+	recoveryDisplayNotRecovered = "not_recovered"
+	recoveryDisplayPending      = "pending"
+	recoveryDisplayRecovered    = "recovered"
+	recoveryDisplayFailed       = "failed"
+)
+
+// resourceGatewayStatuses memetakan hasil verifikasi PostgreSQL Gateway dan
+// Fabric ke dua field kompatibilitas API. AgentStatus sengaja tidak menjadi
+// input fungsi ini: Agent offline adalah kondisi client, bukan bukti bahwa
+// snapshot atau anchor Gateway rusak. Parameter agentStatus sengaja diterima
+// untuk menegaskan kontrak bahwa nilainya tidak pernah mengubah hasil.
+func resourceGatewayStatuses(baseStatus, _ string) (integrityStatus, chainStatus string) {
+	switch baseStatus {
+	case "tampered":
+		return "tampered", "tampered"
+	case "unreachable":
+		return "unreachable", "unreachable"
+	case "pending":
+		return "pending", "pending"
+	default:
+		return "valid", "valid"
+	}
+}
+
+func recoveryDisplayStatus(status string) string {
+	switch status {
+	case models.RecoveryStatusSucceeded:
+		return recoveryDisplayRecovered
+	case models.RecoveryStatusPendingExecution,
+		models.RecoveryStatusPendingApproval,
+		models.RecoveryStatusApproved,
+		models.RecoveryStatusExecuting:
+		return recoveryDisplayPending
+	case models.RecoveryStatusRejected,
+		models.RecoveryStatusFailedVerification,
+		models.RecoveryStatusFailedExecution:
+		return recoveryDisplayFailed
+	default:
+		return recoveryDisplayNotRecovered
+	}
+}
+
+// enrichRecoveryStatuses mengambil workflow recovery terbaru untuk setiap log
+// dalam satu query. Dengan begitu endpoint riwayat tidak melakukan N+1 query
+// dan frontend dapat menampilkan badge RECOVERED tanpa mencampurnya dengan
+// status konektivitas Agent.
+func (s *auditService) enrichRecoveryStatuses(clientID string, items []ResourceLogVerification) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	logIDs := make([]string, 0, len(items))
+	seenLogIDs := make(map[string]struct{}, len(items))
+	for i := range items {
+		items[i].RecoveryStatus = recoveryDisplayNotRecovered
+		if items[i].LogID == "" {
+			continue
+		}
+		if _, exists := seenLogIDs[items[i].LogID]; exists {
+			continue
+		}
+		seenLogIDs[items[i].LogID] = struct{}{}
+		logIDs = append(logIDs, items[i].LogID)
+	}
+	if s.db == nil || len(logIDs) == 0 {
+		return nil
+	}
+
+	var requests []models.RecoveryRequest
+	if err := s.db.Where("client_id = ? AND target_log_id IN ?", clientID, logIDs).
+		Order("requested_at DESC").Find(&requests).Error; err != nil {
+		return err
+	}
+
+	itemByLogID := make(map[string]int, len(items))
+	for i := range items {
+		if _, exists := itemByLogID[items[i].LogID]; !exists {
+			itemByLogID[items[i].LogID] = i
+		}
+	}
+	latestRequestByLogID := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		index, exists := itemByLogID[request.TargetLogID]
+		if !exists {
+			continue
+		}
+		if _, alreadySet := latestRequestByLogID[request.TargetLogID]; alreadySet {
+			continue
+		}
+		latestRequestByLogID[request.TargetLogID] = struct{}{}
+		items[index].RecoveryStatus = recoveryDisplayStatus(request.Status)
+		items[index].RecoveryRequestID = request.ID
+		items[index].RecoveryExecutedAt = request.ExecutedAt
+	}
+	return nil
 }
