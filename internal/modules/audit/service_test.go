@@ -86,3 +86,25 @@ func TestRecoveryDisplayStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldVerifyResourceWithAgent(t *testing.T) {
+	tests := []struct {
+		name     string
+		action   string
+		isLatest bool
+		want     bool
+	}{
+		{name: "latest client event", action: "UPDATE", isLatest: true, want: true},
+		{name: "historical client event", action: "UPDATE", isLatest: false, want: false},
+		{name: "latest recovery event", action: "RECOVERY", isLatest: true, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := models.AuditLog{Action: tt.action}
+			if got := shouldVerifyResourceWithAgent(log, tt.isLatest); got != tt.want {
+				t.Fatalf("shouldVerifyResourceWithAgent(%q, %t) = %t, want %t", tt.action, tt.isLatest, got, tt.want)
+			}
+		})
+	}
+}
