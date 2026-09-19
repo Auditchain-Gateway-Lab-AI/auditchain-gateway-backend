@@ -1133,7 +1133,14 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bo
 		AgentStatus:     "skipped_historical",
 	}
 
-	if !isLatest {
+	if !shouldVerifyResourceWithAgent(auditLog, isLatest) {
+		if isLatest && strings.EqualFold(strings.TrimSpace(auditLog.Action), "RECOVERY") {
+			item.AgentStatus = "skipped_recovery"
+			if requestID := recoveryRequestIDFromAuthorizationContext(auditLog.AuthorizationContext); requestID != "" {
+				item.RecoveryStatus = recoveryDisplayRecovered
+				item.RecoveryRequestID = requestID
+			}
+		}
 		return item
 	}
 
@@ -1203,6 +1210,21 @@ func recoveryDisplayStatus(status string) string {
 	}
 }
 
+// shouldVerifyResourceWithAgent hanya mengizinkan Layer 3 untuk log terbaru
+// yang merepresentasikan event operasional client. Event RECOVERY dibuat oleh
+// Gateway sendiri, sehingga tidak boleh dibandingkan dengan Agent client.
+func shouldVerifyResourceWithAgent(auditLog models.AuditLog, isLatest bool) bool {
+	return isLatest && !strings.EqualFold(strings.TrimSpace(auditLog.Action), "RECOVERY")
+}
+
+func recoveryRequestIDFromAuthorizationContext(authorizationContext string) string {
+	const prefix = "recovery_request:"
+	if !strings.HasPrefix(strings.TrimSpace(authorizationContext), prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(authorizationContext), prefix))
+}
+
 // enrichRecoveryStatuses mengambil workflow recovery terbaru untuk setiap log
 // dalam satu query. Dengan begitu endpoint riwayat tidak melakukan N+1 query
 // dan frontend dapat menampilkan badge RECOVERED tanpa mencampurnya dengan
@@ -1216,6 +1238,9 @@ func (s *auditService) enrichRecoveryStatuses(clientID string, items []ResourceL
 	seenLogIDs := make(map[string]struct{}, len(items))
 	for i := range items {
 		items[i].RecoveryStatus = recoveryDisplayNotRecovered
+		if strings.EqualFold(strings.TrimSpace(items[i].Action), "RECOVERY") && items[i].RecoveryRequestID != "" {
+			items[i].RecoveryStatus = recoveryDisplayRecovered
+		}
 		if items[i].LogID == "" {
 			continue
 		}
