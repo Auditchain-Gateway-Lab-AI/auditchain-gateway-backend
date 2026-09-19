@@ -7,12 +7,14 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
 
 type Engine struct {
-	DB *gorm.DB
+	DB             *gorm.DB
+	RecoveryCutoff *time.Time
 }
 
 // ProcessBatch mengelompokkan log transaksi yang sudah di-hash dan membuat Merkle Root
@@ -23,6 +25,11 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 	// Saat snapshot wajib diaktifkan, log tanpa snapshot tervalidasi tidak
 	// boleh masuk Merkle/Fabric karena tidak dapat dipulihkan kembali.
 	query := a.DB.Where("status = ?", "HASHED")
+	if a.RecoveryCutoff != nil {
+		// Legacy rows predate the snapshot pipeline. They must not be
+		// re-anchored by the new pipeline or keep the new-scope gate blocked.
+		query = query.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *a.RecoveryCutoff)
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true") {
 		query = query.Where("snapshot_status = ?", models.SnapshotStatusVerified)
 	}

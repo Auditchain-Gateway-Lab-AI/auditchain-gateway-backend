@@ -60,6 +60,16 @@ func tamperScannerEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAMPER_SCANNER_ENABLED")), "true")
 }
 
+func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Time) error {
+	if (recovery || snapshotRequired) && cutoff == nil {
+		return fmt.Errorf("RECOVERY_CUTOFF_AT wajib diisi saat recovery atau anchoring gate aktif")
+	}
+	if recovery && !snapshotRequired {
+		return fmt.Errorf("RECOVERY_ENABLED=true membutuhkan SNAPSHOT_REQUIRED_FOR_ANCHOR=true")
+	}
+	return nil
+}
+
 func buildSnapshotRuntime() (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
 	if !snapshotWriterEnabled() {
 		return nil, nil, nil, nil
@@ -121,7 +131,7 @@ func loadSnapshotWorkerConfig() (snapshotworker.Config, error) {
 	}, nil
 }
 
-func loadTamperScannerConfig() (tamperscanner.Config, error) {
+func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, error) {
 	parsePositiveInt := func(name string, fallback int) (int, error) {
 		raw := strings.TrimSpace(os.Getenv(name))
 		if raw == "" {
@@ -147,16 +157,17 @@ func loadTamperScannerConfig() (tamperscanner.Config, error) {
 		return tamperscanner.Config{}, err
 	}
 	return tamperscanner.Config{
-		Enabled:     tamperScannerEnabled(),
-		Interval:    time.Duration(intervalSeconds) * time.Second,
-		BatchSize:   batchSize,
-		Concurrency: concurrency,
+		Enabled:        tamperScannerEnabled(),
+		Interval:       time.Duration(intervalSeconds) * time.Second,
+		BatchSize:      batchSize,
+		Concurrency:    concurrency,
+		RecoveryCutoff: recoveryCutoff,
 	}, nil
 }
 
-func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder) {
+func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time) {
 	hashEngine := &hasher.Engine{DB: db}
-	aggEngine := &aggregator.Engine{DB: db}
+	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff}
 	kafkaEngine := &kafkaconsumer.Engine{DB: db, SnapshotBuilder: snapshotBuilder}
 
 	// Ticker pipeline: hasher + aggregator (batch=10) + anchoring setiap 10 detik
@@ -212,6 +223,13 @@ func main() {
 	defer cancel()
 
 	db := config.ConnectDB()
+	recoveryCutoff, cutoffErr := config.LoadRecoveryCutoff()
+	if cutoffErr != nil {
+		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", cutoffErr)
+	}
+	if scopeErr := validateRecoveryScopeFlags(recoveryEnabled(), snapshotRequiredForAnchor(), recoveryCutoff); scopeErr != nil {
+		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", scopeErr)
+	}
 
 	snapshotBuilder, snapshotStore, snapshotCipher, err := buildSnapshotRuntime()
 	if err != nil {
@@ -248,13 +266,13 @@ func main() {
 		log.Fatal("❌ TAMPER_SCANNER_ENABLED=true membutuhkan koneksi Fabric yang valid")
 	}
 
-	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder)
+	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff)
 
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, db)
 	auditHandler := audit.NewHandler(auditService)
 	if tamperScannerEnabled() {
-		scannerConfig, configErr := loadTamperScannerConfig()
+		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)
 		if configErr != nil {
 			log.Fatalf("❌ Konfigurasi tamper scanner tidak valid: %v", configErr)
 		}
@@ -282,6 +300,7 @@ func main() {
 	reportService := report.NewService(auditService)
 	reportHandler := report.NewHandler(reportService)
 	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, snapshotBuilder)
+	recoveryService.SetRecoveryCutoff(recoveryCutoff)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
 	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)

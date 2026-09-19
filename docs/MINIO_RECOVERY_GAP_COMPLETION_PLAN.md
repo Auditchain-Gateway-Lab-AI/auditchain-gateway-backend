@@ -15,9 +15,10 @@ atau diubah oleh recovery.
 | Frozen recovery references | Implemented | Request menyimpan checksum, plaintext hash, anchor ID, dan expected root. |
 | Tamper scanner | Implemented | Batch scanner memeriksa log ANCHORED secara berkala dan meng-cache pembacaan anchor Fabric per anchor dalam satu siklus. |
 | API candidates/preflight | Implemented | Kontrak siap digunakan dashboard. |
-| PostgreSQL anchoring gate | Configurable | Aktif setelah SNAPSHOT_REQUIRED_FOR_ANCHOR=true. |
-| Object Lock COMPLIANCE | Configuration ready | Migrasi object lama harus dilakukan di server secara terkontrol. |
+| PostgreSQL anchoring gate | Implemented in code | Recovery aktif fail-fast jika `SNAPSHOT_REQUIRED_FOR_ANCHOR` belum true; operator tetap harus mengaktifkannya di server. |
+| Object Lock COMPLIANCE | Implemented for new scope | Object baru memakai COMPLIANCE 30 hari; object legacy tidak dimigrasikan karena berada di luar recovery scope. |
 | Dashboard Recovery Center | Out of scope | Dikerjakan pada repository frontend terpisah. |
+| Legacy recovery boundary | Implemented in code | `RECOVERY_CUTOFF_AT` membatasi recovery pada log baru; history lama tetap dapat diverifikasi tetapi tidak dipulihkan dari MinIO. |
 
 ## Urutan validasi recovery
 
@@ -57,7 +58,15 @@ TAMPER_SCANNER_ENABLED=false
 TAMPER_SCAN_INTERVAL_SECONDS=300
 TAMPER_SCAN_BATCH_SIZE=100
 TAMPER_SCAN_CONCURRENCY=2
+RECOVERY_CUTOFF_AT=2026-09-18T14:34:33Z
 ~~~
+
+`RECOVERY_CUTOFF_AT` wajib diisi ketika `RECOVERY_ENABLED=true` atau
+`SNAPSHOT_REQUIRED_FOR_ANCHOR=true`. Audit log dengan `db_timestamp` sebelum
+cutoff (atau tanpa `db_timestamp`) dikategorikan sebagai legacy. Log tersebut
+tetap berada di PostgreSQL dan dapat diverifikasi terhadap Fabric, tetapi tidak
+ditawarkan sebagai kandidat recovery. Scanner terjadwal dan aggregator baru
+juga tidak memproses ulang baris legacy.
 
 Scanner mengambil log berstatus ANCHORED yang paling lama diperiksa. Status
 operasional disimpan pada audit_logs.integrity_status:
@@ -166,6 +175,7 @@ TAMPER_SCANNER_ENABLED=true
 RECOVERY_ENABLED=true
 MINIO_RETENTION_MODE=COMPLIANCE
 MINIO_RETENTION_DAYS=30
+RECOVERY_CUTOFF_AT=2026-09-18T14:34:33Z
 ~~~
 
 Gateway gagal startup jika:
@@ -174,6 +184,8 @@ Gateway gagal startup jika:
 - anchoring gate aktif tanpa Fabric;
 - recovery aktif tanpa MinIO, encryption key, snapshot builder, atau Fabric;
 - scanner aktif tanpa Fabric.
+- recovery atau anchoring gate aktif tanpa `RECOVERY_CUTOFF_AT`.
+- recovery aktif tanpa `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`.
 
 Pada server, tambahkan flag tersebut ke `.env` yang sudah ada; jangan menimpa
 file `.env` produksi dengan `.env.example` karena file itu berisi secret dan
@@ -192,10 +204,15 @@ Jalankan pada maintenance window server:
 3. Verifikasi waktu server/NTP.
 4. Uji bucket staging dengan COMPLIANCE.
 5. Uji update/delete menggunakan writer dan root; operasi harus ditolak selama retention.
-6. Set default bucket production ke COMPLIANCE 30 hari.
-7. Terapkan COMPLIANCE ke seluruh versi object lama.
-8. Verifikasi mode COMPLIANCE dan retain-until dengan mc stat atau mc retention info.
+6. Set default bucket production ke COMPLIANCE 30 hari untuk object baru.
+7. Object legacy tidak dimigrasikan dan tidak boleh dipilih sebagai kandidat recovery.
+8. Verifikasi mode COMPLIANCE dan retain-until pada object baru dengan mc stat atau mc retention info.
 9. Jangan menghapus atau mengganti bucket sebelum seluruh bukti inventaris dan validasi tersimpan.
+
+Pemeriksaan read-only dapat dijalankan menggunakan
+`scripts/minio/verify-compliance.sh`. Ringkasan operasional untuk scope baru
+tersedia di `scripts/ops/check-recovery-health.sh`; script tersebut sengaja
+tidak menghitung baris legacy sebelum `RECOVERY_CUTOFF_AT`.
 
 COMPLIANCE bersifat irreversible sampai masa retention berakhir. Gunakan
 staging/ephemeral bucket untuk smoke test agar object test tidak bercampur
@@ -230,6 +247,9 @@ Estimasi satu developer, satu hari kerja intensif, dengan rollout bertahap:
 9. Pastikan evidence tampered tersimpan terenkripsi.
 10. Pastikan event RECOVERY baru dibuat dan masuk outbox snapshot.
 11. Pastikan database client tidak pernah disentuh.
+12. Pastikan log sebelum `RECOVERY_CUTOFF_AT` tetap dapat diverifikasi tetapi
+    kandidat recovery mengembalikan `eligible=false` dengan alasan
+    `legacy_recovery_out_of_scope`.
 
 Event `RECOVERY` merupakan audit event baru, tetapi kolom `metadata`-nya harus
 identik dengan metadata snapshot yang dipulihkan dan actor sumbernya harus

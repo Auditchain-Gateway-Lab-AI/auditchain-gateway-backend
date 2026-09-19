@@ -33,10 +33,11 @@ type BatchVerifier interface {
 }
 
 type Config struct {
-	Enabled     bool
-	Interval    time.Duration
-	BatchSize   int
-	Concurrency int
+	Enabled        bool
+	Interval       time.Duration
+	BatchSize      int
+	Concurrency    int
+	RecoveryCutoff *time.Time
 }
 
 type Worker struct {
@@ -91,8 +92,13 @@ func (w *Worker) Run(ctx context.Context) {
 // signal for operational logging.
 func (w *Worker) Scan(ctx context.Context) error {
 	var logs []models.AuditLog
-	if err := w.db.WithContext(ctx).
-		Where("status = ?", "ANCHORED").
+	query := w.db.WithContext(ctx).Where("status = ?", "ANCHORED")
+	if w.cfg.RecoveryCutoff != nil {
+		// Legacy history remains available for manual integrity checks, but
+		// the scheduled recovery scanner is scoped to snapshot-backed rows.
+		query = query.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *w.cfg.RecoveryCutoff)
+	}
+	if err := query.
 		Order("integrity_checked_at ASC NULLS FIRST, blockchain_timestamp ASC NULLS FIRST, log_id ASC").
 		Limit(w.cfg.BatchSize).
 		Find(&logs).Error; err != nil {
