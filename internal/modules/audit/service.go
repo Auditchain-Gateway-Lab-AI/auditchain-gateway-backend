@@ -623,17 +623,22 @@ func (s *auditService) verifyLogIntegrity(logID, clientID string) (*Verification
 	var agentDiscrepancies []agentverifier.Discrepancy
 
 	latestLog, latestErr := s.repo.GetLatestLogByResource(auditLog.Resource, clientID)
-	if latestErr == nil && latestLog != nil && latestLog.LogID == auditLog.LogID {
-		agentStatus = "not_configured"
-		agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
-		if agentErr != nil {
-			agentStatus = "unreachable"
-		} else if agentResult.AgentUsed {
-			if agentResult.IsMatch {
-				agentStatus = "matched"
-			} else {
-				agentStatus = "mismatch"
-				agentDiscrepancies = agentResult.Discrepancies
+	isLatest := latestErr == nil && latestLog != nil && latestLog.LogID == auditLog.LogID
+	if isLatest {
+		if !shouldVerifyResourceWithAgent(*auditLog, true) {
+			agentStatus = "skipped_recovery"
+		} else {
+			agentStatus = "not_configured"
+			agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+			if agentErr != nil {
+				agentStatus = "unreachable"
+			} else if agentResult.AgentUsed {
+				if agentResult.IsMatch {
+					agentStatus = "matched"
+				} else {
+					agentStatus = "mismatch"
+					agentDiscrepancies = agentResult.Discrepancies
+				}
 			}
 		}
 	}

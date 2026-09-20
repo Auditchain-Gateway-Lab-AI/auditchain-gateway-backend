@@ -97,6 +97,8 @@ func TestShouldVerifyResourceWithAgent(t *testing.T) {
 		{name: "latest client event", action: "UPDATE", isLatest: true, want: true},
 		{name: "historical client event", action: "UPDATE", isLatest: false, want: false},
 		{name: "latest recovery event", action: "RECOVERY", isLatest: true, want: false},
+		{name: "latest recovery event ignores casing and spaces", action: " recovery ", isLatest: true, want: false},
+		{name: "historical recovery event", action: "RECOVERY", isLatest: false, want: false},
 	}
 
 	for _, tt := range tests {
