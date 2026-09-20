@@ -110,3 +110,58 @@ func TestShouldVerifyResourceWithAgent(t *testing.T) {
 		})
 	}
 }
+
+func TestLatestClientEventIndexSkipsRecoveryEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		logs []models.AuditLog
+		want int
+	}{
+		{
+			name: "update remains latest client event after recovery",
+			logs: []models.AuditLog{
+				{Action: "INSERT"},
+				{Action: "UPDATE"},
+				{Action: "RECOVERY"},
+			},
+			want: 1,
+		},
+		{
+			name: "multiple recovery events do not hide delete",
+			logs: []models.AuditLog{
+				{Action: "DELETE"},
+				{Action: "RECOVERY"},
+				{Action: " recovery "},
+			},
+			want: 0,
+		},
+		{
+			name: "new client event after recovery becomes latest",
+			logs: []models.AuditLog{
+				{Action: "UPDATE"},
+				{Action: "RECOVERY"},
+				{Action: "UPDATE"},
+			},
+			want: 2,
+		},
+		{
+			name: "only recovery events have no client event",
+			logs: []models.AuditLog{
+				{Action: "RECOVERY"},
+			},
+			want: -1,
+		},
+		{
+			name: "empty history has no client event",
+			want: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := latestClientEventIndex(tt.logs); got != tt.want {
+				t.Fatalf("latestClientEventIndex() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

@@ -17,6 +17,7 @@ type AuditRepository interface {
 	GetProofsByHash(hash string) ([]models.MerkleProof, error)
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error)
+	GetLatestClientLogByResource(resource, clientID string) (*models.AuditLog, error)
 	GetClientDBEngine(clientID string) (string, error)
 
 	GetRecentLogsPage(clientID string, page, pageSize int, sortOrder, sourceTable string, fromTime, toTime *time.Time) ([]models.AuditLog, int64, error)
@@ -106,6 +107,19 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 	var log models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
 		Order("timestamp desc").First(&log).Error
+	return &log, err
+}
+
+// GetLatestClientLogByResource ignores internal RECOVERY events because only
+// client-originated events can be compared with the live database via Agent.
+func (r *auditRepoImpl) GetLatestClientLogByResource(resource, clientID string) (*models.AuditLog, error) {
+	var log models.AuditLog
+	err := r.db.Where(
+		"resource = ? AND client_id = ? AND UPPER(TRIM(action)) <> ?",
+		resource,
+		clientID,
+		"RECOVERY",
+	).Order("timestamp desc").First(&log).Error
 	return &log, err
 }
 

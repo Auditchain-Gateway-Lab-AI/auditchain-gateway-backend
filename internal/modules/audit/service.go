@@ -117,18 +117,24 @@ type ResourceLogVerification struct {
 	RecoveryStatus     string     `json:"recovery_status"`
 	RecoveryRequestID  string     `json:"recovery_request_id,omitempty"`
 	RecoveryExecutedAt *time.Time `json:"recovery_executed_at,omitempty"`
-	IsLatest           bool       `json:"is_latest"`
+	// IsLatest marks the newest event in the timeline. A RECOVERY event can be
+	// latest because it is a valid AuditChain event.
+	IsLatest bool `json:"is_latest"`
+	// IsLatestClientEvent marks the newest client-originated event that should
+	// be compared with the live client database through Agent.
+	IsLatestClientEvent bool `json:"is_latest_client_event"`
 
-	// AgentStatus HANYA relevan untuk log_id = log terbaru pada resource ini
-	// (IsLatest=true). Agent cuma bisa membaca kondisi TERKINI data klien,
+	// AgentStatus HANYA relevan untuk event operasional client terbaru
+	// (IsLatestClientEvent=true). Agent cuma bisa membaca kondisi TERKINI data klien,
 	// jadi membandingkannya ke log lama pasti mismatch meski tidak ada
 	// tampering — itu bukan bukti manipulasi, itu snapshot historis yang
 	// memang sudah usang secara wajar.
-	//   matched            — log terbaru, Agent dihubungi, data cocok
-	//   mismatch           — log terbaru, Agent dihubungi, ada perbedaan
-	//   unreachable        — log terbaru, Agent terkonfigurasi tapi gagal dihubungi
-	//   not_configured     — log terbaru, klien belum setup AgentConfig
-	//   skipped_historical — BUKAN log terbaru, Layer 3 tidak relevan untuk baris ini
+	//   matched            — event client terbaru, Agent dihubungi, data cocok
+	//   mismatch           — event client terbaru, Agent dihubungi, ada perbedaan
+	//   unreachable        — event client terbaru, Agent gagal dihubungi
+	//   not_configured     — event client terbaru, klien belum setup AgentConfig
+	//   skipped_recovery   — event internal Gateway, tidak dibandingkan ke Agent
+	//   skipped_historical — event client lama, Layer 3 tidak relevan
 	AgentStatus        string                      `json:"agent_status"`
 	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
@@ -622,12 +628,12 @@ func (s *auditService) verifyLogIntegrity(logID, clientID string) (*Verification
 	agentStatus := "skipped_historical"
 	var agentDiscrepancies []agentverifier.Discrepancy
 
-	latestLog, latestErr := s.repo.GetLatestLogByResource(auditLog.Resource, clientID)
-	isLatest := latestErr == nil && latestLog != nil && latestLog.LogID == auditLog.LogID
-	if isLatest {
-		if !shouldVerifyResourceWithAgent(*auditLog, true) {
-			agentStatus = "skipped_recovery"
-		} else {
+	if isRecoveryAction(auditLog.Action) {
+		agentStatus = "skipped_recovery"
+	} else {
+		latestClientLog, latestErr := s.repo.GetLatestClientLogByResource(auditLog.Resource, clientID)
+		isLatestClientEvent := latestErr == nil && latestClientLog != nil && latestClientLog.LogID == auditLog.LogID
+		if shouldVerifyResourceWithAgent(*auditLog, isLatestClientEvent) {
 			agentStatus = "not_configured"
 			agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
 			if agentErr != nil {
@@ -1001,8 +1007,10 @@ func (s *auditService) GetResourceInventory(clientID string) (interface{}, error
 
 // VerifyResourceHistory menjalankan verifikasi Layer 2 (re-hash) + Layer 4
 // (Merkle proof reconstruction vs Fabric) untuk SETIAP log milik resource
-// ini, dan Layer 3 (Agent, live client data) HANYA untuk log terbaru — lihat
-// classifyResourceLog. Hasilnya diagregasi menjadi satu chain_status.
+// ini, dan Layer 3 (Agent, live client data) HANYA untuk event client terbaru.
+// Event RECOVERY tetap latest di timeline tetapi tidak menggantikan event
+// client yang menjadi pembanding kondisi live. Hasilnya diagregasi menjadi
+// satu chain_status.
 //
 // ChainIssues memberi detail KENAPA chain_status jadi "tampered", dengan dua
 // kategori yang SENGAJA dipisah (bisa muncul bersamaan, karena dua-duanya
@@ -1032,8 +1040,9 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 	var chainIssues []string
 
 	lastIndex := len(logs) - 1
+	latestClientIndex := latestClientEventIndex(logs)
 	for i, auditLog := range logs {
-		item := s.classifyResourceLog(auditLog, i == lastIndex)
+		item := s.classifyResourceLog(auditLog, i == lastIndex, i == latestClientIndex)
 		result.Logs = append(result.Logs, item)
 
 		// baseIntegrityFailed dicek terpisah dari AgentStatus supaya
@@ -1044,7 +1053,7 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 		if baseIntegrityFailed {
 			chainIssues = append(chainIssues, fmt.Sprintf("log_integrity_failed:%s", auditLog.LogID))
 		}
-		if item.IsLatest && item.AgentStatus == "mismatch" {
+		if item.IsLatestClientEvent && item.AgentStatus == "mismatch" {
 			chainIssues = append(chainIssues, fmt.Sprintf("client_mismatch:%s", auditLog.LogID))
 		}
 
@@ -1090,7 +1099,7 @@ func (s *auditService) GetTableResources(tableName, clientID string) ([]Resource
 
 	results := make([]ResourceLogVerification, 0, len(logs))
 	for _, auditLog := range logs {
-		item := s.classifyResourceLog(auditLog, false)
+		item := s.classifyResourceLog(auditLog, false, false)
 		results = append(results, item)
 	}
 	if err := s.enrichRecoveryStatuses(clientID, results); err != nil {
@@ -1113,39 +1122,39 @@ func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 }
 
 // classifyResourceLog menjalankan Layer 2+4 (rehash + Merkle vs Fabric) untuk
-// SEMUA log, tapi Layer 3 (Agent, live data klien) HANYA untuk log terbaru —
-// karena hanya baris terbaru yang seharusnya cocok dengan kondisi data klien
-// saat ini. Log lama SENGAJA dilewati dari perbandingan Agent supaya tidak
-// menghasilkan false-positive "mismatch" akibat data yang memang sudah
-// berubah secara sah setelah log itu dibuat.
-func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest bool) ResourceLogVerification {
+// SEMUA log, tapi Layer 3 (Agent, live data klien) HANYA untuk event client
+// terbaru. RECOVERY adalah event internal Gateway: tetap dapat menjadi latest
+// secara kronologis, tetapi tidak mengambil posisi latest client event.
+func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, isLatestClientEvent bool) ResourceLogVerification {
 	baseStatus := s.classifyIntegrity(auditLog)
 	integrityStatus, chainStatus := resourceGatewayStatuses(baseStatus, "skipped_historical")
 
 	item := ResourceLogVerification{
-		LogID:           auditLog.LogID,
-		Resource:        auditLog.Resource,
-		Action:          auditLog.Action,
-		LastAction:      auditLog.Action,
-		Actor:           auditLog.Actor,
-		Timestamp:       formatPgTimestamp(auditLog.Timestamp),
-		LastUpdatedAt:   formatPgTimestamp(auditLog.Timestamp),
-		HashValue:       auditLog.HashValue,
-		IntegrityStatus: integrityStatus,
-		ChainStatus:     chainStatus,
-		RecoveryStatus:  recoveryDisplayNotRecovered,
-		IsLatest:        isLatest,
-		AgentStatus:     "skipped_historical",
+		LogID:               auditLog.LogID,
+		Resource:            auditLog.Resource,
+		Action:              auditLog.Action,
+		LastAction:          auditLog.Action,
+		Actor:               auditLog.Actor,
+		Timestamp:           formatPgTimestamp(auditLog.Timestamp),
+		LastUpdatedAt:       formatPgTimestamp(auditLog.Timestamp),
+		HashValue:           auditLog.HashValue,
+		IntegrityStatus:     integrityStatus,
+		ChainStatus:         chainStatus,
+		RecoveryStatus:      recoveryDisplayNotRecovered,
+		IsLatest:            isLatest,
+		IsLatestClientEvent: isLatestClientEvent,
+		AgentStatus:         "skipped_historical",
 	}
 
-	if !shouldVerifyResourceWithAgent(auditLog, isLatest) {
-		if isLatest && strings.EqualFold(strings.TrimSpace(auditLog.Action), "RECOVERY") {
-			item.AgentStatus = "skipped_recovery"
-			if requestID := recoveryRequestIDFromAuthorizationContext(auditLog.AuthorizationContext); requestID != "" {
-				item.RecoveryStatus = recoveryDisplayRecovered
-				item.RecoveryRequestID = requestID
-			}
+	if isRecoveryAction(auditLog.Action) {
+		item.AgentStatus = "skipped_recovery"
+		if requestID := recoveryRequestIDFromAuthorizationContext(auditLog.AuthorizationContext); requestID != "" {
+			item.RecoveryStatus = recoveryDisplayRecovered
+			item.RecoveryRequestID = requestID
 		}
+		return item
+	}
+	if !shouldVerifyResourceWithAgent(auditLog, isLatestClientEvent) {
 		return item
 	}
 
@@ -1215,11 +1224,27 @@ func recoveryDisplayStatus(status string) string {
 	}
 }
 
-// shouldVerifyResourceWithAgent hanya mengizinkan Layer 3 untuk log terbaru
-// yang merepresentasikan event operasional client. Event RECOVERY dibuat oleh
-// Gateway sendiri, sehingga tidak boleh dibandingkan dengan Agent client.
-func shouldVerifyResourceWithAgent(auditLog models.AuditLog, isLatest bool) bool {
-	return isLatest && !strings.EqualFold(strings.TrimSpace(auditLog.Action), "RECOVERY")
+// shouldVerifyResourceWithAgent hanya mengizinkan Layer 3 untuk event
+// operasional client terbaru. Event RECOVERY dibuat oleh Gateway sendiri,
+// sehingga tidak boleh dibandingkan dengan Agent client.
+func shouldVerifyResourceWithAgent(auditLog models.AuditLog, isLatestClientEvent bool) bool {
+	return isLatestClientEvent && !isRecoveryAction(auditLog.Action)
+}
+
+func isRecoveryAction(action string) bool {
+	return strings.EqualFold(strings.TrimSpace(action), "RECOVERY")
+}
+
+// latestClientEventIndex receives logs ordered by timestamp ascending and
+// returns the newest client-originated event. Gateway RECOVERY events do not
+// replace the client event used for live source verification.
+func latestClientEventIndex(logs []models.AuditLog) int {
+	for i := len(logs) - 1; i >= 0; i-- {
+		if !isRecoveryAction(logs[i].Action) {
+			return i
+		}
+	}
+	return -1
 }
 
 func recoveryRequestIDFromAuthorizationContext(authorizationContext string) string {
