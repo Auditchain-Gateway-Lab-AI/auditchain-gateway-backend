@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"go-blockchain-api/internal/models"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,6 +15,26 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{Service: service}
+}
+
+type ErrorResponse struct {
+	Error string `json:"error" example:"Pesan kesalahan"`
+}
+
+type IncidentListResponse struct {
+	Data []models.TamperIncident `json:"data"`
+}
+
+type IncidentDetailResponse struct {
+	Data models.TamperIncident `json:"data"`
+}
+
+type RequestListResponse struct {
+	Data []models.RecoveryRequest `json:"data"`
+}
+
+type RequestDetailResponse struct {
+	Data models.RecoveryRequest `json:"data"`
 }
 
 func (h *Handler) clientID(c *gin.Context) (string, bool) {
@@ -36,6 +58,16 @@ func (h *Handler) userID(c *gin.Context) string {
 	return userID
 }
 
+// @Summary List tamper incidents
+// @Description Mengambil daftar semua insiden tamper berdasarkan client_id (opsional difilter dengan status).
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param status query string false "Filter Status Insiden (OPEN, RESOLVED)"
+// @Success 200 {object} IncidentListResponse "Daftar Insiden Tamper"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar tamper incident"
+// @Router /recovery/incidents [get]
 func (h *Handler) ListIncidents(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -49,6 +81,17 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": incidents})
 }
 
+// @Summary Get tamper incident detail
+// @Description Mengambil detail sebuah insiden tamper berdasarkan ID.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Incident ID"
+// @Success 200 {object} IncidentDetailResponse "Detail Insiden Tamper"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Tamper incident tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil detail tamper incident"
+// @Router /recovery/incidents/{id} [get]
 func (h *Handler) GetIncident(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -66,6 +109,17 @@ func (h *Handler) GetIncident(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": incident})
 }
 
+// @Summary List candidate snapshots for recovery
+// @Description Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery pada insiden tertentu.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Incident ID"
+// @Success 200 {object} map[string]interface{} "Daftar kandidat snapshot"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Insiden tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar kandidat"
+// @Router /recovery/incidents/{id}/candidates [get]
 func (h *Handler) ListCandidates(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -79,6 +133,17 @@ func (h *Handler) ListCandidates(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": candidates})
 }
 
+// @Summary Preflight check for recovery
+// @Description Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan tidak ada konflik sebelum recovery.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Incident ID"
+// @Success 200 {object} map[string]interface{} "Hasil preflight check"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 409 {object} ErrorResponse "Konflik atau kondisi tidak valid untuk preflight"
+// @Failure 500 {object} ErrorResponse "Gagal melakukan preflight"
+// @Router /recovery/incidents/{id}/preflight [post]
 func (h *Handler) Preflight(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -92,6 +157,16 @@ func (h *Handler) Preflight(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary List snapshot versions by resource
+// @Description Mengambil histori versi snapshot dari sebuah resource (table).
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param resource path string true "Resource/Table Name"
+// @Success 200 {object} map[string]interface{} "Histori versi snapshot"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil histori snapshot recovery"
+// @Router /recovery/snapshots/{resource}/versions [get]
 func (h *Handler) ListVersions(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -105,6 +180,16 @@ func (h *Handler) ListVersions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": versions})
 }
 
+// @Summary List recovery requests
+// @Description Mengambil daftar permintaan (request) recovery yang diajukan.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param status query string false "Filter Status Request"
+// @Success 200 {object} RequestListResponse "Daftar recovery request"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar recovery request"
+// @Router /recovery/requests [get]
 func (h *Handler) ListRequests(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -118,6 +203,17 @@ func (h *Handler) ListRequests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": requests})
 }
 
+// @Summary Get recovery request detail
+// @Description Mengambil detail sebuah permintaan (request) recovery berdasarkan ID.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} RequestDetailResponse "Detail recovery request"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Recovery request tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil detail recovery request"
+// @Router /recovery/requests/{id} [get]
 func (h *Handler) GetRequest(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -135,6 +231,19 @@ func (h *Handler) GetRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": request})
 }
 
+// @Summary Create recovery request
+// @Description Membuat permintaan baru untuk melakukan recovery data ke snapshot tertentu.
+// @Tags Recovery
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateRequestInput true "Data Request Recovery"
+// @Success 201 {object} RequestDetailResponse "Recovery request berhasil dibuat"
+// @Failure 400 {object} ErrorResponse "Format request tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 409 {object} ErrorResponse "Konflik atau state tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal membuat recovery request"
+// @Router /recovery/requests [post]
 func (h *Handler) CreateRequest(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -153,6 +262,17 @@ func (h *Handler) CreateRequest(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": request})
 }
 
+// @Summary Approve recovery request
+// @Description Menyetujui sebuah permintaan recovery (untuk backward compatibility).
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} RequestDetailResponse "Request berhasil disetujui"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
+// @Failure 409 {object} ErrorResponse "State request tidak sesuai"
+// @Router /recovery/requests/{id}/approve [post]
 func (h *Handler) Approve(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -166,6 +286,17 @@ func (h *Handler) Approve(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": request})
 }
 
+// @Summary Reject recovery request
+// @Description Menolak sebuah permintaan recovery.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} RequestDetailResponse "Request berhasil ditolak"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
+// @Failure 409 {object} ErrorResponse "State request tidak sesuai"
+// @Router /recovery/requests/{id}/reject [post]
 func (h *Handler) Reject(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -179,6 +310,18 @@ func (h *Handler) Reject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": request})
 }
 
+// @Summary Execute recovery request
+// @Description Mengeksekusi permintaan recovery yang telah disetujui atau siap dieksekusi, memulihkan data dari S3.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Request ID"
+// @Success 200 {object} RequestDetailResponse "Eksekusi recovery dimulai/berhasil"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
+// @Failure 409 {object} ErrorResponse "State request tidak sesuai"
+// @Failure 500 {object} ErrorResponse "Gagal mengeksekusi recovery"
+// @Router /recovery/requests/{id}/execute [post]
 func (h *Handler) Execute(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {

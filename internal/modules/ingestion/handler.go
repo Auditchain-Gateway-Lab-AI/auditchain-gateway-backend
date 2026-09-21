@@ -16,6 +16,28 @@ type Handler struct {
 	DB      *gorm.DB
 }
 
+type ErrorResponse struct {
+	Error string `json:"error" example:"Format JSON tidak valid, harus berupa Array Objek"`
+}
+
+type IngestionResponse struct {
+	Message       string `json:"message" example:"Proses bulk ingestion selesai"`
+	TotalReceived int    `json:"total_received" example:"100"`
+	TotalSuccess  int    `json:"total_success" example:"98"`
+	TotalFailed   int    `json:"total_failed" example:"2"`
+}
+
+// @Summary Receive batch logs
+// @Description Menerima array of log dinamis dari sistem klien (Agent atau Kafka) untuk diproses dan diverifikasi ke blockchain.
+// @Tags Ingestion
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body []map[string]interface{} true "Array of Log Data"
+// @Success 202 {object} IngestionResponse "Log diterima dan sedang diproses"
+// @Failure 400 {object} ErrorResponse "Format JSON tidak valid atau array kosong"
+// @Failure 500 {object} ErrorResponse "Identitas klien tidak ditemukan atau gagal memproses konfigurasi"
+// @Router /ingestion [post]
 func (h *Handler) ReceiveLog(c *gin.Context) {
 	clientIDVal, exists := c.Get("client_id")
 	if !exists {

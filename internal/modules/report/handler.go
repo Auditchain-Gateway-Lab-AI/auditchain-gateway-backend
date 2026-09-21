@@ -43,6 +43,10 @@ func (h *Handler) getClientID(c *gin.Context) (string, bool) {
 	return clientID, true
 }
 
+type ErrorResponse struct {
+	Error string `json:"error" example:"Pesan kesalahan"`
+}
+
 type GenerateReportRequest struct {
 	PeriodFrom string   `json:"period_from" binding:"required"`
 	PeriodTo   string   `json:"period_to" binding:"required"`
@@ -85,6 +89,19 @@ func parseTimeRobust(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("cannot parse time: %s", timeStr)
 }
 
+// @Summary Generate audit report
+// @Description Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.
+// @Tags Report
+// @Accept json
+// @Produce application/pdf
+// @Produce text/csv
+// @Security BearerAuth
+// @Param request body GenerateReportRequest true "Parameter laporan"
+// @Success 200 {file} file "File laporan PDF atau CSV"
+// @Failure 400 {object} ErrorResponse "Format request tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal generate laporan"
+// @Router /report/generate [post]
 func (h *Handler) GenerateReport(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
