@@ -36,6 +36,8 @@ type auditRepoImpl struct {
 	db *gorm.DB
 }
 
+const clientAuditEventPredicate = "COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'"
+
 func NewAuditRepository(db *gorm.DB) AuditRepository {
 	return &auditRepoImpl{db: db}
 }
@@ -89,7 +91,7 @@ func (r *auditRepoImpl) GetDashboardStats(clientID string) (map[string]int64, er
 			COUNT(*) FILTER (WHERE status = 'ANCHORED')                    AS anchored,
 			COUNT(*) FILTER (WHERE status IN ('RECEIVED','HASHED','AGGREGATED')) AS pending
 		FROM audit_logs
-		WHERE client_id = ?
+		WHERE client_id = ? AND `+clientAuditEventPredicate+`
 	`, clientID).Scan(&result).Error
 
 	if err != nil {
@@ -105,7 +107,7 @@ func (r *auditRepoImpl) GetDashboardStats(clientID string) (map[string]int64, er
 
 func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error) {
 	var log models.AuditLog
-	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
+	err := r.db.Where("resource = ? AND client_id = ? AND "+clientAuditEventPredicate, resource, clientID).
 		Order("timestamp desc").First(&log).Error
 	return &log, err
 }
@@ -115,7 +117,7 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 func (r *auditRepoImpl) GetLatestClientLogByResource(resource, clientID string) (*models.AuditLog, error) {
 	var log models.AuditLog
 	err := r.db.Where(
-		"resource = ? AND client_id = ? AND UPPER(TRIM(action)) <> ?",
+		"resource = ? AND client_id = ? AND COALESCE(UPPER(TRIM(action)), '') <> ?",
 		resource,
 		clientID,
 		"RECOVERY",
@@ -152,7 +154,7 @@ func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int, s
 	var logs []models.AuditLog
 	var total int64
 
-	countQuery := r.db.Model(&models.AuditLog{}).Where("client_id = ?", clientID)
+	countQuery := r.db.Model(&models.AuditLog{}).Where("client_id = ? AND "+clientAuditEventPredicate, clientID)
 	if sourceTable != "" {
 		countQuery = countQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
 	}
@@ -175,7 +177,7 @@ func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int, s
 	}
 
 	offset := (page - 1) * pageSize
-	dataQuery := r.db.Where("client_id = ?", clientID)
+	dataQuery := r.db.Where("client_id = ? AND "+clientAuditEventPredicate, clientID)
 	if sourceTable != "" {
 		dataQuery = dataQuery.Where("resource LIKE ? OR resource = ?", sourceTable+":%", sourceTable)
 	}
@@ -203,7 +205,7 @@ func (r *auditRepoImpl) GetRecentLogsPage(clientID string, page, pageSize int, s
 func (r *auditRepoImpl) CountAnchoredLogs(clientID string) (int64, error) {
 	var total int64
 	err := r.db.Model(&models.AuditLog{}).
-		Where("client_id = ? AND status = ?", clientID, "ANCHORED").
+		Where("client_id = ? AND status = ? AND "+clientAuditEventPredicate, clientID, "ANCHORED").
 		Count(&total).Error
 	return total, err
 }
@@ -215,7 +217,7 @@ func (r *auditRepoImpl) CountAnchoredLogs(clientID string) (int64, error) {
 func (r *auditRepoImpl) GetAnchoredLogsPage(clientID string, page, pageSize int) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	offset := (page - 1) * pageSize
-	err := r.db.Where("client_id = ? AND status = ?", clientID, "ANCHORED").
+	err := r.db.Where("client_id = ? AND status = ? AND "+clientAuditEventPredicate, clientID, "ANCHORED").
 		Order("timestamp desc").
 		Limit(pageSize).
 		Offset(offset).
@@ -226,7 +228,7 @@ func (r *auditRepoImpl) GetAnchoredLogsPage(clientID string, page, pageSize int)
 func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Raw(
-		"SELECT DISTINCT ON (resource) * FROM audit_logs WHERE client_id = ? ORDER BY resource, timestamp DESC",
+		"SELECT DISTINCT ON (resource) * FROM audit_logs WHERE client_id = ? AND "+clientAuditEventPredicate+" ORDER BY resource, timestamp DESC",
 		clientID,
 	).Scan(&logs).Error
 	return logs, err
@@ -234,7 +236,7 @@ func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog
 
 func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
-	err := r.db.Where("resource = ? AND client_id = ?", resource, clientID).
+	err := r.db.Where("resource = ? AND client_id = ? AND "+clientAuditEventPredicate, resource, clientID).
 		Order("timestamp asc").Find(&logs).Error
 	return logs, err
 }
@@ -245,7 +247,7 @@ func (r *auditRepoImpl) GetTableResources(tableName, clientID string) ([]models.
 	err := r.db.Raw(`
 		SELECT DISTINCT ON (resource) * 
 		FROM audit_logs 
-		WHERE client_id = ? AND (resource = ? OR resource LIKE ?) 
+		WHERE client_id = ? AND `+clientAuditEventPredicate+` AND (resource = ? OR resource LIKE ?)
 		ORDER BY resource, timestamp DESC
 	`, clientID, tableName, tableName+":%").Scan(&logs).Error
 	return logs, err
@@ -292,7 +294,7 @@ func (r *auditRepoImpl) GetClientTables(clientID string) ([]models.ClientTable, 
 				MAX(timestamp) AS last_updated_at,
 				NOW() AS created_at
 			FROM audit_logs
-			WHERE client_id = ? AND resource IS NOT NULL AND resource != ''
+			WHERE client_id = ? AND ` + clientAuditEventPredicate + ` AND resource IS NOT NULL AND resource != ''
 			GROUP BY client_id, SPLIT_PART(resource, ':', 1)
 			ON CONFLICT (client_id, table_name) DO NOTHING
 		`
@@ -309,7 +311,7 @@ func (r *auditRepoImpl) GetClientTables(clientID string) ([]models.ClientTable, 
 
 func (r *auditRepoImpl) GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
-	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ?", clientID, from, to).
+	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ? AND "+clientAuditEventPredicate, clientID, from, to).
 		Order("timestamp asc").Find(&logs).Error
 	return logs, err
 }

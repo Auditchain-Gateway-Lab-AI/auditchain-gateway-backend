@@ -28,7 +28,7 @@ type Service struct {
 	store           snapshotstore.SnapshotStore
 	cipher          *snapshotstore.Cipher
 	fabric          FabricReader
-	snapshotBuilder snapshotstore.OutboxBuilder
+	snapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
 	recoveryCutoff  *time.Time
 }
 
@@ -95,8 +95,8 @@ type CreateRequestInput struct {
 	IdempotencyKey string `json:"idempotency_key" binding:"required"`
 }
 
-func NewService(db *gorm.DB, store snapshotstore.SnapshotStore, cipher *snapshotstore.Cipher, fabric FabricReader, builders ...snapshotstore.OutboxBuilder) *Service {
-	var builder snapshotstore.OutboxBuilder
+func NewService(db *gorm.DB, store snapshotstore.SnapshotStore, cipher *snapshotstore.Cipher, fabric FabricReader, builders ...snapshotstore.RecoveryEventOutboxBuilder) *Service {
+	var builder snapshotstore.RecoveryEventOutboxBuilder
 	if len(builders) > 0 {
 		builder = builders[0]
 	}
@@ -171,7 +171,7 @@ func (s *Service) GetRequest(ctx context.Context, clientID, requestID string) (*
 func (s *Service) ListVersions(ctx context.Context, clientID, resource string) ([]VersionView, error) {
 	var logs []models.AuditLog
 	if err := s.db.WithContext(ctx).
-		Where("client_id = ? AND resource = ? AND snapshot_status = ?", clientID, resource, models.SnapshotStatusVerified).
+		Where("client_id = ? AND resource = ? AND snapshot_status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", clientID, resource, models.SnapshotStatusVerified).
 		Scopes(func(db *gorm.DB) *gorm.DB {
 			if s.recoveryCutoff == nil {
 				return db
@@ -347,7 +347,7 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 
 	var selected models.AuditLog
 	if err := s.db.WithContext(ctx).Where(
-		"log_id = ? AND client_id = ? AND resource = ? AND snapshot_status = ?",
+		"log_id = ? AND client_id = ? AND resource = ? AND snapshot_status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'",
 		input.SelectedLogID, clientID, incident.Resource, models.SnapshotStatusVerified,
 	).First(&selected).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -497,7 +497,12 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 		if !isClientExecutableStatus(request.Status) {
 			return errors.New("invalid_request_state")
 		}
-		if err := tx.Model(&request).Update("status", models.RecoveryStatusExecuting).Error; err != nil {
+		startedAt := time.Now().UTC()
+		if err := tx.Model(&request).Updates(map[string]interface{}{
+			"status":               models.RecoveryStatusExecuting,
+			"execution_started_at": startedAt,
+			"executed_by":          executorID,
+		}).Error; err != nil {
 			return err
 		}
 		return tx.Model(&models.TamperIncident{}).Where("id = ?", request.IncidentID).Update("status", models.IncidentStatusRecovering).Error
@@ -506,17 +511,13 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 	}
 
 	if err := s.executeSnapshot(ctx, &request, executorID); err != nil {
-		_ = s.db.WithContext(ctx).Model(&request).Updates(map[string]interface{}{
-			"status":         models.RecoveryStatusFailedVerification,
-			"failure_reason": sanitizeFailure(err),
-			"executed_by":    executorID,
-		})
-		_ = s.db.WithContext(ctx).Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusRecovering).Update("status", models.IncidentStatusUnderReview).Error
-		request.Status = models.RecoveryStatusFailedVerification
-		request.FailureReason = sanitizeFailure(err)
+		if recordErr := s.recordFailedExecution(ctx, &request, executorID, err); recordErr != nil {
+			return nil, recordErr
+		}
+		_ = s.db.WithContext(ctx).First(&request, "id = ? AND client_id = ?", request.ID, clientID).Error
 		return &request, err
 	}
-	request.Status = models.RecoveryStatusSucceeded
+	_ = s.db.WithContext(ctx).First(&request, "id = ? AND client_id = ?", request.ID, clientID).Error
 	return &request, nil
 }
 
@@ -634,51 +635,162 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			return err
 		}
 
-		recoveryLog := models.AuditLog{
-			LogID:    uuid.NewString(),
-			ClientID: request.ClientID,
-			// Actor pada event recovery mengikuti actor sumber dari snapshot,
-			// sehingga data hasil recovery tetap konsisten dengan event asli.
-			// Identitas operator recovery tetap dicatat pada recovery_requests
-			// (executed_by) dan ditelusuri melalui authorization_context.
-			Actor:                reconstructed.Actor,
-			Action:               "RECOVERY",
-			Resource:             restored.Resource,
-			Timestamp:            now,
-			SourceSystem:         "AuditChain Gateway",
-			AuthorizationContext: "recovery_request:" + request.ID,
-			// Event RECOVERY harus membawa metadata hasil pemulihan yang sama
-			// persis dengan snapshot target. Detail workflow tetap tersedia
-			// melalui recovery_requests (request.ID), tamper_incidents, dan
-			// authorization_context; jangan mencampurnya ke metadata canonical.
-			Metadata:        reconstructed.Metadata,
-			Status:          "HASHED",
-			SnapshotStatus:  models.SnapshotStatusPending,
-			IntegrityStatus: models.IntegrityStatusNotChecked,
+		targetTimestamp := reconstructed.Timestamp
+		recoveryEvent := models.RecoveryEvent{
+			ID:                       uuid.NewString(),
+			ClientID:                 request.ClientID,
+			RequestID:                request.ID,
+			IncidentID:               request.IncidentID,
+			TargetLogID:              request.TargetLogID,
+			SelectedLogID:            request.SelectedLogID,
+			EventType:                models.RecoveryEventTypeExecution,
+			ResultStatus:             models.RecoveryResultSucceeded,
+			Resource:                 restored.Resource,
+			TargetActor:              reconstructed.Actor,
+			TargetAction:             reconstructed.Action,
+			TargetTimestamp:          &targetTimestamp,
+			SourceSystem:             reconstructed.SourceSystem,
+			TargetSourceSystem:       reconstructed.SourceSystem,
+			TargetAuthorization:      reconstructed.AuthorizationContext,
+			TargetSourceRecordID:     reconstructed.SourceRecordID,
+			RecoveredMetadata:        reconstructed.Metadata,
+			ExecutorSystem:           "AuditChain Gateway",
+			ExecutedBy:               executorID,
+			Reason:                   request.Reason,
+			BeforeHash:               request.BeforeHash,
+			AfterHash:                snapshot.HashValue,
+			SourceSnapshotObjectKey:  request.SnapshotObjectKey,
+			SourceSnapshotVersionID:  request.SnapshotVersionID,
+			SourceSnapshotChecksum:   request.SnapshotChecksum,
+			SourceSnapshotPlainHash:  request.SnapshotPlaintextHash,
+			SourceAnchorID:           request.AnchorID,
+			SourceExpectedMerkleRoot: request.ExpectedMerkleRoot,
+			ExecutedAt:               now,
+			PipelineStatus:           models.RecoveryPipelineHashed,
+			SnapshotStatus:           models.SnapshotStatusPending,
+			IntegrityStatus:          models.IntegrityStatusNotChecked,
 		}
-		recoveryLog.HashValue = hasher.GenerateLogHash(&recoveryLog)
-		if err := tx.Create(&recoveryLog).Error; err != nil {
-			return fmt.Errorf("audit event recovery gagal: %w", err)
+		recoveryEvent.EventHash = hasher.GenerateRecoveryEventHash(&recoveryEvent)
+		if err := tx.Create(&recoveryEvent).Error; err != nil {
+			return fmt.Errorf("recovery event gagal: %w", err)
 		}
-		if s.snapshotBuilder != nil {
-			recoveryOutbox, err := s.snapshotBuilder.Build(recoveryLog)
-			if err != nil {
-				return fmt.Errorf("snapshot audit event recovery gagal: %w", err)
-			}
-			if err := tx.Create(recoveryOutbox).Error; err != nil {
-				return fmt.Errorf("snapshot outbox event recovery gagal: %w", err)
-			}
+		if s.snapshotBuilder == nil {
+			return errors.New("recovery_snapshot_builder_unavailable")
+		}
+		recoveryOutbox, err := s.snapshotBuilder.BuildRecoveryEvent(recoveryEvent)
+		if err != nil {
+			return fmt.Errorf("snapshot recovery event gagal: %w", err)
+		}
+		if err := tx.Create(recoveryOutbox).Error; err != nil {
+			return fmt.Errorf("snapshot outbox recovery event gagal: %w", err)
 		}
 		if err := tx.Model(&models.RecoveryRequest{}).Where("id = ?", request.ID).Updates(map[string]interface{}{
-			"status":      models.RecoveryStatusSucceeded,
-			"after_hash":  snapshot.HashValue,
-			"executed_at": now,
-			"executed_by": executorID,
+			"status":            models.RecoveryStatusSucceeded,
+			"after_hash":        snapshot.HashValue,
+			"executed_at":       now,
+			"executed_by":       executorID,
+			"recovery_event_id": recoveryEvent.ID,
 		}).Error; err != nil {
 			return err
 		}
 		return nil
 	})
+}
+
+func (s *Service) recordFailedExecution(ctx context.Context, request *models.RecoveryRequest, executorID string, failure error) error {
+	if request == nil {
+		return errors.New("invalid_request")
+	}
+	now := time.Now().UTC()
+	var target models.AuditLog
+	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error; err != nil {
+		return err
+	}
+	resultStatus := models.RecoveryResultVerification
+	if strings.Contains(strings.ToLower(failure.Error()), "restore audit log") || strings.Contains(strings.ToLower(failure.Error()), "post_recovery") {
+		resultStatus = models.RecoveryResultExecution
+	}
+	event := models.RecoveryEvent{
+		ID:                       uuid.NewString(),
+		ClientID:                 request.ClientID,
+		RequestID:                request.ID,
+		IncidentID:               request.IncidentID,
+		TargetLogID:              request.TargetLogID,
+		SelectedLogID:            request.SelectedLogID,
+		EventType:                models.RecoveryEventTypeExecution,
+		ResultStatus:             resultStatus,
+		Resource:                 target.Resource,
+		TargetActor:              target.Actor,
+		TargetAction:             target.Action,
+		TargetTimestamp:          &target.Timestamp,
+		SourceSystem:             target.SourceSystem,
+		TargetSourceSystem:       target.SourceSystem,
+		TargetAuthorization:      target.AuthorizationContext,
+		TargetSourceRecordID:     target.SourceRecordID,
+		ExecutorSystem:           "AuditChain Gateway",
+		ExecutedBy:               executorID,
+		Reason:                   request.Reason,
+		BeforeHash:               request.BeforeHash,
+		SourceSnapshotObjectKey:  request.SnapshotObjectKey,
+		SourceSnapshotVersionID:  request.SnapshotVersionID,
+		SourceSnapshotChecksum:   request.SnapshotChecksum,
+		SourceSnapshotPlainHash:  request.SnapshotPlaintextHash,
+		SourceAnchorID:           request.AnchorID,
+		SourceExpectedMerkleRoot: request.ExpectedMerkleRoot,
+		FailureCode:              failureCode(failure),
+		FailureReason:            sanitizeFailure(failure),
+		ExecutedAt:               now,
+		PipelineStatus:           models.RecoveryPipelineHashed,
+		SnapshotStatus:           models.SnapshotStatusPending,
+		IntegrityStatus:          models.IntegrityStatusNotChecked,
+	}
+	event.EventHash = hasher.GenerateRecoveryEventHash(&event)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing models.RecoveryEvent
+		if err := tx.Where("request_id = ?", request.ID).First(&existing).Error; err == nil {
+			return tx.Model(&models.RecoveryRequest{}).Where("id = ?", request.ID).Updates(map[string]interface{}{
+				"status": models.RecoveryStatusFailedVerification, "failure_reason": sanitizeFailure(failure), "executed_by": executorID,
+			}).Error
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Create(&event).Error; err != nil {
+			return err
+		}
+		if s.snapshotBuilder == nil {
+			return errors.New("recovery_snapshot_builder_unavailable")
+		}
+		outbox, err := s.snapshotBuilder.BuildRecoveryEvent(event)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(outbox).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.RecoveryRequest{}).Where("id = ?", request.ID).Updates(map[string]interface{}{
+			"status": models.RecoveryStatusFailedVerification, "failure_reason": sanitizeFailure(failure), "executed_by": executorID,
+			"executed_at": now, "recovery_event_id": event.ID,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusRecovering).Update("status", models.IncidentStatusUnderReview).Error
+	})
+}
+
+func failureCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.TrimSpace(err.Error())
+	if index := strings.IndexByte(message, ':'); index > 0 {
+		message = message[:index]
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	message = strings.ReplaceAll(message, " ", "_")
+	if len(message) > 100 {
+		message = message[:100]
+	}
+	return message
 }
 
 func (s *Service) validateSnapshot(ctx context.Context, request *models.RecoveryRequest) (snapshotstore.AuditSnapshot, string, snapshotstore.ObjectInfo, error) {

@@ -57,3 +57,26 @@ func TestClientIDRejectsMissingIdentity(t *testing.T) {
 		t.Fatalf("status = %d, want %d", ctx.Writer.Status(), http.StatusUnauthorized)
 	}
 }
+
+func TestClientOperatorRejectsPlatformAdmin(t *testing.T) {
+	h := &Handler{}
+	ctx := recoveryTestContext("/api/dashboard/recovery/requests")
+	ctx.Set("role", "admin")
+	ctx.Set("user_id", "admin-user")
+	if h.clientOperator(ctx) {
+		t.Fatal("platform admin must not execute client recovery")
+	}
+	if ctx.Writer.Status() != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", ctx.Writer.Status(), http.StatusForbidden)
+	}
+}
+
+func TestClientOperatorAcceptsAuditor(t *testing.T) {
+	h := &Handler{}
+	ctx := recoveryTestContext("/api/dashboard/recovery/requests")
+	ctx.Set("role", "Auditor")
+	ctx.Set("user_id", "client-user")
+	if !h.clientOperator(ctx) {
+		t.Fatal("client auditor should be able to execute recovery")
+	}
+}

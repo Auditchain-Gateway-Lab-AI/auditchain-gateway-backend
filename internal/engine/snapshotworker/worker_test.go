@@ -26,6 +26,18 @@ func TestBuildObjectKeySanitizesPathSegments(t *testing.T) {
 	}
 }
 
+func TestBuildRecoveryEventObjectKeyUsesSeparateNamespace(t *testing.T) {
+	createdAt := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	key := BuildRecoveryEventObjectKey("production", "client-1", createdAt, "event-1", "hash-1")
+	want := "production/client-1/recovery-events/2026/09/21/event-1/hash-1.snapshot"
+	if key != want {
+		t.Fatalf("BuildRecoveryEventObjectKey() = %q, want %q", key, want)
+	}
+	if strings.Contains(key, "/audit-logs/") {
+		t.Fatal("recovery event snapshot tidak boleh memakai namespace audit log")
+	}
+}
+
 func TestRetryDelayCapsAtThirtyMinutes(t *testing.T) {
 	if got := retryDelay(5*time.Second, 1); got != 5*time.Second {
 		t.Fatalf("retryDelay attempt 1 = %s", got)

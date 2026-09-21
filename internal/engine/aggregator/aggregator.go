@@ -24,7 +24,10 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 	// 1. Ambil log yang siap diagregasi (maksimal sejumlah batchSize).
 	// Saat snapshot wajib diaktifkan, log tanpa snapshot tervalidasi tidak
 	// boleh masuk Merkle/Fabric karena tidak dapat dipulihkan kembali.
-	query := a.DB.Where("status = ?", "HASHED")
+	// RECOVERY is an internal Gateway event. New recovery evidence lives in
+	// recovery_events and must not be reintroduced into the client audit tree;
+	// legacy RECOVERY rows remain queryable for forensics only.
+	query := a.DB.Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "HASHED")
 	if a.RecoveryCutoff != nil {
 		// Legacy rows predate the snapshot pipeline. They must not be
 		// re-anchored by the new pipeline or keep the new-scope gate blocked.
@@ -113,5 +116,64 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 	}
 
 	log.Printf("[Aggregator] ✅ Batch %d transaksi sukses diagregasi. Merkle Root: %s", len(logs), merkleResult.Root)
+	return nil
+}
+
+// ProcessRecoveryBatch anchors recovery execution evidence independently from
+// client audit logs. A recovery event is eligible only after its own encrypted
+// MinIO snapshot has been verified.
+func (a *Engine) ProcessRecoveryBatch(batchSize int) error {
+	var events []models.RecoveryEvent
+	if err := a.DB.Where("pipeline_status = ? AND snapshot_status = ?", models.RecoveryPipelineHashed, models.SnapshotStatusVerified).
+		Order("executed_at asc").Limit(batchSize).Find(&events).Error; err != nil {
+		return err
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	hashes := make([]string, 0, len(events))
+	for _, event := range events {
+		hashes = append(hashes, event.EventHash)
+	}
+	merkleResult := crypto.BuildMerkleTree(hashes)
+	if merkleResult == nil {
+		return nil
+	}
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&models.MerkleMetadata{MerkleRoot: merkleResult.Root, BatchSize: len(events)}).Error; err != nil {
+			return err
+		}
+		for _, event := range events {
+			result := tx.Model(&models.RecoveryEvent{}).
+				Where("id = ? AND pipeline_status = ?", event.ID, models.RecoveryPipelineHashed).
+				Updates(map[string]interface{}{
+					"merkle_root":     merkleResult.Root,
+					"pipeline_status": models.RecoveryPipelineAggregated,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("recovery event %s tidak lagi berstatus HASHED", event.ID)
+			}
+			for _, proof := range merkleResult.Proofs[event.EventHash] {
+				if err := tx.Create(&models.MerkleProof{
+					TransactionHash: event.EventHash,
+					SiblingHash:     proof.SiblingHash,
+					IsLeft:          proof.IsLeft,
+					TreeLevel:       proof.TreeLevel,
+					MerkleRoot:      merkleResult.Root,
+				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("[Aggregator] recovery event batch gagal: %v", err)
+		return err
+	}
+	log.Printf("[Aggregator] recovery event batch %d sukses diagregasi. Merkle Root: %s", len(events), merkleResult.Root)
 	return nil
 }
