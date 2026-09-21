@@ -1,4 +1,101 @@
 definitions:
+  audit.DashboardStatsResponse:
+    properties:
+      integrity_score:
+        example: "99.79"
+        type: string
+      pending_logs:
+        example: 37
+        type: integer
+      tampered_logs:
+        example: 3
+        type: integer
+      total_logs:
+        example: 1500
+        type: integer
+      total_resources:
+        example: 45
+        type: integer
+      unreachable_logs:
+        example: 10
+        type: integer
+      valid_logs:
+        example: 1450
+        type: integer
+    type: object
+  audit.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  audit.RecentLogsResponse:
+    properties:
+      data:
+        description: Array of logs
+        items: {}
+        type: array
+      note:
+        type: string
+      pagination:
+        properties:
+          page:
+            type: integer
+          page_size:
+            type: integer
+          total_pages:
+            type: integer
+          total_rows:
+            type: integer
+        type: object
+    type: object
+  audit.ResourceInventoryItem:
+    properties:
+      latest_log_id:
+        example: log-abc
+        type: string
+      resource:
+        example: orders
+        type: string
+      total_logs:
+        example: 500
+        type: integer
+    type: object
+  audit.VerifyLogData:
+    properties:
+      actual_hash:
+        type: string
+      agent_discrepancies: {}
+      agent_status:
+        type: string
+      blockchain_tx_id:
+        type: string
+      expected_hash:
+        type: string
+      is_valid:
+        type: boolean
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      message:
+        type: string
+    type: object
+  audit.VerifyLogResponse:
+    properties:
+      data:
+        $ref: '#/definitions/audit.VerifyLogData'
+      layer:
+        example: 4_blockchain
+        type: string
+      log_id:
+        type: string
+      message:
+        type: string
+      status:
+        example: success
+        type: string
+    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -101,6 +198,15 @@ definitions:
       username:
         type: string
     type: object
+  client.ClientDetailResponse:
+    properties:
+      agent_config:
+        $ref: '#/definitions/models.AgentConfig'
+      client:
+        $ref: '#/definitions/models.Client'
+      kafka_config:
+        $ref: '#/definitions/models.ClientKafkaConfig'
+    type: object
   client.CreateClientRequest:
     properties:
       action_field:
@@ -132,6 +238,88 @@ definitions:
         type: string
     required:
     - company_name
+    type: object
+  client.CreateClientResponse:
+    properties:
+      api_key:
+        type: string
+      client_id:
+        type: string
+      field_mapping:
+        properties:
+          action_field:
+            type: string
+          actor_field:
+            type: string
+          create_actor_field:
+            type: string
+          delete_actor_field:
+            type: string
+          fallback_actor_field:
+            type: string
+          resource_field:
+            type: string
+          update_actor_field:
+            type: string
+        type: object
+      message:
+        example: Klien / Perusahaan SaaS berhasil didaftarkan
+        type: string
+    type: object
+  client.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  models.AgentConfig:
+    properties:
+      agent_url:
+        description: |-
+          URL Agent yang dapat dihubungi dari jaringan Gateway.
+          Contoh: http://192.168.11.50:9090
+        type: string
+      client_id:
+        type: string
+      connector_status:
+        description: running, skipped, failed_xxx
+        type: string
+      created_at:
+        type: string
+      db_engine:
+        description: Informasi Database Klien (auto-filled dari install.sh telemetry)
+        type: string
+      db_name:
+        description: Nama database yang diaudit
+        type: string
+      db_tables:
+        description: Daftar tabel yang dimonitor (comma-separated)
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      tailscale_ip:
+        description: Field auto-filled oleh install.sh telemetry callback
+        type: string
+      timeout_seconds:
+        description: 'Timeout dalam detik untuk request ke Agent (default: 5)'
+        type: integer
+      updated_at:
+        type: string
+      user_column_name:
+        type: string
+      user_sync_message:
+        description: detail warning/error sync user table
+        type: string
+      user_sync_status:
+        description: ok, failed, skipped
+        type: string
+      user_table_name:
+        description: Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)
+        type: string
     type: object
   models.Client:
     properties:
@@ -168,6 +356,31 @@ definitions:
         description: Konfigurasi SaaS
         type: string
       update_actor_field:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.ClientKafkaConfig:
+    properties:
+      actor_field:
+        type: string
+      client_id:
+        type: string
+      created_at:
+        type: string
+      db_engine:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      kafka_brokers:
+        type: string
+      pk_field:
+        type: string
+      source_system:
+        type: string
+      topic_prefix:
         type: string
       updated_at:
         type: string
@@ -341,8 +554,7 @@ paths:
         "500":
           description: Gagal mengambil daftar klien
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
       security:
       - BearerAuth: []
       summary: List all clients
@@ -365,18 +577,15 @@ paths:
         "201":
           description: Klien berhasil didaftarkan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.CreateClientResponse'
         "400":
           description: Format tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
         "500":
           description: Gagal mendaftarkan klien
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Create a new client (SaaS tenant)
@@ -398,23 +607,19 @@ paths:
         "200":
           description: Detail klien
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ClientDetailResponse'
         "400":
           description: ID klien kosong
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
         "404":
           description: Klien tidak ditemukan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
         "500":
           description: Gagal mengambil data klien
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/client.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get client detail
@@ -430,19 +635,16 @@ paths:
           description: Daftar resource inventory
           schema:
             items:
-              additionalProperties: true
-              type: object
+              $ref: '#/definitions/audit.ResourceInventoryItem'
             type: array
         "401":
           description: Identitas client tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal memuat daftar data
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get resource inventory
@@ -490,23 +692,19 @@ paths:
         "200":
           description: Daftar log beserta data paginasi
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.RecentLogsResponse'
         "400":
           description: Parameter tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal mengambil log terbaru
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get recent audit logs
@@ -522,18 +720,15 @@ paths:
         "200":
           description: Statistik dashboard
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.DashboardStatsResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal mengambil statistik
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get dashboard statistics
@@ -554,33 +749,27 @@ paths:
         "200":
           description: Verifikasi sukses dan log valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "202":
           description: Verifikasi pending/dalam proses
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "404":
           description: Log tidak ditemukan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
         "409":
           description: Verifikasi gagal/tampered pada suatu layer
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "500":
           description: Kesalahan sistem saat verifikasi
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify a specific log

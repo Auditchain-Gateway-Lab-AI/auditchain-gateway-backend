@@ -264,8 +264,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Gagal mengambil daftar klien",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
                 }
@@ -302,22 +301,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Klien berhasil didaftarkan",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.CreateClientResponse"
                         }
                     },
                     "400": {
                         "description": "Format tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mendaftarkan klien",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
                 }
@@ -351,29 +347,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Detail klien",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ClientDetailResponse"
                         }
                     },
                     "400": {
                         "description": "ID klien kosong",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Klien tidak ditemukan",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mengambil data klien",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
                 }
@@ -400,23 +392,20 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "type": "object",
-                                "additionalProperties": true
+                                "$ref": "#/definitions/audit.ResourceInventoryItem"
                             }
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memuat daftar data",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -491,29 +480,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Daftar log beserta data paginasi",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.RecentLogsResponse"
                         }
                     },
                     "400": {
                         "description": "Parameter tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mengambil log terbaru",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -538,22 +523,19 @@ const docTemplate = `{
                     "200": {
                         "description": "Statistik dashboard",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.DashboardStatsResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mengambil statistik",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -587,43 +569,37 @@ const docTemplate = `{
                     "200": {
                         "description": "Verifikasi sukses dan log valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "202": {
                         "description": "Verifikasi pending/dalam proses",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Log tidak ditemukan",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Verifikasi gagal/tampered pada suatu layer",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "500": {
                         "description": "Kesalahan sistem saat verifikasi",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -631,6 +607,147 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "audit.DashboardStatsResponse": {
+            "type": "object",
+            "properties": {
+                "integrity_score": {
+                    "type": "string",
+                    "example": "99.79"
+                },
+                "pending_logs": {
+                    "type": "integer",
+                    "example": 37
+                },
+                "tampered_logs": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 1500
+                },
+                "total_resources": {
+                    "type": "integer",
+                    "example": 45
+                },
+                "unreachable_logs": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "valid_logs": {
+                    "type": "integer",
+                    "example": 1450
+                }
+            }
+        },
+        "audit.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "audit.RecentLogsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Array of logs",
+                    "type": "array",
+                    "items": {}
+                },
+                "note": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "type": "object",
+                    "properties": {
+                        "page": {
+                            "type": "integer"
+                        },
+                        "page_size": {
+                            "type": "integer"
+                        },
+                        "total_pages": {
+                            "type": "integer"
+                        },
+                        "total_rows": {
+                            "type": "integer"
+                        }
+                    }
+                }
+            }
+        },
+        "audit.ResourceInventoryItem": {
+            "type": "object",
+            "properties": {
+                "latest_log_id": {
+                    "type": "string",
+                    "example": "log-abc"
+                },
+                "resource": {
+                    "type": "string",
+                    "example": "orders"
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 500
+                }
+            }
+        },
+        "audit.VerifyLogData": {
+            "type": "object",
+            "properties": {
+                "actual_hash": {
+                    "type": "string"
+                },
+                "agent_discrepancies": {},
+                "agent_status": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "is_valid": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.VerifyLogResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/audit.VerifyLogData"
+                },
+                "layer": {
+                    "type": "string",
+                    "example": "4_blockchain"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -783,6 +900,20 @@ const docTemplate = `{
                 }
             }
         },
+        "client.ClientDetailResponse": {
+            "type": "object",
+            "properties": {
+                "agent_config": {
+                    "$ref": "#/definitions/models.AgentConfig"
+                },
+                "client": {
+                    "$ref": "#/definitions/models.Client"
+                },
+                "kafka_config": {
+                    "$ref": "#/definitions/models.ClientKafkaConfig"
+                }
+            }
+        },
         "client.CreateClientRequest": {
             "type": "object",
             "required": [
@@ -827,6 +958,122 @@ const docTemplate = `{
                 }
             }
         },
+        "client.CreateClientResponse": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "field_mapping": {
+                    "type": "object",
+                    "properties": {
+                        "action_field": {
+                            "type": "string"
+                        },
+                        "actor_field": {
+                            "type": "string"
+                        },
+                        "create_actor_field": {
+                            "type": "string"
+                        },
+                        "delete_actor_field": {
+                            "type": "string"
+                        },
+                        "fallback_actor_field": {
+                            "type": "string"
+                        },
+                        "resource_field": {
+                            "type": "string"
+                        },
+                        "update_actor_field": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Klien / Perusahaan SaaS berhasil didaftarkan"
+                }
+            }
+        },
+        "client.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "models.AgentConfig": {
+            "type": "object",
+            "properties": {
+                "agent_url": {
+                    "description": "URL Agent yang dapat dihubungi dari jaringan Gateway.\nContoh: http://192.168.11.50:9090",
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "connector_status": {
+                    "description": "running, skipped, failed_xxx",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "db_engine": {
+                    "description": "Informasi Database Klien (auto-filled dari install.sh telemetry)",
+                    "type": "string"
+                },
+                "db_name": {
+                    "description": "Nama database yang diaudit",
+                    "type": "string"
+                },
+                "db_tables": {
+                    "description": "Daftar tabel yang dimonitor (comma-separated)",
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "tailscale_ip": {
+                    "description": "Field auto-filled oleh install.sh telemetry callback",
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "description": "Timeout dalam detik untuk request ke Agent (default: 5)",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_column_name": {
+                    "type": "string"
+                },
+                "user_sync_message": {
+                    "description": "detail warning/error sync user table",
+                    "type": "string"
+                },
+                "user_sync_status": {
+                    "description": "ok, failed, skipped",
+                    "type": "string"
+                },
+                "user_table_name": {
+                    "description": "Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)",
+                    "type": "string"
+                }
+            }
+        },
         "models.Client": {
             "type": "object",
             "properties": {
@@ -867,6 +1114,44 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "update_actor_field": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ClientKafkaConfig": {
+            "type": "object",
+            "properties": {
+                "actor_field": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "db_engine": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "kafka_brokers": {
+                    "type": "string"
+                },
+                "pk_field": {
+                    "type": "string"
+                },
+                "source_system": {
+                    "type": "string"
+                },
+                "topic_prefix": {
                     "type": "string"
                 },
                 "updated_at": {

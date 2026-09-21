@@ -60,6 +60,31 @@ type CreateKafkaConfigRequest struct {
 	PKField      string `json:"pk_field"`
 }
 
+type ErrorResponse struct {
+	Error string `json:"error" example:"Pesan kesalahan atau validasi"`
+}
+
+type CreateClientResponse struct {
+	Message      string `json:"message" example:"Klien / Perusahaan SaaS berhasil didaftarkan"`
+	ClientID     string `json:"client_id"`
+	APIKey       string `json:"api_key"`
+	FieldMapping struct {
+		ActorField         string `json:"actor_field"`
+		FallbackActorField string `json:"fallback_actor_field"`
+		CreateActorField   string `json:"create_actor_field"`
+		UpdateActorField   string `json:"update_actor_field"`
+		DeleteActorField   string `json:"delete_actor_field"`
+		ActionField        string `json:"action_field"`
+		ResourceField      string `json:"resource_field"`
+	} `json:"field_mapping"`
+}
+
+type ClientDetailResponse struct {
+	Client      models.Client            `json:"client"`
+	AgentConfig models.AgentConfig       `json:"agent_config"`
+	KafkaConfig models.ClientKafkaConfig `json:"kafka_config"`
+}
+
 func (h *Handler) CreateKafkaConfig(c *gin.Context) {
 	var req CreateKafkaConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -140,9 +165,9 @@ func (h *Handler) ToggleKafkaConfig(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param request body CreateClientRequest true "Data Klien"
-// @Success 201 {object} map[string]interface{} "Klien berhasil didaftarkan"
-// @Failure 400 {object} map[string]interface{} "Format tidak valid"
-// @Failure 500 {object} map[string]interface{} "Gagal mendaftarkan klien"
+// @Success 201 {object} CreateClientResponse "Klien berhasil didaftarkan"
+// @Failure 400 {object} ErrorResponse "Format tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mendaftarkan klien"
 // @Router /client [post]
 func (h *Handler) CreateClient(c *gin.Context) {
 	var req CreateClientRequest
@@ -212,7 +237,7 @@ func (h *Handler) DeleteKafkaConfig(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Success 200 {array} models.Client "Daftar klien"
-// @Failure 500 {object} map[string]interface{} "Gagal mengambil daftar klien"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar klien"
 // @Router /client [get]
 func (h *Handler) ListClients(c *gin.Context) {
 	clients, err := h.Service.GetClients()
@@ -663,10 +688,10 @@ func (h *Handler) UpdateActorConfig(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Client ID"
-// @Success 200 {object} map[string]interface{} "Detail klien"
-// @Failure 400 {object} map[string]interface{} "ID klien kosong"
-// @Failure 404 {object} map[string]interface{} "Klien tidak ditemukan"
-// @Failure 500 {object} map[string]interface{} "Gagal mengambil data klien"
+// @Success 200 {object} ClientDetailResponse "Detail klien"
+// @Failure 400 {object} ErrorResponse "ID klien kosong"
+// @Failure 404 {object} ErrorResponse "Klien tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil data klien"
 // @Router /client/{id} [get]
 func (h *Handler) GetClientDetail(c *gin.Context) {
 	id := c.Param("id")
