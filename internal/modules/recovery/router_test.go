@@ -21,6 +21,9 @@ func TestRegisterRoutesUsesClientAuthForRecoveryExecution(t *testing.T) {
 	if !routes["POST /api/dashboard/recovery/requests/:id/execute"] {
 		t.Fatal("client recovery execute route is not registered")
 	}
+	if !routes["GET /api/dashboard/recovery/events"] || !routes["GET /api/dashboard/recovery/events/:id/verify"] {
+		t.Fatal("recovery event read/verify routes are not registered")
+	}
 	if routes["POST /api/dashboard/recovery/requests/:id/approve"] {
 		t.Fatal("platform-admin approval route must not be registered")
 	}

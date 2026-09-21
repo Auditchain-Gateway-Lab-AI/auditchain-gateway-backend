@@ -187,9 +187,15 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 				if err := aggEngine.ProcessBatch(10); err != nil {
 					log.Printf("❌ [Aggregator] Error: %v\n", err)
 				}
+				if err := aggEngine.ProcessRecoveryBatch(10); err != nil {
+					log.Printf("❌ [RecoveryAggregator] Error: %v\n", err)
+				}
 				if fabricSvc != nil {
 					if err := fabricSvc.AnchorPendingRoots(); err != nil {
 						log.Printf("❌ [Anchoring] Error: %v\n", err)
+					}
+					if err := fabricSvc.AnchorPendingRecoveryRoots(); err != nil {
+						log.Printf("❌ [RecoveryAnchoring] Error: %v\n", err)
 					}
 				}
 			}
@@ -299,7 +305,11 @@ func main() {
 
 	reportService := report.NewService(auditService)
 	reportHandler := report.NewHandler(reportService)
-	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, snapshotBuilder)
+	var recoverySnapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
+	if snapshotCipher != nil {
+		recoverySnapshotBuilder = snapshotstore.RecoveryEventSnapshotOutboxBuilder{Cipher: snapshotCipher}
+	}
+	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, recoverySnapshotBuilder)
 	recoveryService.SetRecoveryCutoff(recoveryCutoff)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 

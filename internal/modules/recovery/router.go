@@ -23,6 +23,9 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		readRoutes.GET("/resources/:resource/versions", h.ListVersions)
 		readRoutes.GET("/requests", h.ListRequests)
 		readRoutes.GET("/requests/:id", h.GetRequest)
+		readRoutes.GET("/events", h.ListEvents)
+		readRoutes.GET("/events/:id", h.GetEvent)
+		readRoutes.GET("/events/:id/verify", h.VerifyEvent)
 		readRoutes.POST("/requests", h.CreateRequest)
 	}
 
