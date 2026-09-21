@@ -29,6 +29,14 @@ incident. Kandidat legacy sebelum `RECOVERY_CUTOFF_AT` dikembalikan dengan:
 }
 ```
 
+Pengecualian berlaku untuk recovery berulang pada log yang sama. Jika log
+tersebut sudah memiliki `recovery_events.result_status = SUCCEEDED` dengan
+referensi snapshot sumber, anchor, dan Merkle root yang lengkap, incident tamper
+berikutnya tetap dapat menjalankan preflight. `db_timestamp` snapshot lama tidak
+boleh membuat log yang sudah pernah dipulihkan menjadi tidak dapat dipulihkan
+lagi. Preflight dan execute tetap memvalidasi ulang object version, checksum,
+hash, Merkle proof, dan anchor pada setiap percobaan.
+
 Preflight tidak mengubah PostgreSQL. Status `VALID` berarti exact object
 version, ciphertext checksum, AES-GCM, snapshot hash, Merkle proof, dan anchor
 Fabric semuanya cocok serta row PostgreSQL saat ini berbeda dari snapshot.

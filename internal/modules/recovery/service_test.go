@@ -54,6 +54,59 @@ func TestServiceRecoveryCutoffKeepsLegacyOutOfScope(t *testing.T) {
 	}
 }
 
+func TestRecoveryEventTrustedLineageAllowsRepeatRecovery(t *testing.T) {
+	event := &models.RecoveryEvent{
+		ResultStatus:             models.RecoveryResultSucceeded,
+		SourceSnapshotObjectKey:  "production/log-1",
+		SourceSnapshotVersionID:  "version-1",
+		SourceSnapshotChecksum:   "checksum-1",
+		SourceSnapshotPlainHash:  "hash-1",
+		SourceAnchorID:           "anchor-1",
+		SourceExpectedMerkleRoot: "root-1",
+	}
+	if !recoveryEventHasTrustedLineage(event) {
+		t.Fatal("successful recovery event with complete source references must establish trusted lineage")
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*models.RecoveryEvent)
+		want   bool
+	}{
+		{
+			name: "failed event does not establish lineage",
+			mutate: func(value *models.RecoveryEvent) {
+				value.ResultStatus = models.RecoveryResultExecution
+			},
+			want: false,
+		},
+		{
+			name: "missing snapshot version does not establish lineage",
+			mutate: func(value *models.RecoveryEvent) {
+				value.SourceSnapshotVersionID = ""
+			},
+			want: false,
+		},
+		{
+			name: "missing anchor does not establish lineage",
+			mutate: func(value *models.RecoveryEvent) {
+				value.SourceAnchorID = ""
+			},
+			want: false,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			candidate := *event
+			testCase.mutate(&candidate)
+			if got := recoveryEventHasTrustedLineage(&candidate); got != testCase.want {
+				t.Fatalf("trusted lineage = %v, want %v", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestClientExecutableStatus(t *testing.T) {
 	for _, status := range []string{
 		models.RecoveryStatusPendingExecution,

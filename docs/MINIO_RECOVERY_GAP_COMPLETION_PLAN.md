@@ -69,6 +69,14 @@ tetap berada di PostgreSQL dan dapat diverifikasi terhadap Fabric, tetapi tidak
 ditawarkan sebagai kandidat recovery. Scanner terjadwal dan aggregator baru
 juga tidak memproses ulang baris legacy.
 
+Setelah sebuah log berhasil dipulihkan, recovery berikutnya untuk log yang sama
+tidak dianggap sebagai recovery legacy baru. `recovery_events` yang sukses dan
+memiliki referensi snapshot sumber, anchor, serta Merkle root membentuk trusted
+lineage. Incident tamper berikutnya boleh memakai lineage tersebut, dengan
+syarat seluruh validasi snapshot dan anchor tetap dijalankan ulang. Ini menjaga
+agar satu log dapat dipulihkan berulang kali tanpa menghapus batasan untuk log
+legacy yang belum pernah memiliki bukti snapshot terpercaya.
+
 Scanner mengambil log berstatus ANCHORED yang paling lama diperiksa. Status
 operasional disimpan pada audit_logs.integrity_status:
 

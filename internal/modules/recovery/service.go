@@ -103,9 +103,9 @@ func NewService(db *gorm.DB, store snapshotstore.SnapshotStore, cipher *snapshot
 	return &Service{db: db, store: store, cipher: cipher, fabric: fabric, snapshotBuilder: builder}
 }
 
-// SetRecoveryCutoff limits recovery operations to audit rows created after
-// the snapshot pipeline was enabled. Legacy rows remain visible to integrity
-// verification but cannot be selected for MinIO recovery.
+// SetRecoveryCutoff sets the default deployment boundary for recovery. Rows
+// before the boundary remain legacy unless a prior successful recovery has
+// already established a trusted snapshot lineage for the same log.
 func (s *Service) SetRecoveryCutoff(cutoff *time.Time) {
 	if cutoff == nil {
 		s.recoveryCutoff = nil
@@ -120,6 +120,54 @@ func (s *Service) inRecoveryScope(logRow *models.AuditLog) bool {
 		return false
 	}
 	return config.InRecoveryScope(logRow.DBTimestamp, s.recoveryCutoff)
+}
+
+// recoveryScopeAllowed keeps the deployment cutoff as the default boundary,
+// but lets a log continue through the recovery workflow after a successful
+// recovery has already established a trusted snapshot lineage for it.
+//
+// A recovery restores the audit row from the original snapshot, including its
+// original db_timestamp. If that timestamp is NULL or predates the current
+// deployment cutoff, a later tamper incident would otherwise become
+// permanently unrecoverable even though the gateway has already validated and
+// restored the exact same log once. The lineage exception does not skip any
+// cryptographic checks: ListCandidates and Preflight still require the
+// current row's verified snapshot references, and validateSnapshot is still
+// executed before a request is persisted and during execution.
+func (s *Service) recoveryScopeAllowed(ctx context.Context, clientID string, logRow *models.AuditLog) (bool, error) {
+	if s.inRecoveryScope(logRow) {
+		return true, nil
+	}
+	if s.db == nil || logRow == nil || strings.TrimSpace(clientID) == "" || strings.TrimSpace(logRow.LogID) == "" {
+		return false, nil
+	}
+
+	var events []models.RecoveryEvent
+	err := s.db.WithContext(ctx).
+		Where("client_id = ? AND target_log_id = ? AND result_status = ?", clientID, logRow.LogID, models.RecoveryResultSucceeded).
+		Order("executed_at DESC").
+		Find(&events).Error
+	if err != nil {
+		return false, err
+	}
+	for i := range events {
+		if recoveryEventHasTrustedLineage(&events[i]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func recoveryEventHasTrustedLineage(event *models.RecoveryEvent) bool {
+	if event == nil || event.ResultStatus != models.RecoveryResultSucceeded {
+		return false
+	}
+	return strings.TrimSpace(event.SourceSnapshotObjectKey) != "" &&
+		strings.TrimSpace(event.SourceSnapshotVersionID) != "" &&
+		strings.TrimSpace(event.SourceSnapshotChecksum) != "" &&
+		strings.TrimSpace(event.SourceSnapshotPlainHash) != "" &&
+		strings.TrimSpace(event.SourceAnchorID) != "" &&
+		strings.TrimSpace(event.SourceExpectedMerkleRoot) != ""
 }
 
 func (s *Service) ListIncidents(ctx context.Context, clientID string, filter IncidentFilter) ([]models.TamperIncident, error) {
@@ -227,7 +275,11 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 		SnapshotVerifiedAt:    logRow.SnapshotVerifiedAt,
 		Eligible:              logRow.SnapshotStatus == models.SnapshotStatusVerified && logRow.SnapshotObjectKey != "" && logRow.SnapshotVersionID != "" && logRow.SnapshotChecksum != "" && logRow.SnapshotPlaintextHash != "" && logRow.BlockchainTxID != nil && strings.TrimSpace(*logRow.BlockchainTxID) != "" && logRow.MerkleRoot != "",
 	}
-	if !s.inRecoveryScope(&logRow) {
+	scopeAllowed, err := s.recoveryScopeAllowed(ctx, clientID, &logRow)
+	if err != nil {
+		return nil, err
+	}
+	if !scopeAllowed {
 		candidate.Eligible = false
 		candidate.Reason = "legacy_recovery_out_of_scope"
 		return []CandidateView{candidate}, nil
@@ -266,7 +318,11 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", incident.LogID, clientID).First(&logRow).Error; err != nil {
 		return nil, errors.New("snapshot_not_found")
 	}
-	if !s.inRecoveryScope(&logRow) {
+	scopeAllowed, err := s.recoveryScopeAllowed(ctx, clientID, &logRow)
+	if err != nil {
+		return nil, err
+	}
+	if !scopeAllowed {
 		return nil, errors.New("legacy_recovery_out_of_scope")
 	}
 	if logRow.SnapshotStatus != models.SnapshotStatusVerified {
@@ -355,7 +411,11 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		}
 		return nil, err
 	}
-	if !s.inRecoveryScope(&selected) {
+	scopeAllowed, err := s.recoveryScopeAllowed(ctx, clientID, &selected)
+	if err != nil {
+		return nil, err
+	}
+	if !scopeAllowed {
 		return nil, errors.New("legacy_recovery_out_of_scope")
 	}
 	if selected.SnapshotObjectKey == "" || selected.SnapshotVersionID == "" {
