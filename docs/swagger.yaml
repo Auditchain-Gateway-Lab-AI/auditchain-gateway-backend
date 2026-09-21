@@ -1,4 +1,3 @@
-basePath: /api
 definitions:
   auth.AuthRequest:
     properties:
@@ -13,7 +12,108 @@ definitions:
     - password
     - username
     type: object
-host: localhost:3000
+  auth.ProfileUpdateRequest:
+    properties:
+      current_password:
+        type: string
+      full_name:
+        type: string
+      new_password:
+        type: string
+      username:
+        minLength: 4
+        type: string
+    required:
+    - username
+    type: object
+  auth.RegisterRequest:
+    properties:
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      password:
+        example: rahasia1234
+        minLength: 6
+        type: string
+      username:
+        example: auditor_senior
+        type: string
+    required:
+    - client_id
+    - password
+    - username
+    type: object
+  client.CreateClientRequest:
+    properties:
+      action_field:
+        example: operasi
+        type: string
+      actor_field:
+        example: app_user
+        type: string
+      company_name:
+        example: PT Karya Bangsa
+        type: string
+      create_actor_field:
+        example: created_by
+        type: string
+      delete_actor_field:
+        example: deleted_by
+        type: string
+      fallback_actor_field:
+        example: db_user
+        type: string
+      resource_field:
+        example: tabel
+        type: string
+      status:
+        example: active
+        type: string
+      update_actor_field:
+        example: updated_by
+        type: string
+    required:
+    - company_name
+    type: object
+  models.Client:
+    properties:
+      action_field:
+        type: string
+      actor_field:
+        description: |-
+          Konfigurasi Mapping Field Dinamis
+          Digunakan untuk memetakan field kustom klien ke field standar Gateway.
+          Contoh untuk klien yang menggunakan auditchain-agent (payload dari audit_trail):
+            ActorField           = "app_user"
+            FallbackActorField   = "db_user"   ← baru: fallback jika app_user null
+            ActionField          = "operasi"
+            ResourceField        = "tabel"
+        type: string
+      api_key_prefix:
+        description: Keamanan API Key
+        type: string
+      company_name:
+        type: string
+      create_actor_field:
+        type: string
+      created_at:
+        type: string
+      delete_actor_field:
+        type: string
+      fallback_actor_field:
+        type: string
+      id:
+        type: string
+      resource_field:
+        type: string
+      status:
+        description: Konfigurasi SaaS
+        type: string
+      update_actor_field:
+        type: string
+      updated_at:
+        type: string
+    type: object
 info:
   contact:
     email: support@auditchain.local
@@ -28,7 +128,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Mengotentikasi user dan mengembalikan JWT Token untuk akses Dashboard
+      description: Autentikasi pengguna dan mendapatkan token JWT untuk akses API.
       parameters:
       - description: Kredensial Login
         in: body
@@ -40,7 +140,190 @@ paths:
       - application/json
       responses:
         "200":
-          description: Berhasil Login
+          description: Login berhasil dan mengembalikan token
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format request tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Username atau Password salah!
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Akun dinonaktifkan karena client tidak aktif
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal mencetak token keamanan
+          schema:
+            additionalProperties: true
+            type: object
+      summary: User login
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      consumes:
+      - application/json
+      description: Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan
+        JWT).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data profil user
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Token tidak memiliki identitas user yang valid
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Profil user tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get user profile
+      tags:
+      - Auth
+    put:
+      consumes:
+      - application/json
+      description: Memperbarui informasi profil pengguna yang sedang login. Bisa juga
+        untuk mengubah password.
+      parameters:
+      - description: Data Profil Baru
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.ProfileUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Profil berhasil diperbarui dan mengembalikan token baru jika
+            password diubah
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Validasi input gagal (misal username terlalu pendek)
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Token tidak valid atau Password saat ini tidak sesuai
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Username sudah digunakan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal memperbarui profil
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Mendaftarkan pengguna baru (auditor/admin) ke dalam perusahaan
+        (client) tertentu.
+      parameters:
+      - description: Data Pendaftaran
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Pengguna berhasil didaftarkan
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format tidak valid atau client_id belum diisi
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Perusahaan (Client ID) tidak terdaftar di sistem
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Username sudah digunakan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal memproses pendaftaran
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Register a new user
+      tags:
+      - Auth
+  /client:
+    get:
+      description: Mengambil daftar semua klien/perusahaan yang terdaftar.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar klien
+          schema:
+            items:
+              $ref: '#/definitions/models.Client'
+            type: array
+        "500":
+          description: Gagal mengambil daftar klien
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List all clients
+      tags:
+      - Client
+    post:
+      consumes:
+      - application/json
+      description: Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.
+      parameters:
+      - description: Data Klien
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/client.CreateClientRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Klien berhasil didaftarkan
           schema:
             additionalProperties: true
             type: object
@@ -49,73 +332,197 @@ paths:
           schema:
             additionalProperties: true
             type: object
-        "401":
-          description: Username/Password salah
+        "500":
+          description: Gagal mendaftarkan klien
           schema:
             additionalProperties: true
             type: object
-      summary: Login Auditor
+      security:
+      - BearerAuth: []
+      summary: Create a new client (SaaS tenant)
       tags:
-      - Authentication
-  /auth/register:
-    post:
-      consumes:
-      - application/json
-      description: Mendaftarkan pengguna baru. Secara otomatis akan diberikan role
-        "Auditor" oleh sistem.
-      parameters:
-      - description: Kredensial Pengguna Baru
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/auth.AuthRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Akun berhasil dibuat
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 'Format input tidak valid (misal: password kurang dari 6 karakter)'
-          schema:
-            additionalProperties: true
-            type: object
-        "409":
-          description: Username sudah terdaftar di database
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Pendaftaran Akun
-      tags:
-      - Authentication
-  /dashboard/verify/{hash}:
+      - Client
+  /client/{id}:
     get:
-      description: Melakukan re-hashing data lokal dan memverifikasi Merkle Root langsung
-        ke jaringan Hyperledger Fabric.
+      description: Mengambil detail informasi klien beserta konfigurasi agent dan
+        kafka-nya.
       parameters:
-      - description: Nilai Hash dari Log yang ingin diverifikasi
+      - description: Client ID
         in: path
-        name: hash
+        name: id
         required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: ✅ Data Valid dan Otentik
+          description: Detail klien
           schema:
             additionalProperties: true
             type: object
-        "202":
-          description: ⏳ Data Pending di Antrean
+        "400":
+          description: ID klien kosong
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Klien tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal mengambil data klien
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get client detail
+      tags:
+      - Client
+  /dashboard/inventory:
+    get:
+      description: Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar resource inventory
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal memuat daftar data
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get resource inventory
+      tags:
+      - Audit
+  /dashboard/logs:
+    get:
+      description: Mengambil daftar log terbaru dengan dukungan paginasi dan filter.
+      parameters:
+      - description: 'Nomor Halaman (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Ukuran Halaman (default: 10)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter Status Integritas (valid, tampered, unreachable)
+        in: query
+        name: integrity_status
+        type: string
+      - description: Urutan (asc, desc)
+        in: query
+        name: sort_order
+        type: string
+      - description: Filter Tabel Sumber
+        in: query
+        name: source_table
+        type: string
+      - description: Filter Database Engine
+        in: query
+        name: db_engine
+        type: string
+      - description: Waktu Mulai (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Waktu Selesai (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar log beserta data paginasi
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Parameter tidak valid
           schema:
             additionalProperties: true
             type: object
         "401":
-          description: Akses ditolak
+          description: Identitas client tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal mengambil log terbaru
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get recent audit logs
+      tags:
+      - Audit
+  /dashboard/stats:
+    get:
+      description: Mengambil statistik ringkasan dashboard seperti jumlah log dan
+        status integritas.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Statistik dashboard
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Gagal mengambil statistik
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get dashboard statistics
+      tags:
+      - Audit
+  /dashboard/verify/{log_id}:
+    get:
+      description: Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
+      parameters:
+      - description: ID Log
+        in: path
+        name: log_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verifikasi sukses dan log valid
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: Verifikasi pending/dalam proses
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Identitas client tidak valid
           schema:
             additionalProperties: true
             type: object
@@ -125,20 +532,20 @@ paths:
             additionalProperties: true
             type: object
         "409":
-          description: "\U0001F6A8 Data Termanipulasi (DB atau Blockchain Mismatch)"
+          description: Verifikasi gagal/tampered pada suatu layer
           schema:
             additionalProperties: true
             type: object
         "500":
-          description: Kesalahan koneksi ke Blockchain
+          description: Kesalahan sistem saat verifikasi
           schema:
             additionalProperties: true
             type: object
       security:
       - BearerAuth: []
-      summary: Verifikasi Integritas Log (Merkle Proof)
+      summary: Verify a specific log
       tags:
-      - Audit & Dashboard
+      - Audit
 securityDefinitions:
   BearerAuth:
     description: 'Masukkan token dengan format: Bearer {token}'

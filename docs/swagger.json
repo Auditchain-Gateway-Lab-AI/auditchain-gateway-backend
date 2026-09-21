@@ -10,12 +10,10 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:3000",
-    "basePath": "/api",
     "paths": {
         "/auth/login": {
             "post": {
-                "description": "Mengotentikasi user dan mengembalikan JWT Token untuk akses Dashboard",
+                "description": "Autentikasi pengguna dan mendapatkan token JWT untuk akses API.",
                 "consumes": [
                     "application/json"
                 ],
@@ -23,9 +21,9 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Authentication"
+                    "Auth"
                 ],
-                "summary": "Login Auditor",
+                "summary": "User login",
                 "parameters": [
                     {
                         "description": "Kredensial Login",
@@ -39,7 +37,280 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Berhasil Login",
+                        "description": "Login berhasil dan mengembalikan token",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Format request tidak valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Username atau Password salah!",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Akun dinonaktifkan karena client tidak aktif",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mencetak token keamanan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Get user profile",
+                "responses": {
+                    "200": {
+                        "description": "Data profil user",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Token tidak memiliki identitas user yang valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Profil user tidak ditemukan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Update user profile",
+                "parameters": [
+                    {
+                        "description": "Data Profil Baru",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Profil berhasil diperbarui dan mengembalikan token baru jika password diubah",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Validasi input gagal (misal username terlalu pendek)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Token tidak valid atau Password saat ini tidak sesuai",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Username sudah digunakan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memperbarui profil",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/register": {
+            "post": {
+                "description": "Mendaftarkan pengguna baru (auditor/admin) ke dalam perusahaan (client) tertentu.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Register a new user",
+                "parameters": [
+                    {
+                        "description": "Data Pendaftaran",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Pengguna berhasil didaftarkan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Format tidak valid atau client_id belum diisi",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Perusahaan (Client ID) tidak terdaftar di sistem",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Username sudah digunakan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memproses pendaftaran",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/client": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "List all clients",
+                "responses": {
+                    "200": {
+                        "description": "Daftar klien",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Client"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar klien",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Create a new client (SaaS tenant)",
+                "parameters": [
+                    {
+                        "description": "Data Klien",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/client.CreateClientRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Klien berhasil didaftarkan",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -52,8 +323,8 @@
                             "additionalProperties": true
                         }
                     },
-                    "401": {
-                        "description": "Username/Password salah",
+                    "500": {
+                        "description": "Gagal mendaftarkan klien",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -62,96 +333,283 @@
                 }
             }
         },
-        "/auth/register": {
-            "post": {
-                "description": "Mendaftarkan pengguna baru. Secara otomatis akan diberikan role \"Auditor\" oleh sistem.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Pendaftaran Akun",
-                "parameters": [
-                    {
-                        "description": "Kredensial Pengguna Baru",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/auth.AuthRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Akun berhasil dibuat",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Format input tidak valid (misal: password kurang dari 6 karakter)",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "409": {
-                        "description": "Username sudah terdaftar di database",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/dashboard/verify/{hash}": {
+        "/client/{id}": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Melakukan re-hashing data lokal dan memverifikasi Merkle Root langsung ke jaringan Hyperledger Fabric.",
+                "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Audit \u0026 Dashboard"
+                    "Client"
                 ],
-                "summary": "Verifikasi Integritas Log (Merkle Proof)",
+                "summary": "Get client detail",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Nilai Hash dari Log yang ingin diverifikasi",
-                        "name": "hash",
+                        "description": "Client ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "✅ Data Valid dan Otentik",
+                        "description": "Detail klien",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
                         }
                     },
-                    "202": {
-                        "description": "⏳ Data Pending di Antrean",
+                    "400": {
+                        "description": "ID klien kosong",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Klien tidak ditemukan",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil data klien",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/inventory": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get resource inventory",
+                "responses": {
+                    "200": {
+                        "description": "Daftar resource inventory",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memuat daftar data",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/logs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get recent audit logs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Nomor Halaman (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Ukuran Halaman (default: 10)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Status Integritas (valid, tampered, unreachable)",
+                        "name": "integrity_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Urutan (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Tabel Sumber",
+                        "name": "source_table",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Database Engine",
+                        "name": "db_engine",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu Mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu Selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar log beserta data paginasi",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter tidak valid",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
                         }
                     },
                     "401": {
-                        "description": "Akses ditolak",
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil log terbaru",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil statistik ringkasan dashboard seperti jumlah log dan status integritas.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get dashboard statistics",
+                "responses": {
+                    "200": {
+                        "description": "Statistik dashboard",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil statistik",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/verify/{log_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Verify a specific log",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID Log",
+                        "name": "log_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Verifikasi sukses dan log valid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "Verifikasi pending/dalam proses",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -165,14 +623,14 @@
                         }
                     },
                     "409": {
-                        "description": "🚨 Data Termanipulasi (DB atau Blockchain Mismatch)",
+                        "description": "Verifikasi gagal/tampered pada suatu layer",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
                         }
                     },
                     "500": {
-                        "description": "Kesalahan koneksi ke Blockchain",
+                        "description": "Kesalahan sistem saat verifikasi",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -198,6 +656,141 @@
                 "username": {
                     "type": "string",
                     "example": "auditor_senior"
+                }
+            }
+        },
+        "auth.ProfileUpdateRequest": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "current_password": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "minLength": 4
+                }
+            }
+        },
+        "auth.RegisterRequest": {
+            "type": "object",
+            "required": [
+                "client_id",
+                "password",
+                "username"
+            ],
+            "properties": {
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6,
+                    "example": "rahasia1234"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "auditor_senior"
+                }
+            }
+        },
+        "client.CreateClientRequest": {
+            "type": "object",
+            "required": [
+                "company_name"
+            ],
+            "properties": {
+                "action_field": {
+                    "type": "string",
+                    "example": "operasi"
+                },
+                "actor_field": {
+                    "type": "string",
+                    "example": "app_user"
+                },
+                "company_name": {
+                    "type": "string",
+                    "example": "PT Karya Bangsa"
+                },
+                "create_actor_field": {
+                    "type": "string",
+                    "example": "created_by"
+                },
+                "delete_actor_field": {
+                    "type": "string",
+                    "example": "deleted_by"
+                },
+                "fallback_actor_field": {
+                    "type": "string",
+                    "example": "db_user"
+                },
+                "resource_field": {
+                    "type": "string",
+                    "example": "tabel"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "update_actor_field": {
+                    "type": "string",
+                    "example": "updated_by"
+                }
+            }
+        },
+        "models.Client": {
+            "type": "object",
+            "properties": {
+                "action_field": {
+                    "type": "string"
+                },
+                "actor_field": {
+                    "description": "Konfigurasi Mapping Field Dinamis\nDigunakan untuk memetakan field kustom klien ke field standar Gateway.\nContoh untuk klien yang menggunakan auditchain-agent (payload dari audit_trail):\n  ActorField           = \"app_user\"\n  FallbackActorField   = \"db_user\"   ← baru: fallback jika app_user null\n  ActionField          = \"operasi\"\n  ResourceField        = \"tabel\"",
+                    "type": "string"
+                },
+                "api_key_prefix": {
+                    "description": "Keamanan API Key",
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "create_actor_field": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "delete_actor_field": {
+                    "type": "string"
+                },
+                "fallback_actor_field": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "resource_field": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Konfigurasi SaaS",
+                    "type": "string"
+                },
+                "update_actor_field": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         }

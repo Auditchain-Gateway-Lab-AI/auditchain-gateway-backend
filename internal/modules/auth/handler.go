@@ -28,6 +28,18 @@ type ProfileUpdateRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+// @Summary Register a new user
+// @Description Mendaftarkan pengguna baru (auditor/admin) ke dalam perusahaan (client) tertentu.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body RegisterRequest true "Data Pendaftaran"
+// @Success 201 {object} map[string]interface{} "Pengguna berhasil didaftarkan"
+// @Failure 400 {object} map[string]interface{} "Format tidak valid atau client_id belum diisi"
+// @Failure 404 {object} map[string]interface{} "Perusahaan (Client ID) tidak terdaftar di sistem"
+// @Failure 409 {object} map[string]interface{} "Username sudah digunakan"
+// @Failure 500 {object} map[string]interface{} "Gagal memproses pendaftaran"
+// @Router /auth/register [post]
 func (h *Handler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -59,6 +71,18 @@ func (h *Handler) Register(c *gin.Context) {
 	})
 }
 
+// @Summary User login
+// @Description Autentikasi pengguna dan mendapatkan token JWT untuk akses API.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body AuthRequest true "Kredensial Login"
+// @Success 200 {object} map[string]interface{} "Login berhasil dan mengembalikan token"
+// @Failure 400 {object} map[string]interface{} "Format request tidak valid"
+// @Failure 401 {object} map[string]interface{} "Username atau Password salah!"
+// @Failure 403 {object} map[string]interface{} "Akun dinonaktifkan karena client tidak aktif"
+// @Failure 500 {object} map[string]interface{} "Gagal mencetak token keamanan"
+// @Router /auth/login [post]
 func (h *Handler) Login(c *gin.Context) {
 	var req AuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -85,6 +109,16 @@ func (h *Handler) Login(c *gin.Context) {
 	})
 }
 
+// @Summary Get user profile
+// @Description Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{} "Data profil user"
+// @Failure 401 {object} map[string]interface{} "Token tidak memiliki identitas user yang valid"
+// @Failure 404 {object} map[string]interface{} "Profil user tidak ditemukan"
+// @Router /auth/me [get]
 func (h *Handler) GetProfile(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {
@@ -115,6 +149,19 @@ func (h *Handler) GetProfile(c *gin.Context) {
 	})
 }
 
+// @Summary Update user profile
+// @Description Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body ProfileUpdateRequest true "Data Profil Baru"
+// @Success 200 {object} map[string]interface{} "Profil berhasil diperbarui dan mengembalikan token baru jika password diubah"
+// @Failure 400 {object} map[string]interface{} "Validasi input gagal (misal username terlalu pendek)"
+// @Failure 401 {object} map[string]interface{} "Token tidak valid atau Password saat ini tidak sesuai"
+// @Failure 409 {object} map[string]interface{} "Username sudah digunakan"
+// @Failure 500 {object} map[string]interface{} "Gagal memperbarui profil"
+// @Router /auth/me [put]
 func (h *Handler) UpdateProfile(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {

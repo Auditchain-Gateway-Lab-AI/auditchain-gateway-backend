@@ -133,6 +133,17 @@ func (h *Handler) ToggleKafkaConfig(c *gin.Context) {
 	})
 }
 
+// @Summary Create a new client (SaaS tenant)
+// @Description Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.
+// @Tags Client
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateClientRequest true "Data Klien"
+// @Success 201 {object} map[string]interface{} "Klien berhasil didaftarkan"
+// @Failure 400 {object} map[string]interface{} "Format tidak valid"
+// @Failure 500 {object} map[string]interface{} "Gagal mendaftarkan klien"
+// @Router /client [post]
 func (h *Handler) CreateClient(c *gin.Context) {
 	var req CreateClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -195,6 +206,14 @@ func (h *Handler) DeleteKafkaConfig(c *gin.Context) {
 	})
 }
 
+// @Summary List all clients
+// @Description Mengambil daftar semua klien/perusahaan yang terdaftar.
+// @Tags Client
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} models.Client "Daftar klien"
+// @Failure 500 {object} map[string]interface{} "Gagal mengambil daftar klien"
+// @Router /client [get]
 func (h *Handler) ListClients(c *gin.Context) {
 	clients, err := h.Service.GetClients()
 	if err != nil {
@@ -638,6 +657,17 @@ func (h *Handler) UpdateActorConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Konfigurasi actor berhasil diperbarui", "client": client})
 }
 
+// @Summary Get client detail
+// @Description Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.
+// @Tags Client
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Client ID"
+// @Success 200 {object} map[string]interface{} "Detail klien"
+// @Failure 400 {object} map[string]interface{} "ID klien kosong"
+// @Failure 404 {object} map[string]interface{} "Klien tidak ditemukan"
+// @Failure 500 {object} map[string]interface{} "Gagal mengambil data klien"
+// @Router /client/{id} [get]
 func (h *Handler) GetClientDetail(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
