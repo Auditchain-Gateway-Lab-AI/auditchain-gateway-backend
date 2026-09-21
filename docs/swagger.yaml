@@ -12,6 +12,37 @@ definitions:
     - password
     - username
     type: object
+  auth.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  auth.LoginResponse:
+    properties:
+      message:
+        type: string
+      token:
+        type: string
+    type: object
+  auth.ProfileResponseData:
+    properties:
+      client_id:
+        type: string
+      company_name:
+        type: string
+      created_at:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      role:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
   auth.ProfileUpdateRequest:
     properties:
       current_password:
@@ -42,6 +73,33 @@ definitions:
     - client_id
     - password
     - username
+    type: object
+  auth.RegisterResponse:
+    properties:
+      message:
+        type: string
+      user:
+        $ref: '#/definitions/auth.UserResponseData'
+    type: object
+  auth.UpdateProfileResponse:
+    properties:
+      message:
+        type: string
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/auth.ProfileResponseData'
+    type: object
+  auth.UserResponseData:
+    properties:
+      client_id:
+        type: string
+      id:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
     type: object
   client.CreateClientRequest:
     properties:
@@ -142,28 +200,23 @@ paths:
         "200":
           description: Login berhasil dan mengembalikan token
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.LoginResponse'
         "400":
           description: Format request tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "401":
           description: Username atau Password salah!
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "403":
           description: Akun dinonaktifkan karena client tidak aktif
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "500":
           description: Gagal mencetak token keamanan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
       summary: User login
       tags:
       - Auth
@@ -179,18 +232,15 @@ paths:
         "200":
           description: Data profil user
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ProfileResponseData'
         "401":
           description: Token tidak memiliki identitas user yang valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "404":
           description: Profil user tidak ditemukan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get user profile
@@ -215,28 +265,23 @@ paths:
           description: Profil berhasil diperbarui dan mengembalikan token baru jika
             password diubah
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.UpdateProfileResponse'
         "400":
           description: Validasi input gagal (misal username terlalu pendek)
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "401":
           description: Token tidak valid atau Password saat ini tidak sesuai
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "409":
           description: Username sudah digunakan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "500":
           description: Gagal memperbarui profil
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Update user profile
@@ -261,28 +306,23 @@ paths:
         "201":
           description: Pengguna berhasil didaftarkan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.RegisterResponse'
         "400":
           description: Format tidak valid atau client_id belum diisi
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "404":
           description: Perusahaan (Client ID) tidak terdaftar di sistem
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "409":
           description: Username sudah digunakan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "500":
           description: Gagal memproses pendaftaran
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
       summary: Register a new user
       tags:
       - Auth
