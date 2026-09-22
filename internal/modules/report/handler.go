@@ -155,7 +155,7 @@ func (h *Handler) GenerateReport(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal generate laporan " + strings.ToUpper(req.Format) + "."})
 		return
 	}
-	
+
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	c.Data(http.StatusOK, contentType, data)
 }

@@ -61,7 +61,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(gofmt -l .)"
+          formatted_files="$(gofmt -l .)"
+          if [[ -n "$formatted_files" ]]; then
+            echo "The following Go files are not gofmt-formatted:"
+            printf '%s\n' "$formatted_files"
+            exit 1
+          fi
 
       - name: Vet backend
         run: go vet -p 1 ./...

@@ -29,7 +29,7 @@ func (s *reportService) GenerateCSVReport(clientID string, fromTime, toTime time
 	// Fetch all logs for the given client and time range
 	// We'll use a large page size to fetch all or paginate through them.
 	// For simplicity in Phase 1, we assume pulling up to 10000 records is fine.
-	
+
 	result, err := s.auditSvc.GetRecentLogsPaginated(clientID, 1, 10000, "", "asc", "", "", &fromTime, &toTime)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func (s *reportService) GenerateCSVReport(clientID string, fromTime, toTime time
 	buf.WriteString("\xEF\xBB\xBF")
 
 	writer := csv.NewWriter(&buf)
-	
+
 	// Write Header
 	header := []string{"Timestamp", "Actor", "Action", "Resource", "Source Table", "Hash Value", "Status", "Blockchain TX ID"}
 	if err := writer.Write(header); err != nil {
@@ -53,7 +53,7 @@ func (s *reportService) GenerateCSVReport(clientID string, fromTime, toTime time
 		if item.BlockchainTxID != nil {
 			txID = *item.BlockchainTxID
 		}
-		
+
 		record := []string{
 			item.Timestamp.Format(time.RFC3339),
 			item.Actor,
@@ -108,12 +108,12 @@ func (s *reportService) GeneratePDFReport(clientID string, fromTime, toTime time
 	pdf.SetFont("Arial", "B", 16)
 	pdf.Cell(40, 10, "Auditchain Gateway - Audit Integrity Report")
 	pdf.Ln(10)
-	
+
 	pdf.SetFont("Arial", "", 10)
 	periodStr := fmt.Sprintf("Period: %s to %s", fromTime.Format("2006-01-02 15:04"), toTime.Format("2006-01-02 15:04"))
 	pdf.Cell(40, 10, periodStr)
 	pdf.Ln(6)
-	
+
 	genStr := fmt.Sprintf("Generated At: %s", time.Now().Format("2006-01-02 15:04:05"))
 	pdf.Cell(40, 10, genStr)
 	pdf.Ln(15)
@@ -122,7 +122,7 @@ func (s *reportService) GeneratePDFReport(clientID string, fromTime, toTime time
 	pdf.SetFont("Arial", "B", 12)
 	pdf.Cell(40, 10, "Summary")
 	pdf.Ln(8)
-	
+
 	pdf.SetFont("Arial", "", 10)
 	pdf.Cell(40, 6, fmt.Sprintf("Total Logs (Shown): %d", totalLogs))
 	pdf.Ln(6)
@@ -137,7 +137,7 @@ func (s *reportService) GeneratePDFReport(clientID string, fromTime, toTime time
 	pdf.SetFont("Arial", "B", 9)
 	colW := []float64{35, 25, 25, 45, 20, 40}
 	headers := []string{"Timestamp", "Actor", "Action", "Resource", "Status", "TX ID"}
-	
+
 	for i, h := range headers {
 		pdf.CellFormat(colW[i], 7, h, "1", 0, "C", false, 0, "")
 	}
@@ -192,4 +192,3 @@ func (s *reportService) GeneratePDFReport(clientID string, fromTime, toTime time
 
 	return buf.Bytes(), nil
 }
-
