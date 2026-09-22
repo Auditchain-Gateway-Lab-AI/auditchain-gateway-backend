@@ -94,6 +94,12 @@ services:
       - "peer0.org2.audit.example.com:100.126.175.124"
       - "peer0.org3.audit.example.com:100.103.85.7"
       - "orderer.audit.example.com:100.125.142.44"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - gateway-net
       - fabric-net

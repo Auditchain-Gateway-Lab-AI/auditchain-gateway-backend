@@ -314,6 +314,7 @@ func main() {
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
 	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)
+	api.RegisterHealthRoutes(router, db)
 
 	port := os.Getenv("PORT")
 	if port == "" {
