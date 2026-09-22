@@ -114,7 +114,9 @@ jobs:
         shell: bash
         env:
           BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
-          BACKEND_ENV_FILE: ${{ runner.temp }}/auditchain-backend-env-${{ github.run_id }}
+          # Keep the source as a basename. drone-scp archives the source path;
+          # using an absolute runner path would recreate that path below /tmp.
+          BACKEND_ENV_FILE: auditchain-backend-env-${{ github.run_id }}
         run: |
           set -euo pipefail
           : "${BACKEND_ENV:?BACKEND_ENV environment secret is required}"
@@ -137,6 +139,10 @@ jobs:
           : "${SSH_USERNAME:?PRODUCTION_SSH_USERNAME is required}"
           : "${SSH_KEY:?PRODUCTION_SSH_PRIVATE_KEY is required}"
           : "${SSH_FINGERPRINT:?PRODUCTION_SSH_HOST_FINGERPRINT is required}"
+          if [[ "$PROJECT_DIR" != /* ]]; then
+            echo "BACKEND_PROJECT_DIR must be an absolute Linux path (for example /home/besu/auditchain/middleware-AuditChain-Gateway)." >&2
+            exit 1
+          fi
 
       - name: Join Tailscale network when configured
         if: ${{ vars.PRODUCTION_NETWORK == 'tailscale' }}
@@ -154,7 +160,7 @@ jobs:
           key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
           fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
-          source: ${{ runner.temp }}/auditchain-backend-env-${{ github.run_id }}
+          source: auditchain-backend-env-${{ github.run_id }}
           target: /tmp
 
       - name: Deploy main commit over SSH
@@ -176,8 +182,16 @@ jobs:
             : "${PROJECT_DIR:?BACKEND_PROJECT_DIR is required}"
             : "${BACKEND_ENV_FILE:?remote environment file path is required}"
             : "${EXPECTED_SHA:?expected SHA is required}"
-            test -d "$PROJECT_DIR/.git"
-            test -s "$BACKEND_ENV_FILE"
+            if [ ! -d "$PROJECT_DIR/.git" ]; then
+              echo "Deployment checkout not found at: $PROJECT_DIR" >&2
+              exit 1
+            fi
+            if [ ! -s "$BACKEND_ENV_FILE" ]; then
+              echo "Uploaded environment file is missing or empty: $BACKEND_ENV_FILE" >&2
+              echo "Matching files currently present in /tmp:" >&2
+              ls -la /tmp/auditchain-backend-env-* 2>/dev/null || true
+              exit 1
+            fi
             chmod 600 "$BACKEND_ENV_FILE"
             cd "$PROJECT_DIR"
             DEPLOY_MODE=development \
@@ -203,6 +217,11 @@ jobs:
           script: |
             set -eu
             rm -f -- "$BACKEND_ENV_FILE"
+
+      - name: Remove temporary local environment file
+        if: always()
+        shell: bash
+        run: rm -f -- "auditchain-backend-env-${{ github.run_id }}"
 
       - name: Write deployment summary
         if: always()
