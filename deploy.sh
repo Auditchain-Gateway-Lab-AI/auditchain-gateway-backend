@@ -77,7 +77,7 @@ if command -v flock >/dev/null 2>&1; then
 		exit 1
 	fi
 else
-	echo "Deploy failed: flock is required to protect the production deployment." >&2
+	echo "Deploy failed: flock is required to protect the deployment." >&2
 	exit 1
 fi
 
@@ -190,9 +190,6 @@ validate_environment_file() {
 			if ((key == "APP_ENV" || key == "PORT" || key == "DB_DSN" || key == "JWT_SECRET") && value ~ /^[[:space:]]*$/) {
 				exit 1
 			}
-			if (key == "APP_ENV" && value != "production") {
-				exit 1
-			}
 		}
 	' "$env_file"; then
 		echo "Deploy failed: backend environment is malformed, contains duplicate keys, or has an empty mandatory value." >&2
@@ -205,10 +202,14 @@ validate_environment_file() {
 			return 1
 		fi
 	done
+	if [[ "$DEPLOY_MODE" == "production" ]] && ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?APP_ENV=production$" "$env_file"; then
+		echo "Deploy failed: production backend environment must set APP_ENV=production." >&2
+		return 1
+	fi
 }
 
 sync_environment() {
-	if [[ "$DEPLOY_MODE" != "production" ]]; then
+	if [[ -z "$BACKEND_ENV_FILE" ]]; then
 		return 0
 	fi
 
@@ -248,11 +249,9 @@ trap on_exit EXIT
 
 echo "Deploying $SERVICE from branch $BRANCH in $DEPLOY_MODE mode."
 
-if [[ "$DEPLOY_MODE" == "production" ]]; then
-	if ! command -v curl >/dev/null 2>&1; then
-		echo "Deploy failed: curl is required for deployment health checks." >&2
-		exit 1
-	fi
+if ! command -v curl >/dev/null 2>&1; then
+	echo "Deploy failed: curl is required for deployment health checks." >&2
+	exit 1
 fi
 
 git fetch origin "$BRANCH"
@@ -276,35 +275,38 @@ if [[ -n "$EXPECTED_SHA" && "$DEPLOYED_SHA" != "$EXPECTED_SHA" ]]; then
 fi
 echo "Deploying commit $DEPLOYED_SHA."
 
-if [[ "$DEPLOY_MODE" != "production" ]]; then
-	compose up -d --build "$SERVICE"
-	compose ps "$SERVICE"
-	echo "Development deploy complete for commit $DEPLOYED_SHA."
-	exit 0
-fi
-
-sync_environment
-compose config --quiet
-for state_container in auditchain-postgres auditchain-minio; do
-	state="$(docker inspect --format '{{.State.Status}}' "$state_container" 2>/dev/null || true)"
-	if [[ "$state" != "running" ]]; then
-		echo "Deploy failed: required stateful container $state_container is not running." >&2
-		exit 1
-	fi
-done
-api_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)"
-if [[ "$api_state" != "running" ]]; then
-	echo "Deploy failed: current API container $CONTAINER_NAME is not running; automatic rollback baseline is unavailable." >&2
-	exit 1
+if [[ -n "$BACKEND_ENV_FILE" ]]; then
+	sync_environment
+	compose config --quiet
 fi
 
 OLD_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)"
 OLD_IMAGE_REF="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)"
 
+if [[ "$DEPLOY_MODE" == "production" ]]; then
+	for state_container in auditchain-postgres auditchain-minio; do
+		state="$(docker inspect --format '{{.State.Status}}' "$state_container" 2>/dev/null || true)"
+		if [[ "$state" != "running" ]]; then
+			echo "Deploy failed: required stateful container $state_container is not running." >&2
+			exit 1
+		fi
+	done
+	api_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+	if [[ "$api_state" != "running" ]]; then
+		echo "Deploy failed: current API container $CONTAINER_NAME is not running; automatic rollback baseline is unavailable." >&2
+		exit 1
+	fi
+fi
+
 compose build "$SERVICE"
 NEW_CONTAINER_STARTED=true
-compose up -d --no-deps --no-build --force-recreate "$SERVICE"
-wait_for_health "deployment"
+if [[ "$DEPLOY_MODE" == "production" ]]; then
+	compose up -d --no-deps --no-build --force-recreate "$SERVICE"
+	wait_for_health "deployment"
+else
+	compose up -d --no-build --force-recreate "$SERVICE"
+	wait_for_health "development deployment"
+fi
 
 compose ps "$SERVICE"
-echo "Deploy complete for commit $DEPLOYED_SHA."
+echo "Deploy complete for commit $DEPLOYED_SHA in $DEPLOY_MODE mode."

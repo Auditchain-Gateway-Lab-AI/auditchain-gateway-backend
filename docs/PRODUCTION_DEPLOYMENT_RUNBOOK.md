@@ -1,5 +1,11 @@
 # Runbook Deployment Production AuditChain
 
+> **Status:** server Besu yang saat ini menjadi target adalah **development**.
+> Workflow aktifnya adalah **Deploy Backend Development** dan panduan utamanya
+> berada di [Development Deployment Runbook](DEVELOPMENT_DEPLOYMENT_RUNBOOK.md).
+> Dokumen ini dipertahankan sebagai referensi hardening/cutover production di
+> masa depan; jangan menjalankannya untuk server development saat ini.
+
 Runbook ini adalah panduan operasional untuk workflow
 `.github/workflows/deploy-production.yml`. Jalur normal memakai tombol **Run
 workflow**; operator tidak perlu menjalankan `git pull` atau Docker Compose

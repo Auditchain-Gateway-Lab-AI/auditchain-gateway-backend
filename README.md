@@ -178,17 +178,18 @@ Jika `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`, `SNAPSHOT_WRITER_ENABLED` dan konfigur
 Recovery MVP memulihkan audit log target yang rusak dari snapshot MinIO yang dipilih.
 Pemulihan langsung ke database operasional klien (write-back lintas event, misalnya memilih V1 untuk menggantikan V3) tetap memerlukan Agent adapter terotorisasi dan menjadi fase lanjutan.
 
-### Deployment production melalui GitHub Actions
+### Deployment development melalui GitHub Actions
 
-Merge ke `main` tidak langsung merestart server. Setelah merge, buka **Actions**
-dan jalankan workflow **Deploy Backend Production** secara manual dari branch
-`main`. Workflow menjalankan test/build, mengirim satu secret multiline
-`BACKEND_ENV` secara sementara, menjalankan `deploy.sh` melalui SSH, membangun
-ulang hanya `api-gateway`, lalu menunggu health/readiness atau melakukan
-rollback otomatis.
+Merge ke `main` tidak langsung merestart server development. Setelah merge, buka
+**Actions** dan jalankan workflow **Deploy Backend Development** secara manual
+dari branch `main`. Workflow menjalankan test/build, mengirim satu secret
+multiline `BACKEND_ENV` secara sementara, menjalankan `deploy.sh` melalui SSH,
+membangun ulang `api-gateway`, lalu menunggu health/readiness. Dengan demikian
+tidak perlu lagi menjalankan `git pull` dan `docker compose up --build -d` secara
+manual di server.
 
 Detail secret, prasyarat server, verifikasi, dan troubleshooting tersedia pada
-[Production Deployment Runbook](docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md) serta
+[Development Deployment Runbook](docs/DEVELOPMENT_DEPLOYMENT_RUNBOOK.md) serta
 [Implementation Plan GitHub Actions](docs/GITHUB_ACTIONS_MANUAL_DEPLOYMENT_PLAN.md).
 
 ---
