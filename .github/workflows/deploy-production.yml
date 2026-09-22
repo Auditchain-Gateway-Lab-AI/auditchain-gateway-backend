@@ -1,0 +1,213 @@
+name: Deploy Backend Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: "Confirm deployment to the production Besu server"
+        required: true
+        default: false
+        type: boolean
+      deployment_reason:
+        description: "Short reason for this deployment"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Validate production trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require main and explicit confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Production deployment is only allowed from main (got $GITHUB_REF)." >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.confirm_production }}" != "true" ]]; then
+            echo "Production deployment requires explicit confirmation." >&2
+            exit 1
+          fi
+
+  validate:
+    name: Validate backend
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout selected main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
+
+      - name: Vet backend
+        run: go vet -p 1 ./...
+
+      - name: Test backend
+        run: go test -p 1 ./... -count=1 -timeout=120s
+
+      - name: Build backend
+        run: go build -p 1 ./...
+
+      - name: Validate Docker Compose definition
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'rm -f .env' EXIT
+          : > .env
+          if docker compose version >/dev/null 2>&1; then
+            docker compose config --quiet
+          elif docker-compose version >/dev/null 2>&1; then
+            docker-compose config --quiet
+          else
+            echo "Docker Compose is not available on the validation runner." >&2
+            exit 1
+          fi
+
+      - name: Validate deployment scripts
+        shell: bash
+        run: bash -n deploy.sh
+
+  deploy:
+    name: Deploy to Besu production server
+    needs: [guard, validate]
+    if: ${{ needs.guard.result == 'success' && needs.validate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+    env:
+      PROJECT_DIR: ${{ secrets.BACKEND_PROJECT_DIR }}
+      BACKEND_ENV_REMOTE_FILE: /tmp/auditchain-backend-env-${{ github.run_id }}
+      EXPECTED_SHA: ${{ github.sha }}
+
+    steps:
+      - name: Prepare application environment file
+        shell: bash
+        env:
+          BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+          BACKEND_ENV_FILE: ${{ runner.temp }}/auditchain-backend-env-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          : "${BACKEND_ENV:?BACKEND_ENV environment secret is required}"
+          umask 077
+          printf '%s\n' "$BACKEND_ENV" > "$BACKEND_ENV_FILE"
+          test -s "$BACKEND_ENV_FILE"
+
+      - name: Validate production transport settings
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_FINGERPRINT: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          : "${PROJECT_DIR:?BACKEND_PROJECT_DIR is required}"
+          : "${SSH_HOST:?PRODUCTION_SSH_HOST is required}"
+          : "${SSH_USERNAME:?PRODUCTION_SSH_USERNAME is required}"
+          : "${SSH_KEY:?PRODUCTION_SSH_PRIVATE_KEY is required}"
+          : "${SSH_FINGERPRINT:?PRODUCTION_SSH_HOST_FINGERPRINT is required}"
+
+      - name: Join Tailscale network when configured
+        if: ${{ vars.PRODUCTION_NETWORK == 'tailscale' }}
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:github-actions-deploy
+
+      - name: Upload environment file to production server
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          source: ${{ runner.temp }}/auditchain-backend-env-${{ github.run_id }}
+          target: /tmp
+
+      - name: Deploy main commit over SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PROJECT_DIR: ${{ env.PROJECT_DIR }}
+          BACKEND_ENV_FILE: ${{ env.BACKEND_ENV_REMOTE_FILE }}
+          EXPECTED_SHA: ${{ env.EXPECTED_SHA }}
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          envs: PROJECT_DIR,BACKEND_ENV_FILE,EXPECTED_SHA
+          command_timeout: 25m
+          script: |
+            set -eu
+            : "${PROJECT_DIR:?BACKEND_PROJECT_DIR is required}"
+            : "${BACKEND_ENV_FILE:?remote environment file path is required}"
+            : "${EXPECTED_SHA:?expected SHA is required}"
+            test -d "$PROJECT_DIR/.git"
+            test -s "$BACKEND_ENV_FILE"
+            chmod 600 "$BACKEND_ENV_FILE"
+            cd "$PROJECT_DIR"
+            DEPLOY_MODE=production \
+            DEPLOY_BRANCH=main \
+            DEPLOY_SERVICE=api-gateway \
+            EXPECTED_SHA="$EXPECTED_SHA" \
+            BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+            bash "$PROJECT_DIR/deploy.sh"
+
+      - name: Remove temporary remote environment file
+        if: always()
+        uses: appleboy/ssh-action@v1.2.5
+        continue-on-error: true
+        env:
+          BACKEND_ENV_FILE: ${{ env.BACKEND_ENV_REMOTE_FILE }}
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          envs: BACKEND_ENV_FILE
+          script: |
+            set -eu
+            rm -f -- "$BACKEND_ENV_FILE"
+
+      - name: Write deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Production deployment"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- Environment: production"
+            echo "- Application env: synchronized from protected BACKEND_ENV secret"
+          } >> "$GITHUB_STEP_SUMMARY"
