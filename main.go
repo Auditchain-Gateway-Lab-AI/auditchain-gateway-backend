@@ -165,7 +165,7 @@ func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, e
 	}, nil
 }
 
-func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time) {
+func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time, recoveryService *recovery.Service) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff}
 	kafkaEngine := &kafkaconsumer.Engine{DB: db, SnapshotBuilder: snapshotBuilder}
@@ -196,6 +196,11 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 					}
 					if err := fabricSvc.AnchorPendingRecoveryRoots(); err != nil {
 						log.Printf("❌ [RecoveryAnchoring] Error: %v\n", err)
+					}
+					if recoveryService != nil {
+						if err := recoveryService.VerifyReadyEvents(ctx, 100); err != nil {
+							log.Printf("⚠️ [RecoveryVerification] Event auto-verification selesai dengan status non-valid: %v\n", err)
+						}
 					}
 				}
 			}
@@ -272,7 +277,14 @@ func main() {
 		log.Fatal("❌ TAMPER_SCANNER_ENABLED=true membutuhkan koneksi Fabric yang valid")
 	}
 
-	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff)
+	var recoverySnapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
+	if snapshotCipher != nil {
+		recoverySnapshotBuilder = snapshotstore.RecoveryEventSnapshotOutboxBuilder{Cipher: snapshotCipher}
+	}
+	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, recoverySnapshotBuilder)
+	recoveryService.SetRecoveryCutoff(recoveryCutoff)
+
+	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService)
 
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, db)
@@ -305,12 +317,6 @@ func main() {
 
 	reportService := report.NewService(auditService)
 	reportHandler := report.NewHandler(reportService)
-	var recoverySnapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
-	if snapshotCipher != nil {
-		recoverySnapshotBuilder = snapshotstore.RecoveryEventSnapshotOutboxBuilder{Cipher: snapshotCipher}
-	}
-	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, recoverySnapshotBuilder)
-	recoveryService.SetRecoveryCutoff(recoveryCutoff)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
 	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)

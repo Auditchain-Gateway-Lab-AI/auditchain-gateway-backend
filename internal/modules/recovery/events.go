@@ -258,6 +258,43 @@ func (s *Service) VerifyEvent(ctx context.Context, clientID, eventID string) (ma
 	return s.updateEventIntegrity(ctx, &event, models.IntegrityStatusValid, "", true)
 }
 
+// VerifyReadyEvents menjalankan verifikasi recovery event secara otomatis
+// setelah snapshot event sudah tersimpan dan root-nya sudah di-anchor. Dengan
+// begitu VerifyEvent tetap tersedia sebagai endpoint diagnostik, tetapi user
+// tidak perlu melakukan verifikasi kedua secara manual setelah recovery.
+func (s *Service) VerifyReadyEvents(ctx context.Context, limit int) error {
+	if s.db == nil {
+		return errors.New("recovery_database_unavailable")
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+
+	var events []models.RecoveryEvent
+	if err := s.db.WithContext(ctx).
+		Where("snapshot_status = ? AND pipeline_status = ? AND integrity_status IN ?", models.SnapshotStatusVerified, models.RecoveryPipelineAnchored, []string{
+			models.IntegrityStatusNotChecked,
+			models.IntegrityStatusPending,
+		}).
+		Where("snapshot_object_key <> '' AND snapshot_version_id <> '' AND merkle_root <> ''").
+		Order("executed_at ASC").
+		Limit(limit).
+		Find(&events).Error; err != nil {
+		return err
+	}
+
+	var firstError error
+	for i := range events {
+		if _, err := s.VerifyEvent(ctx, events[i].ClientID, events[i].ID); err != nil && firstError == nil {
+			// VerifyEvent already persists the concrete integrity status. Keep
+			// processing the other events in this batch even when one event is
+			// tampered or temporarily unreachable.
+			firstError = err
+		}
+	}
+	return firstError
+}
+
 func recoveryEventFromSnapshot(snapshot snapshotstore.RecoveryEventSnapshot) models.RecoveryEvent {
 	return models.RecoveryEvent{
 		ID: snapshot.EventID, ClientID: snapshot.ClientID, RequestID: snapshot.RequestID,
