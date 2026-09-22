@@ -44,6 +44,66 @@ func (h *Handler) getClientID(c *gin.Context) (string, bool) {
 	return clientID, true
 }
 
+type ErrorResponse struct {
+	Error string `json:"error" example:"Pesan kesalahan atau validasi"`
+}
+
+type DashboardStatsResponse struct {
+	TotalLogs        int    `json:"total_logs" example:"1500"`
+	ValidLogs        int    `json:"valid_logs" example:"1450"`
+	TamperedLogs     int    `json:"tampered_logs" example:"3"`
+	UnreachableLogs  int    `json:"unreachable_logs" example:"10"`
+	PendingLogs      int    `json:"pending_logs" example:"37"`
+	TotalResources   int    `json:"total_resources" example:"45"`
+	IntegrityScore   string `json:"integrity_score" example:"99.79"`
+}
+
+type VerifyLogData struct {
+	LogID              string      `json:"log_id"`
+	IsValid            bool        `json:"is_valid"`
+	Message            string      `json:"message"`
+	ExpectedHash       string      `json:"expected_hash,omitempty"`
+	ActualHash         string      `json:"actual_hash,omitempty"`
+	DBRoot             string      `json:"merkle_root,omitempty"`
+	ChainRoot          string      `json:"blockchain_tx_id,omitempty"`
+	AgentStatus        string      `json:"agent_status,omitempty"`
+	AgentDiscrepancies interface{} `json:"agent_discrepancies,omitempty"`
+}
+
+type VerifyLogResponse struct {
+	Status  string        `json:"status" example:"success"`
+	Layer   string        `json:"layer,omitempty" example:"4_blockchain"`
+	Data    VerifyLogData `json:"data,omitempty"`
+	LogID   string        `json:"log_id,omitempty"`
+	Message string        `json:"message,omitempty"`
+}
+
+type RecentLogsResponse struct {
+	Data       []interface{} `json:"data"` // Array of logs
+	Pagination struct {
+		Page       int `json:"page"`
+		PageSize   int `json:"page_size"`
+		TotalRows  int `json:"total_rows"`
+		TotalPages int `json:"total_pages"`
+	} `json:"pagination"`
+	Note string `json:"note,omitempty"`
+}
+
+type ResourceInventoryItem struct {
+	Resource    string `json:"resource" example:"orders"`
+	TotalLogs   int    `json:"total_logs" example:"500"`
+	LatestLogID string `json:"latest_log_id" example:"log-abc"`
+}
+
+// @Summary Get dashboard statistics
+// @Description Mengambil statistik ringkasan dashboard seperti jumlah log dan status integritas.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} DashboardStatsResponse "Statistik dashboard"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil statistik"
+// @Router /dashboard/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -57,6 +117,19 @@ func (h *Handler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// @Summary Verify a specific log
+// @Description Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param log_id path string true "ID Log"
+// @Success 200 {object} VerifyLogResponse "Verifikasi sukses dan log valid"
+// @Success 202 {object} VerifyLogResponse "Verifikasi pending/dalam proses"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Log tidak ditemukan"
+// @Failure 409 {object} VerifyLogResponse "Verifikasi gagal/tampered pada suatu layer"
+// @Failure 500 {object} ErrorResponse "Kesalahan sistem saat verifikasi"
+// @Router /dashboard/verify/{log_id} [get]
 func (h *Handler) VerifyLog(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -191,6 +264,24 @@ func (h *Handler) VerifyData(c *gin.Context) {
 // menggantikan array polos yang dipakai versi lama (limit hardcoded 500).
 // Frontend (src/App.js) perlu disesuaikan untuk membaca res.data.data alih-alih
 // res.data langsung — lihat catatan terpisah, belum diterapkan di sesi ini.
+// @Summary Get recent audit logs
+// @Description Mengambil daftar log terbaru dengan dukungan paginasi dan filter.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param page query int false "Nomor Halaman (default: 1)"
+// @Param page_size query int false "Ukuran Halaman (default: 10)"
+// @Param integrity_status query string false "Filter Status Integritas (valid, tampered, unreachable)"
+// @Param sort_order query string false "Urutan (asc, desc)"
+// @Param source_table query string false "Filter Tabel Sumber"
+// @Param db_engine query string false "Filter Database Engine"
+// @Param from query string false "Waktu Mulai (RFC3339)"
+// @Param to query string false "Waktu Selesai (RFC3339)"
+// @Success 200 {object} RecentLogsResponse "Daftar log beserta data paginasi"
+// @Failure 400 {object} ErrorResponse "Parameter tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil log terbaru"
+// @Router /dashboard/logs [get]
 func (h *Handler) GetRecentLogs(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -247,6 +338,15 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Get resource inventory
+// @Description Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {array} ResourceInventoryItem "Daftar resource inventory"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal memuat daftar data"
+// @Router /dashboard/inventory [get]
 func (h *Handler) GetResourceInventory(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {

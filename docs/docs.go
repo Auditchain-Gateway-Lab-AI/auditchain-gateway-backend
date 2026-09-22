@@ -21,7 +21,7 @@ const docTemplate = `{
     "paths": {
         "/auth/login": {
             "post": {
-                "description": "Mengotentikasi user dan mengembalikan JWT Token untuk akses Dashboard",
+                "description": "Autentikasi pengguna dan mendapatkan token JWT untuk akses API.",
                 "consumes": [
                     "application/json"
                 ],
@@ -29,9 +29,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Authentication"
+                    "Auth"
                 ],
-                "summary": "Login Auditor",
+                "summary": "User login",
                 "parameters": [
                     {
                         "description": "Kredensial Login",
@@ -45,32 +45,46 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Berhasil Login",
+                        "description": "Login berhasil dan mengembalikan token",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.LoginResponse"
                         }
                     },
                     "400": {
-                        "description": "Format tidak valid",
+                        "description": "Format request tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "Username/Password salah",
+                        "description": "Username atau Password salah!",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Akun dinonaktifkan karena client tidak aktif",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mencetak token keamanan",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/auth/register": {
-            "post": {
-                "description": "Mendaftarkan pengguna baru. Secara otomatis akan diberikan role \"Auditor\" oleh sistem.",
+        "/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
                 "consumes": [
                     "application/json"
                 ],
@@ -78,110 +92,1197 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "Authentication"
+                    "Auth"
                 ],
-                "summary": "Pendaftaran Akun",
+                "summary": "Get user profile",
+                "responses": {
+                    "200": {
+                        "description": "Data profil user",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ProfileResponseData"
+                        }
+                    },
+                    "401": {
+                        "description": "Token tidak memiliki identitas user yang valid",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Profil user tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Update user profile",
                 "parameters": [
                     {
-                        "description": "Kredensial Pengguna Baru",
+                        "description": "Data Profil Baru",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/auth.AuthRequest"
+                            "$ref": "#/definitions/auth.ProfileUpdateRequest"
                         }
                     }
                 ],
                 "responses": {
-                    "201": {
-                        "description": "Akun berhasil dibuat",
+                    "200": {
+                        "description": "Profil berhasil diperbarui dan mengembalikan token baru jika password diubah",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.UpdateProfileResponse"
                         }
                     },
                     "400": {
-                        "description": "Format input tidak valid (misal: password kurang dari 6 karakter)",
+                        "description": "Validasi input gagal (misal username terlalu pendek)",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Token tidak valid atau Password saat ini tidak sesuai",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     },
                     "409": {
-                        "description": "Username sudah terdaftar di database",
+                        "description": "Username sudah digunakan",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memperbarui profil",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/dashboard/verify/{hash}": {
+        "/auth/register": {
+            "post": {
+                "description": "Mendaftarkan pengguna baru (auditor/admin) ke dalam perusahaan (client) tertentu.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Register a new user",
+                "parameters": [
+                    {
+                        "description": "Data Pendaftaran",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Pengguna berhasil didaftarkan",
+                        "schema": {
+                            "$ref": "#/definitions/auth.RegisterResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Format tidak valid atau client_id belum diisi",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Perusahaan (Client ID) tidak terdaftar di sistem",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Username sudah digunakan",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memproses pendaftaran",
+                        "schema": {
+                            "$ref": "#/definitions/auth.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/client": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Melakukan re-hashing data lokal dan memverifikasi Merkle Root langsung ke jaringan Hyperledger Fabric.",
+                "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Audit \u0026 Dashboard"
+                    "Client"
                 ],
-                "summary": "Verifikasi Integritas Log (Merkle Proof)",
+                "summary": "List all clients",
+                "responses": {
+                    "200": {
+                        "description": "Daftar klien",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Client"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Create a new client (SaaS tenant)",
+                "parameters": [
+                    {
+                        "description": "Data Klien",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/client.CreateClientRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Klien berhasil didaftarkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.CreateClientResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Format tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mendaftarkan klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/client/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Get client detail",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Nilai Hash dari Log yang ingin diverifikasi",
-                        "name": "hash",
+                        "description": "Client ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "✅ Data Valid dan Otentik",
+                        "description": "Detail klien",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/client.ClientDetailResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "ID klien kosong",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Klien tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil data klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/inventory": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get resource inventory",
+                "responses": {
+                    "200": {
+                        "description": "Daftar resource inventory",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/audit.ResourceInventoryItem"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memuat daftar data",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/logs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get recent audit logs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Nomor Halaman (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Ukuran Halaman (default: 10)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Status Integritas (valid, tampered, unreachable)",
+                        "name": "integrity_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Urutan (asc, desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Tabel Sumber",
+                        "name": "source_table",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter Database Engine",
+                        "name": "db_engine",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu Mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu Selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar log beserta data paginasi",
+                        "schema": {
+                            "$ref": "#/definitions/audit.RecentLogsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil log terbaru",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil statistik ringkasan dashboard seperti jumlah log dan status integritas.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get dashboard statistics",
+                "responses": {
+                    "200": {
+                        "description": "Statistik dashboard",
+                        "schema": {
+                            "$ref": "#/definitions/audit.DashboardStatsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil statistik",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/verify/{log_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Verify a specific log",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID Log",
+                        "name": "log_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Verifikasi sukses dan log valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "202": {
-                        "description": "⏳ Data Pending di Antrean",
+                        "description": "Verifikasi pending/dalam proses",
+                        "schema": {
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Log tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Verifikasi gagal/tampered pada suatu layer",
+                        "schema": {
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Kesalahan sistem saat verifikasi",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ingestion": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menerima array of log dinamis dari sistem klien (Agent atau Kafka) untuk diproses dan diverifikasi ke blockchain.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Ingestion"
+                ],
+                "summary": "Receive batch logs",
+                "parameters": [
+                    {
+                        "description": "Array of Log Data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Log diterima dan sedang diproses",
+                        "schema": {
+                            "$ref": "#/definitions/ingestion.IngestionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Format JSON tidak valid atau array kosong",
+                        "schema": {
+                            "$ref": "#/definitions/ingestion.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Identitas klien tidak ditemukan atau gagal memproses konfigurasi",
+                        "schema": {
+                            "$ref": "#/definitions/ingestion.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/incidents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar semua insiden tamper berdasarkan client_id (opsional difilter dengan status).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List tamper incidents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter Status Insiden (OPEN, RESOLVED)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar Insiden Tamper",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.IncidentListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar tamper incident",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/incidents/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail sebuah insiden tamper berdasarkan ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Get tamper incident detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail Insiden Tamper",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.IncidentDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tamper incident tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil detail tamper incident",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/incidents/{id}/candidates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery pada insiden tertentu.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List candidate snapshots for recovery",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar kandidat snapshot",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
                         }
                     },
                     "401": {
-                        "description": "Akses ditolak",
+                        "description": "Identitas client tidak valid",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     },
                     "404": {
-                        "description": "Log tidak ditemukan",
+                        "description": "Insiden tidak ditemukan",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "409": {
-                        "description": "🚨 Data Termanipulasi (DB atau Blockchain Mismatch)",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     },
                     "500": {
-                        "description": "Kesalahan koneksi ke Blockchain",
+                        "description": "Gagal mengambil daftar kandidat",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/incidents/{id}/preflight": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan tidak ada konflik sebelum recovery.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Preflight check for recovery",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Hasil preflight check",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Konflik atau kondisi tidak valid untuk preflight",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal melakukan preflight",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/requests": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List recovery requests",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter Status Request",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Membuat permintaan baru untuk melakukan recovery data ke snapshot tertentu.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Create recovery request",
+                "parameters": [
+                    {
+                        "description": "Data Request Recovery",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/recovery.CreateRequestInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Recovery request berhasil dibuat",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Format request tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Konflik atau state tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal membuat recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/requests/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail sebuah permintaan (request) recovery berdasarkan ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Get recovery request detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Recovery request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil detail recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/requests/{id}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menyetujui sebuah permintaan recovery (untuk backward compatibility).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Approve recovery request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Request berhasil disetujui",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "State request tidak sesuai",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/requests/{id}/execute": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengeksekusi permintaan recovery yang telah disetujui atau siap dieksekusi, memulihkan data dari S3.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Execute recovery request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Eksekusi recovery dimulai/berhasil",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "State request tidak sesuai",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengeksekusi recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/requests/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menolak sebuah permintaan recovery.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Reject recovery request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Request berhasil ditolak",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "State request tidak sesuai",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/recovery/snapshots/{resource}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil histori versi snapshot dari sebuah resource (table).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List snapshot versions by resource",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Resource/Table Name",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Histori versi snapshot",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil histori snapshot recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/report/generate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/pdf",
+                    "text/csv"
+                ],
+                "tags": [
+                    "Report"
+                ],
+                "summary": "Generate audit report",
+                "parameters": [
+                    {
+                        "description": "Parameter laporan",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/report.GenerateReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File laporan PDF atau CSV",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Format request tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal generate laporan",
+                        "schema": {
+                            "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
                 }
@@ -189,6 +1290,147 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "audit.DashboardStatsResponse": {
+            "type": "object",
+            "properties": {
+                "integrity_score": {
+                    "type": "string",
+                    "example": "99.79"
+                },
+                "pending_logs": {
+                    "type": "integer",
+                    "example": 37
+                },
+                "tampered_logs": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 1500
+                },
+                "total_resources": {
+                    "type": "integer",
+                    "example": 45
+                },
+                "unreachable_logs": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "valid_logs": {
+                    "type": "integer",
+                    "example": 1450
+                }
+            }
+        },
+        "audit.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "audit.RecentLogsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Array of logs",
+                    "type": "array",
+                    "items": {}
+                },
+                "note": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "type": "object",
+                    "properties": {
+                        "page": {
+                            "type": "integer"
+                        },
+                        "page_size": {
+                            "type": "integer"
+                        },
+                        "total_pages": {
+                            "type": "integer"
+                        },
+                        "total_rows": {
+                            "type": "integer"
+                        }
+                    }
+                }
+            }
+        },
+        "audit.ResourceInventoryItem": {
+            "type": "object",
+            "properties": {
+                "latest_log_id": {
+                    "type": "string",
+                    "example": "log-abc"
+                },
+                "resource": {
+                    "type": "string",
+                    "example": "orders"
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 500
+                }
+            }
+        },
+        "audit.VerifyLogData": {
+            "type": "object",
+            "properties": {
+                "actual_hash": {
+                    "type": "string"
+                },
+                "agent_discrepancies": {},
+                "agent_status": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "is_valid": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.VerifyLogResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/audit.VerifyLogData"
+                },
+                "layer": {
+                    "type": "string",
+                    "example": "4_blockchain"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -206,6 +1448,644 @@ const docTemplate = `{
                     "example": "auditor_senior"
                 }
             }
+        },
+        "auth.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.LoginResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.ProfileResponseData": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.ProfileUpdateRequest": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "current_password": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "minLength": 4
+                }
+            }
+        },
+        "auth.RegisterRequest": {
+            "type": "object",
+            "required": [
+                "client_id",
+                "password",
+                "username"
+            ],
+            "properties": {
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6,
+                    "example": "rahasia1234"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "auditor_senior"
+                }
+            }
+        },
+        "auth.RegisterResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/auth.UserResponseData"
+                }
+            }
+        },
+        "auth.UpdateProfileResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/auth.ProfileResponseData"
+                }
+            }
+        },
+        "auth.UserResponseData": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "client.ClientDetailResponse": {
+            "type": "object",
+            "properties": {
+                "agent_config": {
+                    "$ref": "#/definitions/models.AgentConfig"
+                },
+                "client": {
+                    "$ref": "#/definitions/models.Client"
+                },
+                "kafka_config": {
+                    "$ref": "#/definitions/models.ClientKafkaConfig"
+                }
+            }
+        },
+        "client.CreateClientRequest": {
+            "type": "object",
+            "required": [
+                "company_name"
+            ],
+            "properties": {
+                "action_field": {
+                    "type": "string",
+                    "example": "operasi"
+                },
+                "actor_field": {
+                    "type": "string",
+                    "example": "app_user"
+                },
+                "company_name": {
+                    "type": "string",
+                    "example": "PT Karya Bangsa"
+                },
+                "create_actor_field": {
+                    "type": "string",
+                    "example": "created_by"
+                },
+                "delete_actor_field": {
+                    "type": "string",
+                    "example": "deleted_by"
+                },
+                "fallback_actor_field": {
+                    "type": "string",
+                    "example": "db_user"
+                },
+                "resource_field": {
+                    "type": "string",
+                    "example": "tabel"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "update_actor_field": {
+                    "type": "string",
+                    "example": "updated_by"
+                }
+            }
+        },
+        "client.CreateClientResponse": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "field_mapping": {
+                    "type": "object",
+                    "properties": {
+                        "action_field": {
+                            "type": "string"
+                        },
+                        "actor_field": {
+                            "type": "string"
+                        },
+                        "create_actor_field": {
+                            "type": "string"
+                        },
+                        "delete_actor_field": {
+                            "type": "string"
+                        },
+                        "fallback_actor_field": {
+                            "type": "string"
+                        },
+                        "resource_field": {
+                            "type": "string"
+                        },
+                        "update_actor_field": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Klien / Perusahaan SaaS berhasil didaftarkan"
+                }
+            }
+        },
+        "client.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "ingestion.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Format JSON tidak valid, harus berupa Array Objek"
+                }
+            }
+        },
+        "ingestion.IngestionResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "example": "Proses bulk ingestion selesai"
+                },
+                "total_failed": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "total_received": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "total_success": {
+                    "type": "integer",
+                    "example": 98
+                }
+            }
+        },
+        "models.AgentConfig": {
+            "type": "object",
+            "properties": {
+                "agent_url": {
+                    "description": "URL Agent yang dapat dihubungi dari jaringan Gateway.\nContoh: http://192.168.11.50:9090",
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "connector_status": {
+                    "description": "running, skipped, failed_xxx",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "db_engine": {
+                    "description": "Informasi Database Klien (auto-filled dari install.sh telemetry)",
+                    "type": "string"
+                },
+                "db_name": {
+                    "description": "Nama database yang diaudit",
+                    "type": "string"
+                },
+                "db_tables": {
+                    "description": "Daftar tabel yang dimonitor (comma-separated)",
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "tailscale_ip": {
+                    "description": "Field auto-filled oleh install.sh telemetry callback",
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "description": "Timeout dalam detik untuk request ke Agent (default: 5)",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_column_name": {
+                    "type": "string"
+                },
+                "user_sync_message": {
+                    "description": "detail warning/error sync user table",
+                    "type": "string"
+                },
+                "user_sync_status": {
+                    "description": "ok, failed, skipped",
+                    "type": "string"
+                },
+                "user_table_name": {
+                    "description": "Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)",
+                    "type": "string"
+                }
+            }
+        },
+        "models.Client": {
+            "type": "object",
+            "properties": {
+                "action_field": {
+                    "type": "string"
+                },
+                "actor_field": {
+                    "description": "Konfigurasi Mapping Field Dinamis\nDigunakan untuk memetakan field kustom klien ke field standar Gateway.\nContoh untuk klien yang menggunakan auditchain-agent (payload dari audit_trail):\n  ActorField           = \"app_user\"\n  FallbackActorField   = \"db_user\"   ← baru: fallback jika app_user null\n  ActionField          = \"operasi\"\n  ResourceField        = \"tabel\"",
+                    "type": "string"
+                },
+                "api_key_prefix": {
+                    "description": "Keamanan API Key",
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "create_actor_field": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "delete_actor_field": {
+                    "type": "string"
+                },
+                "fallback_actor_field": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "resource_field": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Konfigurasi SaaS",
+                    "type": "string"
+                },
+                "update_actor_field": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ClientKafkaConfig": {
+            "type": "object",
+            "properties": {
+                "actor_field": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "db_engine": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "kafka_brokers": {
+                    "type": "string"
+                },
+                "pk_field": {
+                    "type": "string"
+                },
+                "source_system": {
+                    "type": "string"
+                },
+                "topic_prefix": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.RecoveryRequest": {
+            "type": "object",
+            "properties": {
+                "after_hash": {
+                    "type": "string"
+                },
+                "anchor_id": {
+                    "type": "string"
+                },
+                "approved_at": {
+                    "type": "string"
+                },
+                "approved_by": {
+                    "type": "string"
+                },
+                "before_hash": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "executed_at": {
+                    "type": "string"
+                },
+                "executed_by": {
+                    "type": "string"
+                },
+                "expected_merkle_root": {
+                    "type": "string"
+                },
+                "failure_reason": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "type": "string"
+                },
+                "selected_log_id": {
+                    "type": "string"
+                },
+                "snapshot_checksum": {
+                    "description": "These frozen references are nullable at the database level so AutoMigrate\ncan be applied safely to installations that already contain legacy\nrecovery requests. New requests are rejected unless all values are set.",
+                    "type": "string"
+                },
+                "snapshot_object_key": {
+                    "type": "string"
+                },
+                "snapshot_plaintext_hash": {
+                    "type": "string"
+                },
+                "snapshot_version_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_log_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.TamperIncident": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "detected_hash": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_type": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "recovery.CreateRequestInput": {
+            "type": "object",
+            "required": [
+                "idempotency_key",
+                "incident_id",
+                "reason",
+                "selected_log_id"
+            ],
+            "properties": {
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string",
+                    "minLength": 5
+                },
+                "selected_log_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "recovery.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan"
+                }
+            }
+        },
+        "recovery.IncidentDetailResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.TamperIncident"
+                }
+            }
+        },
+        "recovery.IncidentListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TamperIncident"
+                    }
+                }
+            }
+        },
+        "recovery.RequestDetailResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.RecoveryRequest"
+                }
+            }
+        },
+        "recovery.RequestListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.RecoveryRequest"
+                    }
+                }
+            }
+        },
+        "report.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan"
+                }
+            }
+        },
+        "report.GenerateReportRequest": {
+            "type": "object",
+            "required": [
+                "format",
+                "period_from",
+                "period_to"
+            ],
+            "properties": {
+                "format": {
+                    "type": "string"
+                },
+                "period_from": {
+                    "type": "string"
+                },
+                "period_to": {
+                    "type": "string"
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
         }
     },
     "securityDefinitions": {
@@ -221,8 +2101,8 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:3000",
-	BasePath:         "/api",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
 	Title:            "AuditChain Gateway API",
 	Description:      "API Enterprise untuk sistem audit log berbasis Blockchain dan Merkle Tree.",

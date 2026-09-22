@@ -1,5 +1,101 @@
-basePath: /api
 definitions:
+  audit.DashboardStatsResponse:
+    properties:
+      integrity_score:
+        example: "99.79"
+        type: string
+      pending_logs:
+        example: 37
+        type: integer
+      tampered_logs:
+        example: 3
+        type: integer
+      total_logs:
+        example: 1500
+        type: integer
+      total_resources:
+        example: 45
+        type: integer
+      unreachable_logs:
+        example: 10
+        type: integer
+      valid_logs:
+        example: 1450
+        type: integer
+    type: object
+  audit.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  audit.RecentLogsResponse:
+    properties:
+      data:
+        description: Array of logs
+        items: {}
+        type: array
+      note:
+        type: string
+      pagination:
+        properties:
+          page:
+            type: integer
+          page_size:
+            type: integer
+          total_pages:
+            type: integer
+          total_rows:
+            type: integer
+        type: object
+    type: object
+  audit.ResourceInventoryItem:
+    properties:
+      latest_log_id:
+        example: log-abc
+        type: string
+      resource:
+        example: orders
+        type: string
+      total_logs:
+        example: 500
+        type: integer
+    type: object
+  audit.VerifyLogData:
+    properties:
+      actual_hash:
+        type: string
+      agent_discrepancies: {}
+      agent_status:
+        type: string
+      blockchain_tx_id:
+        type: string
+      expected_hash:
+        type: string
+      is_valid:
+        type: boolean
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      message:
+        type: string
+    type: object
+  audit.VerifyLogResponse:
+    properties:
+      data:
+        $ref: '#/definitions/audit.VerifyLogData'
+      layer:
+        example: 4_blockchain
+        type: string
+      log_id:
+        type: string
+      message:
+        type: string
+      status:
+        example: success
+        type: string
+    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -13,7 +109,449 @@ definitions:
     - password
     - username
     type: object
-host: localhost:3000
+  auth.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  auth.LoginResponse:
+    properties:
+      message:
+        type: string
+      token:
+        type: string
+    type: object
+  auth.ProfileResponseData:
+    properties:
+      client_id:
+        type: string
+      company_name:
+        type: string
+      created_at:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      role:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+  auth.ProfileUpdateRequest:
+    properties:
+      current_password:
+        type: string
+      full_name:
+        type: string
+      new_password:
+        type: string
+      username:
+        minLength: 4
+        type: string
+    required:
+    - username
+    type: object
+  auth.RegisterRequest:
+    properties:
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      password:
+        example: rahasia1234
+        minLength: 6
+        type: string
+      username:
+        example: auditor_senior
+        type: string
+    required:
+    - client_id
+    - password
+    - username
+    type: object
+  auth.RegisterResponse:
+    properties:
+      message:
+        type: string
+      user:
+        $ref: '#/definitions/auth.UserResponseData'
+    type: object
+  auth.UpdateProfileResponse:
+    properties:
+      message:
+        type: string
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/auth.ProfileResponseData'
+    type: object
+  auth.UserResponseData:
+    properties:
+      client_id:
+        type: string
+      id:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    type: object
+  client.ClientDetailResponse:
+    properties:
+      agent_config:
+        $ref: '#/definitions/models.AgentConfig'
+      client:
+        $ref: '#/definitions/models.Client'
+      kafka_config:
+        $ref: '#/definitions/models.ClientKafkaConfig'
+    type: object
+  client.CreateClientRequest:
+    properties:
+      action_field:
+        example: operasi
+        type: string
+      actor_field:
+        example: app_user
+        type: string
+      company_name:
+        example: PT Karya Bangsa
+        type: string
+      create_actor_field:
+        example: created_by
+        type: string
+      delete_actor_field:
+        example: deleted_by
+        type: string
+      fallback_actor_field:
+        example: db_user
+        type: string
+      resource_field:
+        example: tabel
+        type: string
+      status:
+        example: active
+        type: string
+      update_actor_field:
+        example: updated_by
+        type: string
+    required:
+    - company_name
+    type: object
+  client.CreateClientResponse:
+    properties:
+      api_key:
+        type: string
+      client_id:
+        type: string
+      field_mapping:
+        properties:
+          action_field:
+            type: string
+          actor_field:
+            type: string
+          create_actor_field:
+            type: string
+          delete_actor_field:
+            type: string
+          fallback_actor_field:
+            type: string
+          resource_field:
+            type: string
+          update_actor_field:
+            type: string
+        type: object
+      message:
+        example: Klien / Perusahaan SaaS berhasil didaftarkan
+        type: string
+    type: object
+  client.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  ingestion.ErrorResponse:
+    properties:
+      error:
+        example: Format JSON tidak valid, harus berupa Array Objek
+        type: string
+    type: object
+  ingestion.IngestionResponse:
+    properties:
+      message:
+        example: Proses bulk ingestion selesai
+        type: string
+      total_failed:
+        example: 2
+        type: integer
+      total_received:
+        example: 100
+        type: integer
+      total_success:
+        example: 98
+        type: integer
+    type: object
+  models.AgentConfig:
+    properties:
+      agent_url:
+        description: |-
+          URL Agent yang dapat dihubungi dari jaringan Gateway.
+          Contoh: http://192.168.11.50:9090
+        type: string
+      client_id:
+        type: string
+      connector_status:
+        description: running, skipped, failed_xxx
+        type: string
+      created_at:
+        type: string
+      db_engine:
+        description: Informasi Database Klien (auto-filled dari install.sh telemetry)
+        type: string
+      db_name:
+        description: Nama database yang diaudit
+        type: string
+      db_tables:
+        description: Daftar tabel yang dimonitor (comma-separated)
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      tailscale_ip:
+        description: Field auto-filled oleh install.sh telemetry callback
+        type: string
+      timeout_seconds:
+        description: 'Timeout dalam detik untuk request ke Agent (default: 5)'
+        type: integer
+      updated_at:
+        type: string
+      user_column_name:
+        type: string
+      user_sync_message:
+        description: detail warning/error sync user table
+        type: string
+      user_sync_status:
+        description: ok, failed, skipped
+        type: string
+      user_table_name:
+        description: Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)
+        type: string
+    type: object
+  models.Client:
+    properties:
+      action_field:
+        type: string
+      actor_field:
+        description: |-
+          Konfigurasi Mapping Field Dinamis
+          Digunakan untuk memetakan field kustom klien ke field standar Gateway.
+          Contoh untuk klien yang menggunakan auditchain-agent (payload dari audit_trail):
+            ActorField           = "app_user"
+            FallbackActorField   = "db_user"   ← baru: fallback jika app_user null
+            ActionField          = "operasi"
+            ResourceField        = "tabel"
+        type: string
+      api_key_prefix:
+        description: Keamanan API Key
+        type: string
+      company_name:
+        type: string
+      create_actor_field:
+        type: string
+      created_at:
+        type: string
+      delete_actor_field:
+        type: string
+      fallback_actor_field:
+        type: string
+      id:
+        type: string
+      resource_field:
+        type: string
+      status:
+        description: Konfigurasi SaaS
+        type: string
+      update_actor_field:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.ClientKafkaConfig:
+    properties:
+      actor_field:
+        type: string
+      client_id:
+        type: string
+      created_at:
+        type: string
+      db_engine:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      kafka_brokers:
+        type: string
+      pk_field:
+        type: string
+      source_system:
+        type: string
+      topic_prefix:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.RecoveryRequest:
+    properties:
+      after_hash:
+        type: string
+      anchor_id:
+        type: string
+      approved_at:
+        type: string
+      approved_by:
+        type: string
+      before_hash:
+        type: string
+      client_id:
+        type: string
+      executed_at:
+        type: string
+      executed_by:
+        type: string
+      expected_merkle_root:
+        type: string
+      failure_reason:
+        type: string
+      id:
+        type: string
+      idempotency_key:
+        type: string
+      incident_id:
+        type: string
+      reason:
+        type: string
+      requested_at:
+        type: string
+      requested_by:
+        type: string
+      selected_log_id:
+        type: string
+      snapshot_checksum:
+        description: |-
+          These frozen references are nullable at the database level so AutoMigrate
+          can be applied safely to installations that already contain legacy
+          recovery requests. New requests are rejected unless all values are set.
+        type: string
+      snapshot_object_key:
+        type: string
+      snapshot_plaintext_hash:
+        type: string
+      snapshot_version_id:
+        type: string
+      status:
+        type: string
+      target_log_id:
+        type: string
+    type: object
+  models.TamperIncident:
+    properties:
+      client_id:
+        type: string
+      detected_at:
+        type: string
+      detected_hash:
+        type: string
+      expected_hash:
+        type: string
+      id:
+        type: string
+      incident_type:
+        type: string
+      log_id:
+        type: string
+      resolved_at:
+        type: string
+      resource:
+        type: string
+      status:
+        type: string
+    type: object
+  recovery.CreateRequestInput:
+    properties:
+      idempotency_key:
+        type: string
+      incident_id:
+        type: string
+      reason:
+        minLength: 5
+        type: string
+      selected_log_id:
+        type: string
+    required:
+    - idempotency_key
+    - incident_id
+    - reason
+    - selected_log_id
+    type: object
+  recovery.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan
+        type: string
+    type: object
+  recovery.IncidentDetailResponse:
+    properties:
+      data:
+        $ref: '#/definitions/models.TamperIncident'
+    type: object
+  recovery.IncidentListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/models.TamperIncident'
+        type: array
+    type: object
+  recovery.RequestDetailResponse:
+    properties:
+      data:
+        $ref: '#/definitions/models.RecoveryRequest'
+    type: object
+  recovery.RequestListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/models.RecoveryRequest'
+        type: array
+    type: object
+  report.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan
+        type: string
+    type: object
+  report.GenerateReportRequest:
+    properties:
+      format:
+        type: string
+      period_from:
+        type: string
+      period_to:
+        type: string
+      sections:
+        items:
+          type: string
+        type: array
+    required:
+    - format
+    - period_from
+    - period_to
+    type: object
 info:
   contact:
     email: support@auditchain.local
@@ -28,7 +566,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Mengotentikasi user dan mengembalikan JWT Token untuk akses Dashboard
+      description: Autentikasi pengguna dan mendapatkan token JWT untuk akses API.
       parameters:
       - description: Kredensial Login
         in: body
@@ -40,105 +578,812 @@ paths:
       - application/json
       responses:
         "200":
-          description: Berhasil Login
+          description: Login berhasil dan mengembalikan token
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.LoginResponse'
         "400":
-          description: Format tidak valid
+          description: Format request tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
         "401":
-          description: Username/Password salah
+          description: Username atau Password salah!
           schema:
-            additionalProperties: true
-            type: object
-      summary: Login Auditor
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Akun dinonaktifkan karena client tidak aktif
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Gagal mencetak token keamanan
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: User login
       tags:
-      - Authentication
-  /auth/register:
-    post:
+      - Auth
+  /auth/me:
+    get:
       consumes:
       - application/json
-      description: Mendaftarkan pengguna baru. Secara otomatis akan diberikan role
-        "Auditor" oleh sistem.
+      description: Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan
+        JWT).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data profil user
+          schema:
+            $ref: '#/definitions/auth.ProfileResponseData'
+        "401":
+          description: Token tidak memiliki identitas user yang valid
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "404":
+          description: Profil user tidak ditemukan
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get user profile
+      tags:
+      - Auth
+    put:
+      consumes:
+      - application/json
+      description: Memperbarui informasi profil pengguna yang sedang login. Bisa juga
+        untuk mengubah password.
       parameters:
-      - description: Kredensial Pengguna Baru
+      - description: Data Profil Baru
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/auth.AuthRequest'
+          $ref: '#/definitions/auth.ProfileUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Profil berhasil diperbarui dan mengembalikan token baru jika
+            password diubah
+          schema:
+            $ref: '#/definitions/auth.UpdateProfileResponse'
+        "400":
+          description: Validasi input gagal (misal username terlalu pendek)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Token tidak valid atau Password saat ini tidak sesuai
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "409":
+          description: Username sudah digunakan
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Gagal memperbarui profil
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Mendaftarkan pengguna baru (auditor/admin) ke dalam perusahaan
+        (client) tertentu.
+      parameters:
+      - description: Data Pendaftaran
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth.RegisterRequest'
       produces:
       - application/json
       responses:
         "201":
-          description: Akun berhasil dibuat
+          description: Pengguna berhasil didaftarkan
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.RegisterResponse'
         "400":
-          description: 'Format input tidak valid (misal: password kurang dari 6 karakter)'
+          description: Format tidak valid atau client_id belum diisi
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/auth.ErrorResponse'
+        "404":
+          description: Perusahaan (Client ID) tidak terdaftar di sistem
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
         "409":
-          description: Username sudah terdaftar di database
+          description: Username sudah digunakan
           schema:
-            additionalProperties: true
-            type: object
-      summary: Pendaftaran Akun
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Gagal memproses pendaftaran
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      summary: Register a new user
       tags:
-      - Authentication
-  /dashboard/verify/{hash}:
+      - Auth
+  /client:
     get:
-      description: Melakukan re-hashing data lokal dan memverifikasi Merkle Root langsung
-        ke jaringan Hyperledger Fabric.
+      description: Mengambil daftar semua klien/perusahaan yang terdaftar.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar klien
+          schema:
+            items:
+              $ref: '#/definitions/models.Client'
+            type: array
+        "500":
+          description: Gagal mengambil daftar klien
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List all clients
+      tags:
+      - Client
+    post:
+      consumes:
+      - application/json
+      description: Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.
       parameters:
-      - description: Nilai Hash dari Log yang ingin diverifikasi
+      - description: Data Klien
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/client.CreateClientRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Klien berhasil didaftarkan
+          schema:
+            $ref: '#/definitions/client.CreateClientResponse'
+        "400":
+          description: Format tidak valid
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "500":
+          description: Gagal mendaftarkan klien
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a new client (SaaS tenant)
+      tags:
+      - Client
+  /client/{id}:
+    get:
+      description: Mengambil detail informasi klien beserta konfigurasi agent dan
+        kafka-nya.
+      parameters:
+      - description: Client ID
         in: path
-        name: hash
+        name: id
         required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: ✅ Data Valid dan Otentik
+          description: Detail klien
           schema:
+            $ref: '#/definitions/client.ClientDetailResponse'
+        "400":
+          description: ID klien kosong
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "404":
+          description: Klien tidak ditemukan
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "500":
+          description: Gagal mengambil data klien
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get client detail
+      tags:
+      - Client
+  /dashboard/inventory:
+    get:
+      description: Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar resource inventory
+          schema:
+            items:
+              $ref: '#/definitions/audit.ResourceInventoryItem'
+            type: array
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "500":
+          description: Gagal memuat daftar data
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get resource inventory
+      tags:
+      - Audit
+  /dashboard/logs:
+    get:
+      description: Mengambil daftar log terbaru dengan dukungan paginasi dan filter.
+      parameters:
+      - description: 'Nomor Halaman (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Ukuran Halaman (default: 10)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter Status Integritas (valid, tampered, unreachable)
+        in: query
+        name: integrity_status
+        type: string
+      - description: Urutan (asc, desc)
+        in: query
+        name: sort_order
+        type: string
+      - description: Filter Tabel Sumber
+        in: query
+        name: source_table
+        type: string
+      - description: Filter Database Engine
+        in: query
+        name: db_engine
+        type: string
+      - description: Waktu Mulai (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Waktu Selesai (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar log beserta data paginasi
+          schema:
+            $ref: '#/definitions/audit.RecentLogsResponse'
+        "400":
+          description: Parameter tidak valid
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "500":
+          description: Gagal mengambil log terbaru
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get recent audit logs
+      tags:
+      - Audit
+  /dashboard/stats:
+    get:
+      description: Mengambil statistik ringkasan dashboard seperti jumlah log dan
+        status integritas.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Statistik dashboard
+          schema:
+            $ref: '#/definitions/audit.DashboardStatsResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "500":
+          description: Gagal mengambil statistik
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get dashboard statistics
+      tags:
+      - Audit
+  /dashboard/verify/{log_id}:
+    get:
+      description: Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
+      parameters:
+      - description: ID Log
+        in: path
+        name: log_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verifikasi sukses dan log valid
+          schema:
+            $ref: '#/definitions/audit.VerifyLogResponse'
+        "202":
+          description: Verifikasi pending/dalam proses
+          schema:
+            $ref: '#/definitions/audit.VerifyLogResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "404":
+          description: Log tidak ditemukan
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "409":
+          description: Verifikasi gagal/tampered pada suatu layer
+          schema:
+            $ref: '#/definitions/audit.VerifyLogResponse'
+        "500":
+          description: Kesalahan sistem saat verifikasi
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify a specific log
+      tags:
+      - Audit
+  /ingestion:
+    post:
+      consumes:
+      - application/json
+      description: Menerima array of log dinamis dari sistem klien (Agent atau Kafka)
+        untuk diproses dan diverifikasi ke blockchain.
+      parameters:
+      - description: Array of Log Data
+        in: body
+        name: request
+        required: true
+        schema:
+          items:
             additionalProperties: true
             type: object
+          type: array
+      produces:
+      - application/json
+      responses:
         "202":
-          description: ⏳ Data Pending di Antrean
+          description: Log diterima dan sedang diproses
+          schema:
+            $ref: '#/definitions/ingestion.IngestionResponse'
+        "400":
+          description: Format JSON tidak valid atau array kosong
+          schema:
+            $ref: '#/definitions/ingestion.ErrorResponse'
+        "500":
+          description: Identitas klien tidak ditemukan atau gagal memproses konfigurasi
+          schema:
+            $ref: '#/definitions/ingestion.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Receive batch logs
+      tags:
+      - Ingestion
+  /recovery/incidents:
+    get:
+      description: Mengambil daftar semua insiden tamper berdasarkan client_id (opsional
+        difilter dengan status).
+      parameters:
+      - description: Filter Status Insiden (OPEN, RESOLVED)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar Insiden Tamper
+          schema:
+            $ref: '#/definitions/recovery.IncidentListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar tamper incident
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List tamper incidents
+      tags:
+      - Recovery
+  /recovery/incidents/{id}:
+    get:
+      description: Mengambil detail sebuah insiden tamper berdasarkan ID.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Detail Insiden Tamper
+          schema:
+            $ref: '#/definitions/recovery.IncidentDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Tamper incident tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil detail tamper incident
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get tamper incident detail
+      tags:
+      - Recovery
+  /recovery/incidents/{id}/candidates:
+    get:
+      description: Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery
+        pada insiden tertentu.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar kandidat snapshot
           schema:
             additionalProperties: true
             type: object
         "401":
-          description: Akses ditolak
+          description: Identitas client tidak valid
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/recovery.ErrorResponse'
         "404":
-          description: Log tidak ditemukan
+          description: Insiden tidak ditemukan
           schema:
-            additionalProperties: true
-            type: object
-        "409":
-          description: "\U0001F6A8 Data Termanipulasi (DB atau Blockchain Mismatch)"
-          schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/recovery.ErrorResponse'
         "500":
-          description: Kesalahan koneksi ke Blockchain
+          description: Gagal mengambil daftar kandidat
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/recovery.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Verifikasi Integritas Log (Merkle Proof)
+      summary: List candidate snapshots for recovery
       tags:
-      - Audit & Dashboard
+      - Recovery
+  /recovery/incidents/{id}/preflight:
+    post:
+      description: Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan
+        tidak ada konflik sebelum recovery.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Hasil preflight check
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: Konflik atau kondisi tidak valid untuk preflight
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal melakukan preflight
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Preflight check for recovery
+      tags:
+      - Recovery
+  /recovery/requests:
+    get:
+      description: Mengambil daftar permintaan (request) recovery yang diajukan.
+      parameters:
+      - description: Filter Status Request
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar recovery request
+          schema:
+            $ref: '#/definitions/recovery.RequestListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar recovery request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List recovery requests
+      tags:
+      - Recovery
+    post:
+      consumes:
+      - application/json
+      description: Membuat permintaan baru untuk melakukan recovery data ke snapshot
+        tertentu.
+      parameters:
+      - description: Data Request Recovery
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/recovery.CreateRequestInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Recovery request berhasil dibuat
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "400":
+          description: Format request tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: Konflik atau state tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal membuat recovery request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create recovery request
+      tags:
+      - Recovery
+  /recovery/requests/{id}:
+    get:
+      description: Mengambil detail sebuah permintaan (request) recovery berdasarkan
+        ID.
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Detail recovery request
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Recovery request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil detail recovery request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get recovery request detail
+      tags:
+      - Recovery
+  /recovery/requests/{id}/approve:
+    post:
+      description: Menyetujui sebuah permintaan recovery (untuk backward compatibility).
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Request berhasil disetujui
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: State request tidak sesuai
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Approve recovery request
+      tags:
+      - Recovery
+  /recovery/requests/{id}/execute:
+    post:
+      description: Mengeksekusi permintaan recovery yang telah disetujui atau siap
+        dieksekusi, memulihkan data dari S3.
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Eksekusi recovery dimulai/berhasil
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: State request tidak sesuai
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengeksekusi recovery
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Execute recovery request
+      tags:
+      - Recovery
+  /recovery/requests/{id}/reject:
+    post:
+      description: Menolak sebuah permintaan recovery.
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Request berhasil ditolak
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: State request tidak sesuai
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reject recovery request
+      tags:
+      - Recovery
+  /recovery/snapshots/{resource}/versions:
+    get:
+      description: Mengambil histori versi snapshot dari sebuah resource (table).
+      parameters:
+      - description: Resource/Table Name
+        in: path
+        name: resource
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Histori versi snapshot
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil histori snapshot recovery
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List snapshot versions by resource
+      tags:
+      - Recovery
+  /report/generate:
+    post:
+      consumes:
+      - application/json
+      description: Men-generate laporan audit PDF atau CSV berdasarkan periode waktu
+        tertentu.
+      parameters:
+      - description: Parameter laporan
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/report.GenerateReportRequest'
+      produces:
+      - application/pdf
+      - text/csv
+      responses:
+        "200":
+          description: File laporan PDF atau CSV
+          schema:
+            type: file
+        "400":
+          description: Format request tidak valid
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+        "500":
+          description: Gagal generate laporan
+          schema:
+            $ref: '#/definitions/report.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate audit report
+      tags:
+      - Report
 securityDefinitions:
   BearerAuth:
     description: 'Masukkan token dengan format: Bearer {token}'
