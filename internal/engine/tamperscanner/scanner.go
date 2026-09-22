@@ -92,7 +92,10 @@ func (w *Worker) Run(ctx context.Context) {
 // signal for operational logging.
 func (w *Worker) Scan(ctx context.Context) error {
 	var logs []models.AuditLog
-	query := w.db.WithContext(ctx).Where("status = ?", "ANCHORED")
+	// Legacy RECOVERY rows may still exist in audit_logs for forensics, but
+	// they are no longer client-originated audit records and must not create
+	// normal tamper incidents. New recovery executions live in recovery_events.
+	query := w.db.WithContext(ctx).Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "ANCHORED")
 	if w.cfg.RecoveryCutoff != nil {
 		// Legacy history remains available for manual integrity checks, but
 		// the scheduled recovery scanner is scoped to snapshot-backed rows.

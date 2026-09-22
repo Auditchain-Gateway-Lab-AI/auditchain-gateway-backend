@@ -34,9 +34,19 @@ func ConnectDB() *gorm.DB {
 		&models.SnapshotOutbox{},
 		&models.TamperIncident{},
 		&models.RecoveryRequest{},
+		&models.RecoveryEvent{},
 	)
 	if err != nil {
 		log.Fatalf("Gagal migrasi database: %v", err)
+	}
+	// event_type was added after the first snapshot outbox deployment. Keep
+	// the additive migration safe for existing rows and make the legacy value
+	// explicit before the worker starts processing the queue.
+	if err := db.Exec("ALTER TABLE snapshot_outboxes ALTER COLUMN event_type SET DEFAULT 'STORE_AUDIT_SNAPSHOT'").Error; err != nil {
+		log.Fatalf("Gagal menyiapkan default snapshot outbox event type: %v", err)
+	}
+	if err := db.Exec("UPDATE snapshot_outboxes SET event_type = 'STORE_AUDIT_SNAPSHOT' WHERE event_type IS NULL OR event_type = ''").Error; err != nil {
+		log.Fatalf("Gagal menormalisasi event type snapshot outbox lama: %v", err)
 	}
 
 	// Satu log boleh memiliki banyak incident historis (misalnya setelah

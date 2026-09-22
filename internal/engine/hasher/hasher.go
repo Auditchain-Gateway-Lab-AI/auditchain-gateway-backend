@@ -64,7 +64,10 @@ func GenerateLogHash(auditLog *models.AuditLog) string {
 func (h *Engine) ProcessPendingLogs() error {
 	var pendingLogs []models.AuditLog
 
-	if err := h.DB.Where("status = ?", "RECEIVED").Order("timestamp asc").Find(&pendingLogs).Error; err != nil {
+	// RECOVERY rows written by older releases are forensic compatibility data,
+	// not client-originated audit events. Never hash or send them through the
+	// normal audit Merkle pipeline.
+	if err := h.DB.Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "RECEIVED").Order("timestamp asc").Find(&pendingLogs).Error; err != nil {
 		return err
 	}
 

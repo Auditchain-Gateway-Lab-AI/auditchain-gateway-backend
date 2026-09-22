@@ -34,13 +34,24 @@ const (
 	RecoveryStatusSucceeded          = "SUCCEEDED"
 	RecoveryStatusFailedVerification = "FAILED_VERIFICATION"
 	RecoveryStatusFailedExecution    = "FAILED_EXECUTION"
+
+	RecoveryEventTypeExecution = "RECOVERY_EXECUTION"
+	RecoveryResultSucceeded    = "SUCCEEDED"
+	RecoveryResultVerification = "FAILED_VERIFICATION"
+	RecoveryResultExecution    = "FAILED_EXECUTION"
+	RecoveryPipelineHashed     = "HASHED"
+	RecoveryPipelineAggregated = "AGGREGATED"
+	RecoveryPipelineAnchored   = "ANCHORED"
 )
 
 type SnapshotOutbox struct {
-	ID            string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	LogID         string     `gorm:"type:varchar(100);not null;uniqueIndex" json:"log_id"`
-	ClientID      string     `gorm:"type:varchar(36);not null;index" json:"client_id"`
-	EventType     string     `gorm:"type:varchar(50);not null" json:"event_type"`
+	ID       string `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	LogID    string `gorm:"type:varchar(100);not null;uniqueIndex" json:"log_id"`
+	ClientID string `gorm:"type:varchar(36);not null;index" json:"client_id"`
+	// Default keeps AutoMigrate safe for existing outbox rows created before
+	// event types were introduced. Empty/legacy rows are treated as audit
+	// snapshots by the worker during a rolling deployment.
+	EventType     string     `gorm:"type:varchar(50);not null;default:'STORE_AUDIT_SNAPSHOT'" json:"event_type"`
 	Payload       []byte     `gorm:"type:bytea;not null" json:"-"`
 	PayloadHash   string     `gorm:"type:varchar(64);not null" json:"payload_hash"`
 	Status        string     `gorm:"type:varchar(20);not null;index;default:'PENDING'" json:"status"`
@@ -94,4 +105,66 @@ type RecoveryRequest struct {
 	RequestedAt           time.Time  `gorm:"autoCreateTime;index" json:"requested_at"`
 	ApprovedAt            *time.Time `json:"approved_at,omitempty"`
 	ExecutedAt            *time.Time `json:"executed_at,omitempty"`
+	ExecutionStartedAt    *time.Time `json:"execution_started_at,omitempty"`
+	RecoveryEventID       string     `gorm:"type:varchar(36);uniqueIndex" json:"recovery_event_id,omitempty"`
+}
+
+// RecoveryEvent is the immutable, tenant-scoped evidence of one execution
+// attempt. It is deliberately separate from AuditLog: AuditLog contains
+// client-originated CDC events, while this model describes a Gateway recovery
+// operation and its independently anchored evidence.
+type RecoveryEvent struct {
+	ID            string `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	ClientID      string `gorm:"type:varchar(36);not null;index" json:"client_id"`
+	RequestID     string `gorm:"type:varchar(36);not null;uniqueIndex" json:"request_id"`
+	IncidentID    string `gorm:"type:varchar(36);not null;index" json:"incident_id"`
+	TargetLogID   string `gorm:"type:varchar(100);not null;index" json:"target_log_id"`
+	SelectedLogID string `gorm:"type:varchar(100);not null" json:"selected_log_id"`
+	EventType     string `gorm:"type:varchar(50);not null" json:"event_type"`
+	ResultStatus  string `gorm:"type:varchar(35);not null;index" json:"result_status"`
+
+	Resource             string     `gorm:"type:varchar(255);not null;index" json:"resource"`
+	TargetActor          string     `gorm:"type:varchar(100)" json:"target_actor"`
+	TargetAction         string     `gorm:"type:varchar(100)" json:"target_action"`
+	TargetTimestamp      *time.Time `json:"target_timestamp,omitempty"`
+	SourceSystem         string     `gorm:"column:source_system;type:varchar(100)" json:"source_system,omitempty"`
+	TargetSourceSystem   string     `gorm:"type:varchar(100)" json:"target_source_system"`
+	TargetAuthorization  string     `gorm:"type:text" json:"target_authorization_context"`
+	TargetSourceRecordID string     `gorm:"type:varchar(100)" json:"target_source_record_id"`
+	RecoveredMetadata    string     `gorm:"type:jsonb" json:"recovered_metadata"`
+	ExecutorSystem       string     `gorm:"type:varchar(100);not null" json:"executor_system"`
+	ExecutedBy           string     `gorm:"type:varchar(36);not null;index" json:"executed_by"`
+	Reason               string     `gorm:"type:text;not null" json:"reason"`
+	BeforeHash           string     `gorm:"type:varchar(64)" json:"before_hash"`
+	AfterHash            string     `gorm:"type:varchar(64)" json:"after_hash"`
+
+	SourceSnapshotObjectKey  string `gorm:"type:text" json:"source_snapshot_object_key"`
+	SourceSnapshotVersionID  string `gorm:"type:varchar(255)" json:"source_snapshot_version_id"`
+	SourceSnapshotChecksum   string `gorm:"type:varchar(64)" json:"source_snapshot_checksum"`
+	SourceSnapshotPlainHash  string `gorm:"type:varchar(64)" json:"source_snapshot_plaintext_hash"`
+	SourceAnchorID           string `gorm:"type:varchar(100)" json:"source_anchor_id"`
+	SourceExpectedMerkleRoot string `gorm:"type:varchar(64)" json:"source_expected_merkle_root"`
+
+	FailureCode   string    `gorm:"type:varchar(100)" json:"failure_code,omitempty"`
+	FailureReason string    `gorm:"type:text" json:"failure_reason,omitempty"`
+	EventHash     string    `gorm:"type:varchar(64);uniqueIndex" json:"event_hash"`
+	ExecutedAt    time.Time `gorm:"not null;index" json:"executed_at"`
+
+	PipelineStatus      string     `gorm:"type:varchar(20);not null;index;default:'HASHED'" json:"pipeline_status"`
+	MerkleRoot          string     `gorm:"type:varchar(64);index" json:"merkle_root"`
+	BlockchainTxID      *string    `gorm:"type:varchar(100)" json:"blockchain_tx_id"`
+	BlockchainTimestamp *time.Time `gorm:"index" json:"blockchain_timestamp,omitempty"`
+
+	SnapshotStatus        string     `gorm:"type:varchar(30);index;default:'PENDING'" json:"snapshot_status"`
+	SnapshotObjectKey     string     `gorm:"type:text" json:"snapshot_object_key"`
+	SnapshotVersionID     string     `gorm:"type:varchar(255)" json:"snapshot_version_id"`
+	SnapshotChecksum      string     `gorm:"type:varchar(64)" json:"snapshot_checksum"`
+	SnapshotPlaintextHash string     `gorm:"type:varchar(64)" json:"snapshot_plaintext_hash"`
+	SnapshotStoredAt      *time.Time `json:"snapshot_stored_at,omitempty"`
+	SnapshotVerifiedAt    *time.Time `json:"snapshot_verified_at,omitempty"`
+	SnapshotLastError     string     `gorm:"type:text" json:"snapshot_last_error,omitempty"`
+
+	IntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"integrity_status"`
+	IntegrityCheckedAt *time.Time `gorm:"index" json:"integrity_checked_at,omitempty"`
+	IntegrityError     string     `gorm:"type:text" json:"integrity_error,omitempty"`
 }

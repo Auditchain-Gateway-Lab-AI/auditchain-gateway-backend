@@ -119,8 +119,24 @@ func (w *Worker) processOne(ctx context.Context) error {
 		return err
 	}
 
+	// Rows created before event_type was introduced are audit snapshots. Keep
+	// them processable during a rolling deployment instead of dead-lettering
+	// them as an unknown type.
+	eventType := outbox.EventType
+	if eventType == "" {
+		eventType = snapshotstore.SnapshotEventType
+	}
 	key := BuildObjectKey(w.Environment, outbox.ClientID, outbox.CreatedAt, outbox.LogID, outbox.PayloadHash)
+	if eventType == snapshotstore.RecoveryEventSnapshotEventType {
+		key = BuildRecoveryEventObjectKey(w.Environment, outbox.ClientID, outbox.CreatedAt, outbox.LogID, outbox.PayloadHash)
+	}
+	recordType := "audit-log"
+	if eventType == snapshotstore.RecoveryEventSnapshotEventType {
+		recordType = "recovery-event"
+	}
 	metadata := map[string]string{
+		"record-id":      outbox.LogID,
+		"record-type":    recordType,
 		"log-id":         outbox.LogID,
 		"client-id":      outbox.ClientID,
 		"payload-hash":   outbox.PayloadHash,
@@ -213,7 +229,7 @@ func (w *Worker) putIdempotent(ctx context.Context, key string, payload []byte, 
 func (w *Worker) markSuccess(outbox *models.SnapshotOutbox, info snapshotstore.ObjectInfo) error {
 	now := w.now().UTC()
 	return w.DB.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.AuditLog{}).Where("log_id = ?", outbox.LogID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"snapshot_status":         models.SnapshotStatusVerified,
 			"snapshot_object_key":     info.Key,
 			"snapshot_version_id":     info.VersionID,
@@ -222,12 +238,20 @@ func (w *Worker) markSuccess(outbox *models.SnapshotOutbox, info snapshotstore.O
 			"snapshot_stored_at":      now,
 			"snapshot_verified_at":    now,
 			"snapshot_last_error":     "",
-		})
+		}
+		var result *gorm.DB
+		if outbox.EventType == snapshotstore.RecoveryEventSnapshotEventType {
+			result = tx.Model(&models.RecoveryEvent{}).Where("id = ?", outbox.LogID).Updates(updates)
+		} else if outbox.EventType == "" || outbox.EventType == snapshotstore.SnapshotEventType {
+			result = tx.Model(&models.AuditLog{}).Where("log_id = ?", outbox.LogID).Updates(updates)
+		} else {
+			return fmt.Errorf("event type snapshot tidak dikenal: %s", outbox.EventType)
+		}
 		if result.Error != nil {
-			return fmt.Errorf("update audit log snapshot reference gagal: %w", result.Error)
+			return fmt.Errorf("update snapshot reference gagal: %w", result.Error)
 		}
 		if result.RowsAffected != 1 {
-			return fmt.Errorf("audit log %s tidak ditemukan saat menandai snapshot selesai", outbox.LogID)
+			return fmt.Errorf("record %s tidak ditemukan saat menandai snapshot selesai", outbox.LogID)
 		}
 		if err := tx.Model(&models.SnapshotOutbox{}).Where("id = ?", outbox.ID).Updates(map[string]interface{}{
 			"status":       models.OutboxStatusCompleted,
@@ -267,10 +291,17 @@ func (w *Worker) markFailure(outbox *models.SnapshotOutbox, failure error) error
 		if status == models.OutboxStatusDeadLetter {
 			logStatus = models.SnapshotStatusFailed
 		}
-		return tx.Model(&models.AuditLog{}).Where("log_id = ?", outbox.LogID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"snapshot_status":     logStatus,
 			"snapshot_last_error": errorText,
-		}).Error
+		}
+		if outbox.EventType == snapshotstore.RecoveryEventSnapshotEventType {
+			return tx.Model(&models.RecoveryEvent{}).Where("id = ?", outbox.LogID).Updates(updates).Error
+		}
+		if outbox.EventType != "" && outbox.EventType != snapshotstore.SnapshotEventType {
+			return fmt.Errorf("event type snapshot tidak dikenal: %s", outbox.EventType)
+		}
+		return tx.Model(&models.AuditLog{}).Where("log_id = ?", outbox.LogID).Updates(updates).Error
 	})
 }
 
@@ -295,6 +326,15 @@ func BuildObjectKey(environment, clientID string, createdAt time.Time, logID, pa
 	payloadHash = sanitizeSegment(payloadHash, "unknown-hash")
 	return fmt.Sprintf("%s/%s/%04d/%02d/%02d/%s/%s.snapshot",
 		environment, clientID, createdAt.UTC().Year(), createdAt.UTC().Month(), createdAt.UTC().Day(), logID, payloadHash)
+}
+
+func BuildRecoveryEventObjectKey(environment, clientID string, createdAt time.Time, eventID, eventHash string) string {
+	environment = sanitizeSegment(environment, "local")
+	clientID = sanitizeSegment(clientID, "unknown-client")
+	eventID = sanitizeSegment(eventID, "unknown-event")
+	eventHash = sanitizeSegment(eventHash, "unknown-hash")
+	return fmt.Sprintf("%s/%s/recovery-events/%04d/%02d/%02d/%s/%s.snapshot",
+		environment, clientID, createdAt.UTC().Year(), createdAt.UTC().Month(), createdAt.UTC().Day(), eventID, eventHash)
 }
 
 func sanitizeSegment(value, fallback string) string {

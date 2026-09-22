@@ -118,7 +118,9 @@ func InitFabricGateway(db *gorm.DB) (*FabricService, error) {
 func (f *FabricService) AnchorPendingRoots() error {
 	// Cari Merkle Root yang unik dari log berstatus AGGREGATED
 	var distinctRoots []string
-	f.DB.Model(&models.AuditLog{}).Where("status = ?", "AGGREGATED").Distinct("merkle_root").Pluck("merkle_root", &distinctRoots)
+	f.DB.Model(&models.AuditLog{}).
+		Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "AGGREGATED").
+		Distinct("merkle_root").Pluck("merkle_root", &distinctRoots)
 
 	if len(distinctRoots) == 0 {
 		return nil
@@ -170,6 +172,42 @@ func (f *FabricService) AnchorPendingRoots() error {
 		}
 	}
 
+	return nil
+}
+
+// AnchorPendingRecoveryRoots anchors recovery evidence without touching
+// client-originated audit_logs.
+func (f *FabricService) AnchorPendingRecoveryRoots() error {
+	var roots []string
+	if err := f.DB.Model(&models.RecoveryEvent{}).
+		Where("pipeline_status = ?", models.RecoveryPipelineAggregated).
+		Distinct("merkle_root").Pluck("merkle_root", &roots).Error; err != nil {
+		return err
+	}
+	for _, root := range roots {
+		var meta models.MerkleMetadata
+		if err := f.DB.Where("merkle_root = ?", root).First(&meta).Error; err != nil {
+			continue
+		}
+		anchorID := uuid.New().String()
+		anchorTime := time.Now().UTC()
+		batchSize := fmt.Sprintf("%d", meta.BatchSize)
+		_, err := f.Contract.SubmitTransaction("StoreMerkleRoot", anchorID, root, anchorTime.Format(time.RFC3339Nano), "AuditChain_Gateway_Node1", batchSize, "System_Signature")
+		if err != nil {
+			log.Printf("[Anchoring] recovery root %s gagal: %v", root, err)
+			continue
+		}
+		if err := f.DB.Model(&models.RecoveryEvent{}).
+			Where("merkle_root = ? AND pipeline_status = ?", root, models.RecoveryPipelineAggregated).
+			Updates(map[string]interface{}{
+				"pipeline_status":      models.RecoveryPipelineAnchored,
+				"blockchain_tx_id":     anchorID,
+				"blockchain_timestamp": anchorTime,
+			}).Error; err != nil {
+			return err
+		}
+		log.Printf("[Anchoring] recovery root sukses: %s | TxID: %s", root, anchorID)
+	}
 	return nil
 }
 
