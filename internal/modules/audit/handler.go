@@ -49,13 +49,13 @@ type ErrorResponse struct {
 }
 
 type DashboardStatsResponse struct {
-	TotalLogs        int    `json:"total_logs" example:"1500"`
-	ValidLogs        int    `json:"valid_logs" example:"1450"`
-	TamperedLogs     int    `json:"tampered_logs" example:"3"`
-	UnreachableLogs  int    `json:"unreachable_logs" example:"10"`
-	PendingLogs      int    `json:"pending_logs" example:"37"`
-	TotalResources   int    `json:"total_resources" example:"45"`
-	IntegrityScore   string `json:"integrity_score" example:"99.79"`
+	TotalLogs       int    `json:"total_logs" example:"1500"`
+	ValidLogs       int    `json:"valid_logs" example:"1450"`
+	TamperedLogs    int    `json:"tampered_logs" example:"3"`
+	UnreachableLogs int    `json:"unreachable_logs" example:"10"`
+	PendingLogs     int    `json:"pending_logs" example:"37"`
+	TotalResources  int    `json:"total_resources" example:"45"`
+	IntegrityScore  string `json:"integrity_score" example:"99.79"`
 }
 
 type VerifyLogData struct {
