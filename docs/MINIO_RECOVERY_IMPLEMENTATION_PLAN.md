@@ -455,7 +455,7 @@ Kolom minimum:
 | `expected_hash` | Hash yang sah |
 | `detected_hash` | Hash hasil perhitungan dari row saat terdeteksi |
 | `tampered_payload` | Salinan terbatas/terenkripsi untuk bukti forensik |
-| `status` | `OPEN`, `UNDER_REVIEW`, `RECOVERING`, `RESOLVED`, `DISMISSED` |
+| `status` | `OPEN`, `RESOLVED` |
 | `detected_at` | Waktu deteksi |
 | `resolved_at` | Waktu penyelesaian |
 

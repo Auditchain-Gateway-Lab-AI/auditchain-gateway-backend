@@ -311,7 +311,7 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved || incident.Status == models.IncidentStatusDismissed {
+	if incident.Status == models.IncidentStatusResolved {
 		return nil, errors.New("incident_closed")
 	}
 	var logRow models.AuditLog
@@ -397,7 +397,7 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved || incident.Status == models.IncidentStatusDismissed {
+	if incident.Status == models.IncidentStatusResolved {
 		return nil, errors.New("incident_closed")
 	}
 
@@ -481,12 +481,10 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 	if err := s.ensureTargetNeedsRecovery(ctx, request, snapshot.HashValue); err != nil {
 		return nil, err
 	}
+	// Incident lifecycle stays OPEN until the trusted snapshot is actually
+	// restored. Request status carries the pending/executing outcome.
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(request).Error; err != nil {
-			return err
-		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", incident.ID, models.IncidentStatusOpen).
-			Update("status", models.IncidentStatusUnderReview).Error
+		return tx.Create(request).Error
 	}); err != nil {
 		return nil, err
 	}
@@ -528,11 +526,6 @@ func (s *Service) transitionRequest(ctx context.Context, clientID, requestID, ac
 		if err := tx.Model(&request).Updates(updates).Error; err != nil {
 			return err
 		}
-		if next == models.RecoveryStatusRejected {
-			if err := tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusUnderReview).Update("status", models.IncidentStatusOpen).Error; err != nil {
-				return err
-			}
-		}
 		request.Status = next
 		return nil
 	})
@@ -565,7 +558,9 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ?", request.IncidentID).Update("status", models.IncidentStatusRecovering).Error
+		// The incident remains OPEN while the request is executing; a
+		// successful recovery changes it to RESOLVED in executeSnapshot.
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -833,7 +828,7 @@ func (s *Service) recordFailedExecution(ctx context.Context, request *models.Rec
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusRecovering).Update("status", models.IncidentStatusUnderReview).Error
+		return nil
 	})
 }
 

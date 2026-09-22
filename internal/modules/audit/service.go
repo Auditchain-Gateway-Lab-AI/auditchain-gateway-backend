@@ -813,11 +813,11 @@ func (s *auditService) recordTamperIncident(auditLog models.AuditLog, incidentTy
 	}
 	var existing models.TamperIncident
 	err := s.db.Where(
-		"client_id = ? AND log_id = ? AND incident_type = ? AND status IN ?",
+		"client_id = ? AND log_id = ? AND incident_type = ? AND status = ?",
 		auditLog.ClientID,
 		auditLog.LogID,
 		incidentType,
-		[]string{models.IncidentStatusOpen, models.IncidentStatusUnderReview, models.IncidentStatusRecovering},
+		models.IncidentStatusOpen,
 	).First(&existing).Error
 	if err == nil {
 		return
