@@ -18,6 +18,14 @@ sebenarnya adalah menghilangkan pekerjaan manual operator di server. Perintah
 `git pull` dan Docker Compose masih boleh digunakan, tetapi harus dijalankan
 secara otomatis oleh GitHub Actions.
 
+> **Perubahan scope saat implementasi:** server Besu yang tersedia adalah
+> **development**, bukan production. Karena itu workflow aktif menggunakan mode
+> `development`, environment `development`, dan tombol **Deploy Backend
+> Development**. Referensi production di bagian-bagian berikut adalah desain
+> hardening/cutover lanjutan; gunakan
+> [Development Deployment Runbook](DEVELOPMENT_DEPLOYMENT_RUNBOOK.md) untuk
+> deployment sekarang.
+
 ---
 
 ## 2. Tujuan yang Disepakati

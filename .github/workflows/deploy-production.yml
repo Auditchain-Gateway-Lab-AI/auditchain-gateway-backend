@@ -1,10 +1,10 @@
-name: Deploy Backend Production
+name: Deploy Backend Development
 
 on:
   workflow_dispatch:
     inputs:
-      confirm_production:
-        description: "Confirm deployment to the production Besu server"
+      confirm_development:
+        description: "Confirm deployment to the development Besu server"
         required: true
         default: false
         type: boolean
@@ -17,12 +17,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-production-deploy
+  group: backend-development-deploy
   cancel-in-progress: false
 
 jobs:
   guard:
-    name: Validate production trigger
+    name: Validate development trigger
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,11 +31,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "Production deployment is only allowed from main (got $GITHUB_REF)." >&2
+            echo "Development deployment is only allowed from main (got $GITHUB_REF)." >&2
             exit 1
           fi
-          if [[ "${{ inputs.confirm_production }}" != "true" ]]; then
-            echo "Production deployment requires explicit confirmation." >&2
+          if [[ "${{ inputs.confirm_development }}" != "true" ]]; then
+            echo "Development deployment requires explicit confirmation." >&2
             exit 1
           fi
 
@@ -92,13 +92,13 @@ jobs:
         run: bash -n deploy.sh
 
   deploy:
-    name: Deploy to Besu production server
+    name: Deploy to Besu development server
     needs: [guard, validate]
     if: ${{ needs.guard.result == 'success' && needs.validate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: production
+      name: development
     env:
       PROJECT_DIR: ${{ secrets.BACKEND_PROJECT_DIR }}
       BACKEND_ENV_REMOTE_FILE: /tmp/auditchain-backend-env-${{ github.run_id }}
@@ -117,7 +117,7 @@ jobs:
           printf '%s\n' "$BACKEND_ENV" > "$BACKEND_ENV_FILE"
           test -s "$BACKEND_ENV_FILE"
 
-      - name: Validate production transport settings
+      - name: Validate transport settings
         shell: bash
         env:
           PROJECT_DIR: ${{ env.PROJECT_DIR }}
@@ -141,7 +141,7 @@ jobs:
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
           tags: tag:github-actions-deploy
 
-      - name: Upload environment file to production server
+      - name: Upload environment file to development server
         uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.PRODUCTION_SSH_HOST }}
@@ -175,7 +175,7 @@ jobs:
             test -s "$BACKEND_ENV_FILE"
             chmod 600 "$BACKEND_ENV_FILE"
             cd "$PROJECT_DIR"
-            DEPLOY_MODE=production \
+            DEPLOY_MODE=development \
             DEPLOY_BRANCH=main \
             DEPLOY_SERVICE=api-gateway \
             EXPECTED_SHA="$EXPECTED_SHA" \
@@ -204,10 +204,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Production deployment"
+            echo "### Development deployment"
             echo
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo "- Environment: production"
+            echo "- Environment: development"
             echo "- Application env: synchronized from protected BACKEND_ENV secret"
           } >> "$GITHUB_STEP_SUMMARY"
