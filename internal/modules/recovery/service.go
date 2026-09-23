@@ -36,6 +36,14 @@ type IncidentFilter struct {
 	Status string
 }
 
+// IncidentDetailView keeps the encrypted evidence private while exposing the
+// original metadata needed by the tenant-scoped recovery comparison UI.
+type IncidentDetailView struct {
+	models.TamperIncident
+	TamperedMetadata          interface{} `json:"tampered_metadata,omitempty"`
+	TamperedEvidenceAvailable bool        `json:"tampered_evidence_available"`
+}
+
 type VersionView struct {
 	LogID              string     `json:"log_id"`
 	Action             string     `json:"action"`
@@ -191,6 +199,66 @@ func (s *Service) GetIncident(ctx context.Context, clientID, incidentID string) 
 		return nil, err
 	}
 	return &incident, nil
+}
+
+func (s *Service) GetIncidentDetail(ctx context.Context, clientID, incidentID string) (*IncidentDetailView, error) {
+	incident, err := s.GetIncident(ctx, clientID, incidentID)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &IncidentDetailView{TamperIncident: *incident}
+	if len(incident.TamperedPayload) == 0 || s.cipher == nil {
+		return detail, nil
+	}
+
+	metadata, err := decryptTamperedMetadata(s.cipher, incident.TamperedPayload)
+	if err != nil {
+		return nil, fmt.Errorf("tampered_evidence_decrypt_failed: %w", err)
+	}
+	detail.TamperedMetadata = metadata
+	detail.TamperedEvidenceAvailable = true
+	return detail, nil
+}
+
+func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (interface{}, error) {
+	if cipher == nil {
+		return nil, errors.New("tampered_evidence_cipher_unavailable")
+	}
+	plaintext, err := cipher.Decrypt(encrypted)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Metadata json.RawMessage `json:"metadata"`
+	}
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Metadata) == 0 || string(payload.Metadata) == "null" {
+		return nil, nil
+	}
+
+	// AuditLog.Metadata is stored as a JSON string, but accepting an object as
+	// well keeps this reader compatible with older evidence formats.
+	var encodedMetadata string
+	if err := json.Unmarshal(payload.Metadata, &encodedMetadata); err == nil {
+		if encodedMetadata == "" {
+			return nil, nil
+		}
+		var metadata interface{}
+		if err := json.Unmarshal([]byte(encodedMetadata), &metadata); err != nil {
+			return encodedMetadata, nil
+		}
+		return metadata, nil
+	}
+
+	var metadata interface{}
+	if err := json.Unmarshal(payload.Metadata, &metadata); err != nil {
+		return nil, err
+	}
+	return metadata, nil
 }
 
 func (s *Service) ListRequests(ctx context.Context, clientID, status string) ([]models.RecoveryRequest, error) {
