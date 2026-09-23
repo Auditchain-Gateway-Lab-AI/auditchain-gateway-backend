@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -33,6 +35,35 @@ func TestValidateSnapshotIdentityRejectsCrossLogAndHashMismatch(t *testing.T) {
 	snapshot.HashValue = "hash-2"
 	if err := validateSnapshotIdentity(snapshot, request); err == nil || err.Error() != "snapshot_plaintext_hash_mismatch" {
 		t.Fatalf("hash mismatch error = %v, want snapshot_plaintext_hash_mismatch", err)
+	}
+}
+
+func TestDecryptTamperedMetadataRestoresOriginalPayload(t *testing.T) {
+	cipher, err := snapshotstore.NewCipher("test-key", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("NewCipher() error = %v", err)
+	}
+	plaintext, err := json.Marshal(map[string]string{
+		"metadata": `{"room":181,"owner":"tampered-before-recovery"}`,
+	})
+	if err != nil {
+		t.Fatalf("marshal tampered payload: %v", err)
+	}
+	encrypted, err := cipher.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+
+	metadata, err := decryptTamperedMetadata(cipher, encrypted)
+	if err != nil {
+		t.Fatalf("decryptTamperedMetadata() error = %v", err)
+	}
+	values, ok := metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("metadata type = %T, want map[string]interface{}", metadata)
+	}
+	if values["owner"] != "tampered-before-recovery" {
+		t.Fatalf("owner = %v, want original tampered value", values["owner"])
 	}
 }
 
