@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -86,7 +87,8 @@ type Service interface {
 	VerifyResourceHistory(resource, clientID string) (*ResourceChainResult, error)
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error)
-	VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error)
+	EstimateLogRange(from, to time.Time, clientID string) (int64, error)
+	VerifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 }
 
 type auditService struct {
@@ -162,6 +164,17 @@ type RangeVerificationResult struct {
 	Results []RangeItemResult `json:"results"`
 }
 
+const MaxSynchronousVerifyRange = 100
+
+type VerifyRangeTooLargeError struct {
+	EstimatedItems int64
+	Limit          int
+}
+
+func (e *VerifyRangeTooLargeError) Error() string {
+	return fmt.Sprintf("verify range berisi %d log; batas sinkron adalah %d", e.EstimatedItems, e.Limit)
+}
+
 type RangeInfo struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -228,9 +241,32 @@ type RangeItemResult struct {
 	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
+// EstimateLogRange menghitung jumlah log yang akan diproses sebelum operasi
+// verifikasi sinkron dimulai. Handler memakainya untuk preflight UX, sedangkan
+// VerifyLogRange tetap menghitung ulang agar limit tidak dapat dilewati karena
+// race atau client yang memanggil endpoint verify secara langsung.
+func (s *auditService) EstimateLogRange(from, to time.Time, clientID string) (int64, error) {
+	return s.repo.CountLogsByTimeRange(from, to, clientID)
+}
+
 // Implementasi
-func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*RangeVerificationResult, error) {
+func (s *auditService) VerifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+	countStarted := time.Now()
+	estimatedItems, err := s.EstimateLogRange(from, to, clientID)
+	logRangeTiming(requestID, "count_logs", countStarted, err, "estimated_items", estimatedItems)
+	if err != nil {
+		return nil, err
+	}
+	if estimatedItems > MaxSynchronousVerifyRange {
+		return nil, &VerifyRangeTooLargeError{
+			EstimatedItems: estimatedItems,
+			Limit:          MaxSynchronousVerifyRange,
+		}
+	}
+
+	loadStarted := time.Now()
 	logs, err := s.repo.GetLogsByTimeRange(from, to, clientID)
+	logRangeTiming(requestID, "load_logs", loadStarted, err, "loaded_items", len(logs))
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +285,9 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 			Log:   auditLog,
 		}
 
-		verifyResult, err := s.VerifyLogIntegrity(auditLog.LogID, clientID)
+		verifyStarted := time.Now()
+		verifyResult, err := s.verifyLogIntegrity(auditLog.LogID, clientID, requestID)
+		logRangeTiming(requestID, "verify_log", verifyStarted, err, "log_id", auditLog.LogID)
 		if err != nil {
 			item.VerifyStatus = "error"
 			item.Message = err.Error()
@@ -273,6 +311,21 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID string) (*Ran
 	}
 
 	return result, nil
+}
+
+func logRangeTiming(requestID, operation string, started time.Time, err error, field string, value interface{}) {
+	if requestID == "" {
+		requestID = "unknown"
+	}
+	log.Printf(
+		"[AuditTiming] request_id=%s operation=%s duration_ms=%d success=%t %s=%v",
+		requestID,
+		operation,
+		time.Since(started).Milliseconds(),
+		err == nil,
+		field,
+		value,
+	)
 }
 
 func (s *auditService) fetchFabricAnchor(txID string) (*FabricAnchorData, error) {
@@ -347,7 +400,7 @@ func isHashStillPending(auditLog *models.AuditLog) bool {
 // Verifikasi Kafka (Layer 3) SENGAJA DIHAPUS — cukup DB (off-chain) dan
 // Fabric (on-chain) saja sesuai keputusan terbaru.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
-	result, err := s.verifyLogIntegrity(logID, clientID)
+	result, err := s.verifyLogIntegrity(logID, clientID, "")
 	status := models.IntegrityStatusUnreachable
 	if err == nil && result != nil {
 		switch result.Status {
@@ -527,8 +580,10 @@ func (s *auditService) persistIntegrityStatus(logID, clientID, status string, ve
 		}).Error
 }
 
-func (s *auditService) verifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
+func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string) (*VerificationResult, error) {
+	logLookupStarted := time.Now()
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
+	logRangeTiming(requestID, "db_log_lookup", logLookupStarted, err, "log_id", logID)
 	if err != nil {
 		return nil, errors.New("log_not_found")
 	}
@@ -568,7 +623,9 @@ func (s *auditService) verifyLogIntegrity(logID, clientID string) (*Verification
 	if s.fabric == nil {
 		return nil, errors.New("fabric_error")
 	}
+	fabricStarted := time.Now()
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
+	logRangeTiming(requestID, "fabric_anchor_lookup", fabricStarted, err, "log_id", logID)
 	if err != nil {
 		return nil, errors.New("fabric_error")
 	}
@@ -580,7 +637,9 @@ func (s *auditService) verifyLogIntegrity(logID, clientID string) (*Verification
 		return nil, errors.New("parse_error")
 	}
 
+	proofLookupStarted := time.Now()
 	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
+	logRangeTiming(requestID, "db_proof_lookup", proofLookupStarted, perr, "log_id", logID)
 	if perr != nil {
 		return nil, errors.New("proof_lookup_error")
 	}
@@ -631,11 +690,15 @@ func (s *auditService) verifyLogIntegrity(logID, clientID string) (*Verification
 	if isRecoveryAction(auditLog.Action) {
 		agentStatus = "skipped_recovery"
 	} else {
+		latestLookupStarted := time.Now()
 		latestClientLog, latestErr := s.repo.GetLatestClientLogByResource(auditLog.Resource, clientID)
+		logRangeTiming(requestID, "db_latest_resource_lookup", latestLookupStarted, latestErr, "log_id", logID)
 		isLatestClientEvent := latestErr == nil && latestClientLog != nil && latestClientLog.LogID == auditLog.LogID
 		if shouldVerifyResourceWithAgent(*auditLog, isLatestClientEvent) {
 			agentStatus = "not_configured"
+			agentStarted := time.Now()
 			agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+			logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
 			if agentErr != nil {
 				agentStatus = "unreachable"
 			} else if agentResult.AgentUsed {
