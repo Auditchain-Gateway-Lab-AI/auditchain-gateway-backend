@@ -1,8 +1,6 @@
 package api
 
 import (
-	"os"
-	"strings"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/middleware"
 	"go-blockchain-api/internal/modules/audit"
@@ -10,6 +8,8 @@ import (
 	"go-blockchain-api/internal/modules/client"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
+	"os"
+	"strings"
 
 	_ "go-blockchain-api/docs"
 
@@ -31,7 +31,7 @@ func SetupRouter(
 	router.Use(middleware.RequestID())
 
 	corsConfig := cors.DefaultConfig()
-	
+
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
 	if allowedOrigins != "" {
 		corsConfig.AllowOrigins = strings.Split(allowedOrigins, ",")
