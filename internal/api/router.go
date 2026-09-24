@@ -1,6 +1,8 @@
 package api
 
 import (
+	"os"
+	"strings"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
@@ -27,7 +29,15 @@ func SetupRouter(
 	router := gin.Default()
 
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowAllOrigins = true
+	
+	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+	if allowedOrigins != "" {
+		corsConfig.AllowOrigins = strings.Split(allowedOrigins, ",")
+	} else {
+		// Fallback for development if not set, but warn
+		corsConfig.AllowAllOrigins = true
+	}
+
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	router.Use(cors.New(corsConfig))
