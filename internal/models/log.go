@@ -23,6 +23,7 @@ type AuditLog struct {
 	SourceSystem         string     `gorm:"type:varchar(100);index" json:"source_system"`
 	AuthorizationContext string     `gorm:"type:text" json:"authorization_context"`
 	Metadata             string     `gorm:"type:jsonb" json:"metadata"`
+	IsLatest             bool       `gorm:"default:false;index" json:"is_latest"`
 
 	// BARU: ID baris di audit_trail DB klien.
 	// Diisi dari field "audit_trail_id" pada payload Agent.

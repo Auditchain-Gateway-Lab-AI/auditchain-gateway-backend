@@ -7,10 +7,12 @@ import (
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/clientverify"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 
 	_ "go-blockchain-api/docs"
+	"gorm.io/gorm"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -25,6 +27,8 @@ func SetupRouter(
 	agentHandler *agentverifier.Handler,
 	reportHandler *report.Handler,
 	recoveryHandler *recovery.Handler,
+	clientVerifyHandler *clientverify.Handler,
+	db *gorm.DB,
 ) *gin.Engine {
 	router := gin.Default()
 
@@ -55,6 +59,7 @@ func SetupRouter(
 	audit.RegisterRoutes(apiGroup, auditHandler)
 	report.RegisterRoutes(apiGroup, reportHandler)
 	recovery.RegisterRoutes(apiGroup, recoveryHandler)
+	clientverify.RegisterRoutes(apiGroup, clientVerifyHandler, db)
 
 	agentverifier.RegisterRoutes(apiGroup.Group("/dashboard"), agentHandler)
 

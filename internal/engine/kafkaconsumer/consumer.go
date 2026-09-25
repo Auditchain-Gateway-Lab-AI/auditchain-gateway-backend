@@ -544,6 +544,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
 		IntegrityStatus:      models.IntegrityStatusNotChecked,
+		IsLatest:             true,
 	}
 
 	// Hash menggunakan fungsi shared agar canonicalization konsisten
@@ -567,6 +568,13 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// SnapshotBuilder sengaja membuat payload terenkripsi sebelum transaksi,
 	// tetapi object MinIO baru diunggah oleh worker setelah commit berhasil.
 	err := e.DB.Transaction(func(tx *gorm.DB) error {
+		// Reset is_latest for previous log
+		if err := tx.Model(&models.AuditLog{}).
+			Where("client_id = ? AND resource = ?", auditLog.ClientID, auditLog.Resource).
+			Update("is_latest", false).Error; err != nil {
+			return fmt.Errorf("gagal mereset is_latest: %w", err)
+		}
+
 		if err := tx.Create(auditLog).Error; err != nil {
 			return fmt.Errorf("gagal simpan audit log: %w", err)
 		}

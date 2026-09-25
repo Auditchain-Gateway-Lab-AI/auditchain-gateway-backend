@@ -50,12 +50,23 @@ func extractTableName(resource string) string {
 }
 
 func (r *auditRepoImpl) CreateLog(log *models.AuditLog) error {
-	if err := r.db.Create(log).Error; err != nil {
-		return err
-	}
-	tableName := extractTableName(log.Resource)
-	_ = r.UpsertClientTable(log.ClientID, tableName, log.Action, log.Actor, log.Timestamp)
-	return nil
+	log.IsLatest = true
+
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.AuditLog{}).
+			Where("client_id = ? AND resource = ?", log.ClientID, log.Resource).
+			Update("is_latest", false).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(log).Error; err != nil {
+			return err
+		}
+
+		tableName := extractTableName(log.Resource)
+		_ = r.UpsertClientTable(log.ClientID, tableName, log.Action, log.Actor, log.Timestamp)
+		return nil
+	})
 }
 
 func (r *auditRepoImpl) GetLogByHash(hash, clientID string) (*models.AuditLog, error) {

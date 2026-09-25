@@ -39,6 +39,7 @@ import (
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/clientverify"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"go-blockchain-api/internal/storage/snapshotstore"
@@ -319,7 +320,10 @@ func main() {
 	reportHandler := report.NewHandler(reportService)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)
+	clientVerifyService := clientverify.NewService(db, agentverifier.NewService(db), fabricSvc)
+	clientVerifyHandler := clientverify.NewHandler(clientVerifyService)
+
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, clientVerifyHandler, db)
 	api.RegisterHealthRoutes(router, db)
 
 	port := os.Getenv("PORT")
