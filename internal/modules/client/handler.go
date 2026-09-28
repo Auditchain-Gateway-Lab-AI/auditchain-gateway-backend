@@ -1201,3 +1201,58 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 		"message": "Berhasil menyimpan konfigurasi tabel user di Gateway DAN berhasil mengupdate Debezium klien secara remote!",
 	})
 }
+
+// GetClientStats mengambil statistik dashboard dari klien yang sedang login
+func (h *Handler) GetClientStats(c *gin.Context) {
+	clientID, exists := c.Get("client_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan pada token"})
+		return
+	}
+
+	var stats models.ClientDashboardStats
+	if err := h.DB.Where("client_id = ?", clientID).First(&stats).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Data statistik belum tersedia"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik"})
+		return
+	}
+
+	// Parsing JSON String ke Object jika diperlukan agar rapi di response
+	var tableResults interface{}
+	if stats.TableVerifyResults != "" {
+		_ = json.Unmarshal([]byte(stats.TableVerifyResults), &tableResults)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil mengambil statistik",
+		"data": gin.H{
+			"id":                   stats.ID,
+			"client_id":            stats.ClientID,
+			"total_logs":           stats.TotalLogs,
+			"logs_today":           stats.LogsToday,
+			"total_inserts":        stats.TotalInserts,
+			"total_updates":        stats.TotalUpdates,
+			"total_deletes":        stats.TotalDeletes,
+			"last_log_at":          stats.LastLogAt,
+			"total_anchored":       stats.TotalAnchored,
+			"total_pending":        stats.TotalPending,
+			"anchor_percentage":    stats.AnchorPercentage,
+			"total_verifications":  stats.TotalVerifications,
+			"total_rows_verified":  stats.TotalRowsVerified,
+			"total_valid":          stats.TotalValid,
+			"total_tampered":       stats.TotalTampered,
+			"total_verify_pending": stats.TotalVerifyPending,
+			"total_agent_error":    stats.TotalAgentError,
+			"total_fabric_error":   stats.TotalFabricError,
+			"integrity_score":      stats.IntegrityScore,
+			"last_verified_at":     stats.LastVerifiedAt,
+			"last_verified_table":  stats.LastVerifiedTable,
+			"table_verify_results": tableResults,
+			"created_at":           stats.CreatedAt,
+			"updated_at":           stats.UpdatedAt,
+		},
+	})
+}
