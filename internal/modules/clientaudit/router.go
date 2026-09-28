@@ -1,4 +1,4 @@
-package clientverify
+package clientaudit
 
 import (
 	"go-blockchain-api/internal/middleware"

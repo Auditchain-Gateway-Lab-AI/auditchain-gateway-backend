@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/go-pdf/fpdf"
-	"go-blockchain-api/internal/modules/audit"
+	"go-blockchain-api/internal/modules/internalaudit"
 )
 
 type Service interface {
@@ -16,10 +16,10 @@ type Service interface {
 }
 
 type reportService struct {
-	auditSvc audit.Service
+	auditSvc internalaudit.Service
 }
 
-func NewService(auditSvc audit.Service) Service {
+func NewService(auditSvc internalaudit.Service) Service {
 	return &reportService{
 		auditSvc: auditSvc,
 	}

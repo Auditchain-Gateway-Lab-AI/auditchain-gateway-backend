@@ -1,4 +1,4 @@
-package audit
+package internalaudit
 
 import (
 	"go-blockchain-api/internal/middleware"
