@@ -88,7 +88,8 @@ type Service interface {
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	GetTableResources(tableName, clientID string) ([]ResourceLogVerification, error)
 	EstimateLogRange(from, to time.Time, clientID string) (int64, error)
-	VerifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
+	VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
+	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 }
 
 type auditService struct {
@@ -250,7 +251,7 @@ func (s *auditService) EstimateLogRange(from, to time.Time, clientID string) (in
 }
 
 // Implementasi
-func (s *auditService) VerifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+func (s *auditService) VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
 	countStarted := time.Now()
 	estimatedItems, err := s.EstimateLogRange(from, to, clientID)
 	logRangeTiming(requestID, "count_logs", countStarted, err, "estimated_items", estimatedItems)
@@ -286,7 +287,7 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID, requestID st
 		}
 
 		verifyStarted := time.Now()
-		verifyResult, err := s.verifyLogIntegrity(auditLog.LogID, clientID, requestID)
+		verifyResult, err := s.verifyLogIntegrity(auditLog.LogID, clientID, requestID, true)
 		logRangeTiming(requestID, "verify_log", verifyStarted, err, "log_id", auditLog.LogID)
 		if err != nil {
 			item.VerifyStatus = "error"
@@ -308,6 +309,200 @@ func (s *auditService) VerifyLogRange(from, to time.Time, clientID, requestID st
 		}
 		result.Summary.Total++
 		result.Results = append(result.Results, item)
+	}
+
+	// Update Dashboard Stats untuk Client Audit
+	if len(result.Results) > 0 {
+		var stat models.ClientDashboardStats
+		if err := s.db.Where("client_id = ?", clientID).First(&stat).Error; err == nil {
+			totalValid := int64(result.Summary.Valid)
+			totalTampered := int64(result.Summary.Invalid)
+			totalPending := int64(result.Summary.Pending)
+			totalVerified := totalValid + totalTampered + totalPending
+
+			newTotalVerifications := stat.TotalVerifications + totalVerified
+			newTotalValid := stat.TotalValid + totalValid
+			var pct float64
+			if newTotalVerifications > 0 {
+				pct = float64(newTotalValid) / float64(newTotalVerifications) * 100
+			}
+
+			// Aggregate by table from Resource string (Format: TABLE_NAME:ID)
+			var tableResults map[string]interface{}
+			json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
+			if tableResults == nil {
+				tableResults = make(map[string]interface{})
+			}
+
+			// Tally per table
+			type tblSum struct {
+				Total    int `json:"total"`
+				Valid    int `json:"valid"`
+				Invalid  int `json:"invalid"`
+				Pending  int `json:"pending"`
+			}
+			tableAgg := make(map[string]*tblSum)
+
+			for _, item := range result.Results {
+				parts := strings.SplitN(item.Log.Resource, ":", 2)
+				tbl := parts[0]
+				if _, ok := tableAgg[tbl]; !ok {
+					tableAgg[tbl] = &tblSum{}
+				}
+				tableAgg[tbl].Total++
+				if item.VerifyStatus == "success" {
+					tableAgg[tbl].Valid++
+				} else if item.VerifyStatus == "pending" {
+					tableAgg[tbl].Pending++
+				} else {
+					tableAgg[tbl].Invalid++
+				}
+			}
+
+			for tbl, sum := range tableAgg {
+				tableResults[tbl] = sum
+			}
+			newJSON, _ := json.Marshal(tableResults)
+
+			s.db.Model(&stat).Updates(map[string]interface{}{
+				"last_verified_at":     time.Now(),
+				"last_verified_table":  "MULTIPLE (Client Audit)",
+				"total_verifications":  newTotalVerifications,
+				"total_rows_verified":  gorm.Expr("total_rows_verified + ?", totalVerified),
+				"total_valid":          newTotalValid,
+				"total_tampered":       stat.TotalTampered + totalTampered,
+				"total_verify_pending": stat.TotalVerifyPending + totalPending,
+				"integrity_score":      pct,
+				"table_verify_results": string(newJSON),
+			})
+		}
+	}
+
+	return result, nil
+}
+
+func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+	countStarted := time.Now()
+	logs, err := s.repo.GetLogsByTimeRange(from, to, clientID)
+	logRangeTiming(requestID, "load_logs", countStarted, err, "loaded_items", len(logs))
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueResources := make(map[string]bool)
+	for _, l := range logs {
+		uniqueResources[l.Resource] = true
+	}
+
+	result := &RangeVerificationResult{
+		Range: RangeInfo{
+			From: formatPgTimestamp(from),
+			To:   formatPgTimestamp(to),
+		},
+		Results: []RangeItemResult{},
+	}
+
+	for res := range uniqueResources {
+		latestLog, err := s.repo.GetLatestClientLogByResource(res, clientID)
+		if err != nil || latestLog == nil {
+			continue
+		}
+
+		item := RangeItemResult{
+			LogID: latestLog.LogID,
+			Log:   *latestLog,
+		}
+
+		verifyStarted := time.Now()
+		verifyResult, err := s.verifyClientLogIntegrity(latestLog.LogID, clientID, requestID)
+		logRangeTiming(requestID, "verify_client_log", verifyStarted, err, "log_id", latestLog.LogID)
+		if err != nil {
+			item.VerifyStatus = "error"
+			item.Message = err.Error()
+		} else {
+			item.VerifyStatus = verifyResult.Status
+			item.Message = verifyResult.Message
+			item.AgentStatus = verifyResult.AgentStatus
+			item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
+		}
+
+		switch item.VerifyStatus {
+		case "success":
+			result.Summary.Valid++
+		case "pending":
+			result.Summary.Pending++
+		default:
+			result.Summary.Invalid++
+		}
+		result.Summary.Total++
+		result.Results = append(result.Results, item)
+	}
+
+	// Update Dashboard Stats untuk Client Audit
+	if len(result.Results) > 0 {
+		var stat models.ClientDashboardStats
+		if err := s.db.Where("client_id = ?", clientID).First(&stat).Error; err == nil {
+			totalValid := int64(result.Summary.Valid)
+			totalTampered := int64(result.Summary.Invalid)
+			totalPending := int64(result.Summary.Pending)
+			totalVerified := totalValid + totalTampered + totalPending
+
+			newTotalVerifications := stat.TotalVerifications + totalVerified
+			newTotalValid := stat.TotalValid + totalValid
+			var pct float64
+			if newTotalVerifications > 0 {
+				pct = float64(newTotalValid) / float64(newTotalVerifications) * 100
+			}
+
+			// Aggregate by table from Resource string (Format: TABLE_NAME:ID)
+			var tableResults map[string]interface{}
+			json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
+			if tableResults == nil {
+				tableResults = make(map[string]interface{})
+			}
+
+			// Tally per table
+			type tblSum struct {
+				Total    int `json:"total"`
+				Valid    int `json:"valid"`
+				Invalid  int `json:"invalid"`
+				Pending  int `json:"pending"`
+			}
+			tableAgg := make(map[string]*tblSum)
+
+			for _, item := range result.Results {
+				parts := strings.SplitN(item.Log.Resource, ":", 2)
+				tbl := parts[0]
+				if _, ok := tableAgg[tbl]; !ok {
+					tableAgg[tbl] = &tblSum{}
+				}
+				tableAgg[tbl].Total++
+				if item.VerifyStatus == "success" {
+					tableAgg[tbl].Valid++
+				} else if item.VerifyStatus == "pending" {
+					tableAgg[tbl].Pending++
+				} else {
+					tableAgg[tbl].Invalid++
+				}
+			}
+
+			for tbl, sum := range tableAgg {
+				tableResults[tbl] = sum
+			}
+			newJSON, _ := json.Marshal(tableResults)
+
+			s.db.Model(&stat).Updates(map[string]interface{}{
+				"last_verified_at":     time.Now(),
+				"last_verified_table":  "MULTIPLE (Client Audit)",
+				"total_verifications":  newTotalVerifications,
+				"total_rows_verified":  gorm.Expr("total_rows_verified + ?", totalVerified),
+				"total_valid":          newTotalValid,
+				"total_tampered":       stat.TotalTampered + totalTampered,
+				"total_verify_pending": stat.TotalVerifyPending + totalPending,
+				"integrity_score":      pct,
+				"table_verify_results": string(newJSON),
+			})
+		}
 	}
 
 	return result, nil
@@ -400,7 +595,7 @@ func isHashStillPending(auditLog *models.AuditLog) bool {
 // Verifikasi Kafka (Layer 3) SENGAJA DIHAPUS — cukup DB (off-chain) dan
 // Fabric (on-chain) saja sesuai keputusan terbaru.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
-	result, err := s.verifyLogIntegrity(logID, clientID, "")
+	result, err := s.verifyLogIntegrity(logID, clientID, "", false)
 	status := models.IntegrityStatusUnreachable
 	if err == nil && result != nil {
 		switch result.Status {
@@ -580,7 +775,7 @@ func (s *auditService) persistIntegrityStatus(logID, clientID, status string, ve
 		}).Error
 }
 
-func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string) (*VerificationResult, error) {
+func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, skipAgent bool) (*VerificationResult, error) {
 	logLookupStarted := time.Now()
 	auditLog, err := s.repo.GetLogByID(logID, clientID)
 	logRangeTiming(requestID, "db_log_lookup", logLookupStarted, err, "log_id", logID)
@@ -687,26 +882,28 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string) (*V
 	agentStatus := "skipped_historical"
 	var agentDiscrepancies []agentverifier.Discrepancy
 
-	if isRecoveryAction(auditLog.Action) {
-		agentStatus = "skipped_recovery"
-	} else {
-		latestLookupStarted := time.Now()
-		latestClientLog, latestErr := s.repo.GetLatestClientLogByResource(auditLog.Resource, clientID)
-		logRangeTiming(requestID, "db_latest_resource_lookup", latestLookupStarted, latestErr, "log_id", logID)
-		isLatestClientEvent := latestErr == nil && latestClientLog != nil && latestClientLog.LogID == auditLog.LogID
-		if shouldVerifyResourceWithAgent(*auditLog, isLatestClientEvent) {
-			agentStatus = "not_configured"
-			agentStarted := time.Now()
-			agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
-			logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
-			if agentErr != nil {
-				agentStatus = "unreachable"
-			} else if agentResult.AgentUsed {
-				if agentResult.IsMatch {
-					agentStatus = "matched"
-				} else {
-					agentStatus = "mismatch"
-					agentDiscrepancies = agentResult.Discrepancies
+	if !skipAgent {
+		if isRecoveryAction(auditLog.Action) {
+			agentStatus = "skipped_recovery"
+		} else {
+			latestLookupStarted := time.Now()
+			latestClientLog, latestErr := s.repo.GetLatestClientLogByResource(auditLog.Resource, clientID)
+			logRangeTiming(requestID, "db_latest_resource_lookup", latestLookupStarted, latestErr, "log_id", logID)
+			isLatestClientEvent := latestErr == nil && latestClientLog != nil && latestClientLog.LogID == auditLog.LogID
+			if shouldVerifyResourceWithAgent(*auditLog, isLatestClientEvent) {
+				agentStatus = "not_configured"
+				agentStarted := time.Now()
+				agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+				logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
+				if agentErr != nil {
+					agentStatus = "unreachable"
+				} else if agentResult.AgentUsed {
+					if agentResult.IsMatch {
+						agentStatus = "matched"
+					} else {
+						agentStatus = "mismatch"
+						agentDiscrepancies = agentResult.Discrepancies
+					}
 				}
 			}
 		}
@@ -722,6 +919,121 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string) (*V
 		TxID:               auditLog.BlockchainTxID,
 		AgentStatus:        agentStatus,
 		AgentDiscrepancies: agentDiscrepancies,
+	}, nil
+}
+
+func (s *auditService) verifyClientLogIntegrity(logID, clientID, requestID string) (*VerificationResult, error) {
+	logLookupStarted := time.Now()
+	auditLog, err := s.repo.GetLogByID(logID, clientID)
+	logRangeTiming(requestID, "db_log_lookup", logLookupStarted, err, "log_id", logID)
+	if err != nil {
+		return nil, errors.New("log_not_found")
+	}
+
+	if isHashStillPending(auditLog) {
+		return &VerificationResult{
+			Status:  "pending",
+			Message: "Log sudah diterima, tetapi hash final masih diproses pipeline.",
+			IsValid: true,
+			LogID:   auditLog.LogID,
+		}, nil
+	}
+
+	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
+		return &VerificationResult{
+			Status:  "pending",
+			Message: "Log otentik secara lokal. Menunggu antrean Blockchain.",
+			IsValid: true,
+			LogID:   auditLog.LogID,
+		}, nil
+	}
+
+	if s.fabric == nil {
+		return nil, errors.New("fabric_error")
+	}
+
+	agentStarted := time.Now()
+	agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+	logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
+
+	if agentErr != nil || agentResult == nil {
+		return &VerificationResult{
+			Status:      "failed_source",
+			Message:     "🚨 Gagal menghubungi Agent atau Agent belum dikonfigurasi.",
+			IsValid:     false,
+			LogID:       auditLog.LogID,
+			AgentStatus: "unreachable",
+		}, nil
+	}
+
+	if !agentResult.AgentUsed {
+		return &VerificationResult{
+			Status:      "failed_source",
+			Message:     "🚨 Agent belum dikonfigurasi.",
+			IsValid:     false,
+			LogID:       auditLog.LogID,
+			AgentStatus: "not_configured",
+		}, nil
+	}
+
+	// Buat copy log dan rehash dengan data dari agent
+	canonicalizeLog(auditLog)
+	logCopy := *auditLog
+	if agentResult.ClientMetadata != "" {
+		logCopy.Metadata = agentResult.ClientMetadata
+	}
+	recalculatedHash := hasher.GenerateLogHash(&logCopy)
+
+	fabricStarted := time.Now()
+	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
+	logRangeTiming(requestID, "fabric_anchor_lookup", fabricStarted, err, "log_id", logID)
+	if err != nil {
+		return nil, errors.New("fabric_error")
+	}
+
+	var fabricResponse struct {
+		MerkleRoot string `json:"merkle_root"`
+	}
+	if err := json.Unmarshal([]byte(onChainData), &fabricResponse); err != nil {
+		return nil, errors.New("parse_error")
+	}
+
+	proofLookupStarted := time.Now()
+	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
+	logRangeTiming(requestID, "db_proof_lookup", proofLookupStarted, perr, "log_id", logID)
+	if perr != nil {
+		return nil, errors.New("proof_lookup_error")
+	}
+
+	// Reconstruct root with client rehashed value
+	reconstructedRoot := recalculatedHash
+	if len(proofs) > 0 {
+		reconstructedRoot = crypto.ReconstructMerkleRoot(recalculatedHash, toMerkleProofData(proofs))
+	}
+
+	if reconstructedRoot != fabricResponse.MerkleRoot {
+		return &VerificationResult{
+			Status:             "failed_onchain",
+			Message:            "🚨 DATA TERMANIPULASI: Data klien saat ini tidak valid di mata Blockchain!",
+			IsValid:            false,
+			LogID:              auditLog.LogID,
+			DBRoot:             reconstructedRoot,
+			ChainRoot:          fabricResponse.MerkleRoot,
+			AgentStatus:        "mismatch",
+			AgentDiscrepancies: agentResult.Discrepancies,
+		}, nil
+	}
+
+	return &VerificationResult{
+		Status:             "success",
+		Message:            "✅ DATA OTENTIK: Data klien cocok dengan Blockchain.",
+		IsValid:            true,
+		LogID:              auditLog.LogID,
+		ExpectedHash:       auditLog.HashValue,
+		DBRoot:             reconstructedRoot,
+		TxID:               auditLog.BlockchainTxID,
+		AgentStatus:        "matched",
+		AgentDiscrepancies: agentResult.Discrepancies,
 	}, nil
 }
 
