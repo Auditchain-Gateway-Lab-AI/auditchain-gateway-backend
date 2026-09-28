@@ -15,6 +15,7 @@ import (
 
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/engine/stats"
 	"go-blockchain-api/internal/storage/snapshotstore"
 
 	"github.com/segmentio/kafka-go"
@@ -544,6 +545,7 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 		AuthorizationContext: "",
 		Status:               "RECEIVED",
 		IntegrityStatus:      models.IntegrityStatusNotChecked,
+		IsLatest:             true,
 	}
 
 	// Hash menggunakan fungsi shared agar canonicalization konsisten
@@ -567,8 +569,20 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 	// SnapshotBuilder sengaja membuat payload terenkripsi sebelum transaksi,
 	// tetapi object MinIO baru diunggah oleh worker setelah commit berhasil.
 	err := e.DB.Transaction(func(tx *gorm.DB) error {
+		// Reset is_latest for previous log
+		if err := tx.Model(&models.AuditLog{}).
+			Where("client_id = ? AND resource = ?", auditLog.ClientID, auditLog.Resource).
+			Update("is_latest", false).Error; err != nil {
+			return fmt.Errorf("gagal mereset is_latest: %w", err)
+		}
+
 		if err := tx.Create(auditLog).Error; err != nil {
 			return fmt.Errorf("gagal simpan audit log: %w", err)
+		}
+
+		// Update dashboard stats
+		if err := stats.RecordLogStats(tx, auditLog.ClientID, auditLog.Action); err != nil {
+			log.Printf("?  [KafkaConsumer] Gagal update statistik dashboard: %v", err)
 		}
 		if snapshotOutbox != nil {
 			if err := tx.Create(snapshotOutbox).Error; err != nil {

@@ -10,6 +10,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	adminRoutes := routerGroup.Group("/admin", middleware.AdminAuth())
 	{
 		adminRoutes.POST("/clients", h.CreateClient)
+		adminRoutes.POST("/clients/:id/regenerate-api-key", h.RegenerateAPIKey)
 		adminRoutes.GET("/clients", h.ListClients)
 		adminRoutes.POST("/kafka-config", h.CreateKafkaConfig)
 		adminRoutes.GET("/kafka-configs", h.ListKafkaConfigs)
@@ -41,6 +42,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashRoutes.GET("/my-users", h.GetMyUsersCDC)
 		dashRoutes.GET("/actor-config", h.GetActorConfig)
 		dashRoutes.PATCH("/actor-config", h.UpdateActorConfig)
+		dashRoutes.GET("/stats", h.GetClientStats)
 	}
 
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)

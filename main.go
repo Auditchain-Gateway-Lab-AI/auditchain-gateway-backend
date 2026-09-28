@@ -36,9 +36,10 @@ import (
 	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/engine/snapshotworker"
 	"go-blockchain-api/internal/engine/tamperscanner"
-	"go-blockchain-api/internal/modules/audit"
+	"go-blockchain-api/internal/modules/internalaudit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
+	"go-blockchain-api/internal/modules/clientaudit"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"go-blockchain-api/internal/storage/snapshotstore"
@@ -286,9 +287,9 @@ func main() {
 
 	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService)
 
-	auditRepo := audit.NewAuditRepository(db)
-	auditService := audit.NewService(auditRepo, fabricSvc, db)
-	auditHandler := audit.NewHandler(auditService)
+	auditRepo := internalaudit.NewAuditRepository(db)
+	auditService := internalaudit.NewService(auditRepo, fabricSvc, db)
+	auditHandler := internalaudit.NewHandler(auditService)
 	if tamperScannerEnabled() {
 		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)
 		if configErr != nil {
@@ -319,7 +320,10 @@ func main() {
 	reportHandler := report.NewHandler(reportService)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler)
+	clientVerifyService := clientaudit.NewService(db, agentverifier.NewService(db), fabricSvc)
+	clientVerifyHandler := clientaudit.NewHandler(clientVerifyService)
+
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, clientVerifyHandler, db)
 	api.RegisterHealthRoutes(router, db)
 
 	port := os.Getenv("PORT")
