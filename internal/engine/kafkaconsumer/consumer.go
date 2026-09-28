@@ -15,6 +15,7 @@ import (
 
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/engine/stats"
 	"go-blockchain-api/internal/storage/snapshotstore"
 
 	"github.com/segmentio/kafka-go"
@@ -577,6 +578,11 @@ func (e *Engine) processMessage(msg kafka.Message, cfg models.ClientKafkaConfig)
 
 		if err := tx.Create(auditLog).Error; err != nil {
 			return fmt.Errorf("gagal simpan audit log: %w", err)
+		}
+
+		// Update dashboard stats
+		if err := stats.RecordLogStats(tx, auditLog.ClientID, auditLog.Action); err != nil {
+			log.Printf("?  [KafkaConsumer] Gagal update statistik dashboard: %v", err)
 		}
 		if snapshotOutbox != nil {
 			if err := tx.Create(snapshotOutbox).Error; err != nil {

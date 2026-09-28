@@ -229,6 +229,49 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 	}
 
 	response.Summary["total"] = len(response.Results)
+	// Update Verify Stats
+	if len(response.Results) > 0 {
+		var stat models.ClientDashboardStats
+		if err := s.db.Where("client_id = ?", clientID).First(&stat).Error; err == nil {
+			var tableResults map[string]interface{}
+			json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
+			if tableResults == nil {
+				tableResults = make(map[string]interface{})
+			}
+			tableResults[tableName] = response.Summary
+			newJSON, _ := json.Marshal(tableResults)
+
+			totalValid := int64(response.Summary["valid"])
+			totalTampered := int64(response.Summary["tampered_onchain"] + response.Summary["tampered_offchain"])
+			totalPending := int64(response.Summary["pending"])
+			totalAgentError := int64(response.Summary["agent_error"])
+			totalFabricError := int64(response.Summary["fabric_error"])
+			totalVerified := totalValid + totalTampered + totalPending + totalAgentError + totalFabricError
+
+			var pct float64
+			newTotalVerifications := stat.TotalVerifications + totalVerified
+			newTotalValid := stat.TotalValid + totalValid
+			if newTotalVerifications > 0 {
+				pct = float64(newTotalValid) / float64(newTotalVerifications) * 100
+			}
+
+			now := time.Now()
+			s.db.Model(&stat).Updates(map[string]interface{}{
+				"last_verified_at":     now,
+				"last_verified_table":  tableName,
+				"total_verifications":  newTotalVerifications,
+				"total_rows_verified":  gorm.Expr("total_rows_verified + ?", totalVerified), // or keep track uniquely
+				"total_valid":          newTotalValid,
+				"total_tampered":       stat.TotalTampered + totalTampered,
+				"total_verify_pending": stat.TotalVerifyPending + totalPending,
+				"total_agent_error":    stat.TotalAgentError + totalAgentError,
+				"total_fabric_error":   stat.TotalFabricError + totalFabricError,
+				"integrity_score":      pct,
+				"table_verify_results": string(newJSON),
+			})
+		}
+	}
+
 	return response, nil
 }
 
