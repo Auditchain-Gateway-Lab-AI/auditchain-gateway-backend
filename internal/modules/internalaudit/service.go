@@ -979,7 +979,10 @@ func (s *auditService) verifyClientLogIntegrity(logID, clientID, requestID strin
 	// Buat copy log dan rehash dengan data dari agent
 	canonicalizeLog(auditLog)
 	logCopy := *auditLog
-	if agentResult.ClientMetadata != "" {
+	// HANYA gunakan ClientMetadata dari agen JIKA ada perbedaan data nyata (IsMatch = false).
+	// Jika data sebenarnya persis sama, gunakan string Metadata orisinil untuk menjamin
+	// urutan key JSON identik, sehingga tidak menghasilkan false-positive saat re-hash.
+	if agentResult.ClientMetadata != "" && !agentResult.IsMatch {
 		logCopy.Metadata = agentResult.ClientMetadata
 	}
 	recalculatedHash := hasher.GenerateLogHash(&logCopy)
@@ -1012,6 +1015,10 @@ func (s *auditService) verifyClientLogIntegrity(logID, clientID, requestID strin
 	}
 
 	if reconstructedRoot != fabricResponse.MerkleRoot {
+		agStatus := "mismatch"
+		if agentResult.IsMatch {
+			agStatus = "matched"
+		}
 		return &VerificationResult{
 			Status:             "failed_onchain",
 			Message:            "🚨 DATA TERMANIPULASI: Data klien saat ini tidak valid di mata Blockchain!",
@@ -1019,7 +1026,7 @@ func (s *auditService) verifyClientLogIntegrity(logID, clientID, requestID strin
 			LogID:              auditLog.LogID,
 			DBRoot:             reconstructedRoot,
 			ChainRoot:          fabricResponse.MerkleRoot,
-			AgentStatus:        "mismatch",
+			AgentStatus:        agStatus,
 			AgentDiscrepancies: agentResult.Discrepancies,
 		}, nil
 	}
