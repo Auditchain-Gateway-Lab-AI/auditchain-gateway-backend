@@ -198,6 +198,30 @@ func (h *Handler) CreateClient(c *gin.Context) {
 	})
 }
 
+func (h *Handler) RegenerateAPIKey(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
+		return
+	}
+
+	newAPIKey, err := h.Service.RegenerateAPIKey(id)
+	if err != nil {
+		if err.Error() == "klien tidak ditemukan" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "API Key berhasil diregenerate",
+		"client_id": id,
+		"api_key":   newAPIKey,
+	})
+}
+
 func (h *Handler) DeleteKafkaConfig(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
