@@ -27,7 +27,7 @@ type IncidentListResponse struct {
 }
 
 type IncidentDetailResponse struct {
-	Data models.TamperIncident `json:"data"`
+	Data IncidentDetailView `json:"data"`
 }
 
 type RequestListResponse struct {
@@ -103,7 +103,7 @@ func (h *Handler) GetIncident(c *gin.Context) {
 	if !ok {
 		return
 	}
-	incident, err := h.Service.GetIncident(c.Request.Context(), clientID, c.Param("id"))
+	incident, err := h.Service.GetIncidentDetail(c.Request.Context(), clientID, c.Param("id"))
 	if serviceErrorCode(err, "incident_not_found") {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Tamper incident tidak ditemukan."})
 		return

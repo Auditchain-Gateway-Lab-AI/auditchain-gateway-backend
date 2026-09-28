@@ -2,11 +2,14 @@ package api
 
 import (
 	"go-blockchain-api/internal/blockchain/agentverifier"
+	"go-blockchain-api/internal/middleware"
 	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
+	"os"
+	"strings"
 
 	_ "go-blockchain-api/docs"
 
@@ -25,11 +28,21 @@ func SetupRouter(
 	recoveryHandler *recovery.Handler,
 ) *gin.Engine {
 	router := gin.Default()
+	router.Use(middleware.RequestID())
 
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowAllOrigins = true
+
+	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+	if allowedOrigins != "" {
+		corsConfig.AllowOrigins = strings.Split(allowedOrigins, ",")
+	} else {
+		// Fallback for development if not set, but warn
+		corsConfig.AllowAllOrigins = true
+	}
+
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", middleware.RequestIDHeader}
+	corsConfig.ExposeHeaders = []string{middleware.RequestIDHeader}
 	router.Use(cors.New(corsConfig))
 
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

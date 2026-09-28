@@ -29,6 +29,7 @@ type AuditRepository interface {
 	UpsertClientTable(clientID, tableName, action, actor string, ts time.Time) error
 	GetLogsByResource(resource, clientID string) ([]models.AuditLog, error)
 	GetTableResources(tableName, clientID string) ([]models.AuditLog, error)
+	CountLogsByTimeRange(from, to time.Time, clientID string) (int64, error)
 	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
 }
 
@@ -314,4 +315,12 @@ func (r *auditRepoImpl) GetLogsByTimeRange(from, to time.Time, clientID string) 
 	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ? AND "+clientAuditEventPredicate, clientID, from, to).
 		Order("timestamp asc").Find(&logs).Error
 	return logs, err
+}
+
+func (r *auditRepoImpl) CountLogsByTimeRange(from, to time.Time, clientID string) (int64, error) {
+	var total int64
+	err := r.db.Model(&models.AuditLog{}).
+		Where("client_id = ? AND timestamp BETWEEN ? AND ? AND "+clientAuditEventPredicate, clientID, from, to).
+		Count(&total).Error
+	return total, err
 }

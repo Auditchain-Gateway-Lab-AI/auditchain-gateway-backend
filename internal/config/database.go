@@ -48,6 +48,13 @@ func ConnectDB() *gorm.DB {
 	if err := db.Exec("UPDATE snapshot_outboxes SET event_type = 'STORE_AUDIT_SNAPSHOT' WHERE event_type IS NULL OR event_type = ''").Error; err != nil {
 		log.Fatalf("Gagal menormalisasi event type snapshot outbox lama: %v", err)
 	}
+	// The incident lifecycle is intentionally limited to OPEN and RESOLVED.
+	// Older deployments persisted intermediate/terminal states that no longer
+	// have a user-facing action. Keep unresolved legacy incidents actionable
+	// and keep legacy dismissed rows closed before rebuilding the active index.
+	if err := normalizeLegacyTamperStatuses(db); err != nil {
+		log.Fatalf("Gagal menormalisasi status incident tamper lama: %v", err)
+	}
 
 	// Satu log boleh memiliki banyak incident historis (misalnya setelah
 	// recovery dan kemudian tamper lagi), tetapi hanya boleh ada satu incident
@@ -82,7 +89,16 @@ func ensureTamperIncidentActiveIndex(db *gorm.DB) error {
 		return tx.Exec(`
 			CREATE UNIQUE INDEX idx_tamper_active
 			ON tamper_incidents (client_id, log_id, incident_type)
-			WHERE status IN ('OPEN', 'UNDER_REVIEW', 'RECOVERING')
+			WHERE status = 'OPEN'
 		`).Error
+	})
+}
+
+func normalizeLegacyTamperStatuses(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE tamper_incidents SET status = 'OPEN' WHERE status IN ('UNDER_REVIEW', 'RECOVERING')").Error; err != nil {
+			return err
+		}
+		return tx.Exec("UPDATE tamper_incidents SET status = 'RESOLVED' WHERE status = 'DISMISSED'").Error
 	})
 }

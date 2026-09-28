@@ -1,11 +1,14 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"go-blockchain-api/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,8 +17,27 @@ type Handler struct {
 	Service Service
 }
 
+const (
+	defaultAuditLogPageSize = 10
+	maxAuditLogPageSize     = 100
+)
+
 func NewHandler(service Service) *Handler {
 	return &Handler{Service: service}
+}
+
+func normalizeAuditLogPageSize(raw string) int {
+	if raw == "" {
+		return defaultAuditLogPageSize
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return defaultAuditLogPageSize
+	}
+	if parsed > maxAuditLogPageSize {
+		return maxAuditLogPageSize
+	}
+	return parsed
 }
 
 func (h *Handler) getClientID(c *gin.Context) (string, bool) {
@@ -87,6 +109,12 @@ type RecentLogsResponse struct {
 		TotalPages int `json:"total_pages"`
 	} `json:"pagination"`
 	Note string `json:"note,omitempty"`
+}
+
+type VerifyRangeEstimateResponse struct {
+	EstimatedItems int64 `json:"estimated_items"`
+	SyncLimit      int   `json:"sync_limit"`
+	CanVerifySync  bool  `json:"can_verify_sync"`
 }
 
 type ResourceInventoryItem struct {
@@ -295,12 +323,7 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 		}
 	}
 
-	pageSize := 10
-	if ps := c.Query("page_size"); ps != "" {
-		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 {
-			pageSize = parsed
-		}
-	}
+	pageSize := normalizeAuditLogPageSize(c.Query("page_size"))
 
 	integrityStatus := strings.TrimSpace(c.Query("integrity_status"))
 	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
@@ -479,39 +502,82 @@ func parseTimeRobust(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("cannot parse time: %s", timeStr)
 }
 
+func parseVerifyRangeBounds(c *gin.Context) (time.Time, time.Time, bool) {
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+
+	if fromStr == "" || toStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Parameter 'from' dan 'to' wajib diisi (format: RFC3339)"})
+		return time.Time{}, time.Time{}, false
+	}
+
+	from, err := parseTimeRobust(fromStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan format seperti: 2026-06-26T10:00:00Z atau 2026-06-29 10:26:32.54+07"})
+		return time.Time{}, time.Time{}, false
+	}
+
+	to, err := parseTimeRobust(toStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid. Gunakan format seperti: 2026-06-26T10:05:00Z atau 2026-06-29 10:26:32.54+07"})
+		return time.Time{}, time.Time{}, false
+	}
+
+	if to.Before(from) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "'to' tidak boleh lebih awal dari 'from'"})
+		return time.Time{}, time.Time{}, false
+	}
+
+	return from, to, true
+}
+
+func (h *Handler) EstimateLogRange(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	from, to, ok := parseVerifyRangeBounds(c)
+	if !ok {
+		return
+	}
+
+	estimatedItems, err := h.Service.EstimateLogRange(from, to, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung estimasi log pada range"})
+		return
+	}
+
+	c.JSON(http.StatusOK, VerifyRangeEstimateResponse{
+		EstimatedItems: estimatedItems,
+		SyncLimit:      MaxSynchronousVerifyRange,
+		CanVerifySync:  estimatedItems <= MaxSynchronousVerifyRange,
+	})
+}
+
 func (h *Handler) VerifyLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
 		return
 	}
 
-	fromStr := c.Query("from")
-	toStr := c.Query("to")
-
-	if fromStr == "" || toStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Parameter 'from' dan 'to' wajib diisi (format: RFC3339)"})
+	from, to, ok := parseVerifyRangeBounds(c)
+	if !ok {
 		return
 	}
 
-	from, err := parseTimeRobust(fromStr)
+	result, err := h.Service.VerifyLogRange(from, to, clientID, middleware.GetRequestID(c))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan format seperti: 2026-06-26T10:00:00Z atau 2026-06-29 10:26:32.54+07"})
-		return
-	}
-
-	to, err := parseTimeRobust(toStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid. Gunakan format seperti: 2026-06-26T10:05:00Z atau 2026-06-29 10:26:32.54+07"})
-		return
-	}
-
-	if to.Before(from) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "'to' tidak boleh lebih awal dari 'from'"})
-		return
-	}
-
-	result, err := h.Service.VerifyLogRange(from, to, clientID)
-	if err != nil {
+		var tooLarge *VerifyRangeTooLargeError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"code":            "VERIFY_RANGE_TOO_LARGE",
+				"error":           "Range terlalu besar untuk verifikasi sinkron. Persempit date range atau tunggu fitur background job.",
+				"estimated_items": tooLarge.EstimatedItems,
+				"sync_limit":      tooLarge.Limit,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memverifikasi range log"})
 		return
 	}

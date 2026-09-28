@@ -36,6 +36,14 @@ type IncidentFilter struct {
 	Status string
 }
 
+// IncidentDetailView keeps the encrypted evidence private while exposing the
+// original metadata needed by the tenant-scoped recovery comparison UI.
+type IncidentDetailView struct {
+	models.TamperIncident
+	TamperedMetadata          interface{} `json:"tampered_metadata,omitempty"`
+	TamperedEvidenceAvailable bool        `json:"tampered_evidence_available"`
+}
+
 type VersionView struct {
 	LogID              string     `json:"log_id"`
 	Action             string     `json:"action"`
@@ -193,6 +201,66 @@ func (s *Service) GetIncident(ctx context.Context, clientID, incidentID string) 
 	return &incident, nil
 }
 
+func (s *Service) GetIncidentDetail(ctx context.Context, clientID, incidentID string) (*IncidentDetailView, error) {
+	incident, err := s.GetIncident(ctx, clientID, incidentID)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &IncidentDetailView{TamperIncident: *incident}
+	if len(incident.TamperedPayload) == 0 || s.cipher == nil {
+		return detail, nil
+	}
+
+	metadata, err := decryptTamperedMetadata(s.cipher, incident.TamperedPayload)
+	if err != nil {
+		return nil, fmt.Errorf("tampered_evidence_decrypt_failed: %w", err)
+	}
+	detail.TamperedMetadata = metadata
+	detail.TamperedEvidenceAvailable = true
+	return detail, nil
+}
+
+func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (interface{}, error) {
+	if cipher == nil {
+		return nil, errors.New("tampered_evidence_cipher_unavailable")
+	}
+	plaintext, err := cipher.Decrypt(encrypted)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Metadata json.RawMessage `json:"metadata"`
+	}
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Metadata) == 0 || string(payload.Metadata) == "null" {
+		return nil, nil
+	}
+
+	// AuditLog.Metadata is stored as a JSON string, but accepting an object as
+	// well keeps this reader compatible with older evidence formats.
+	var encodedMetadata string
+	if err := json.Unmarshal(payload.Metadata, &encodedMetadata); err == nil {
+		if encodedMetadata == "" {
+			return nil, nil
+		}
+		var metadata interface{}
+		if err := json.Unmarshal([]byte(encodedMetadata), &metadata); err != nil {
+			return encodedMetadata, nil
+		}
+		return metadata, nil
+	}
+
+	var metadata interface{}
+	if err := json.Unmarshal(payload.Metadata, &metadata); err != nil {
+		return nil, err
+	}
+	return metadata, nil
+}
+
 func (s *Service) ListRequests(ctx context.Context, clientID, status string) ([]models.RecoveryRequest, error) {
 	query := s.db.WithContext(ctx).Where("client_id = ?", clientID).Order("requested_at DESC")
 	if strings.TrimSpace(status) != "" {
@@ -311,7 +379,7 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved || incident.Status == models.IncidentStatusDismissed {
+	if incident.Status == models.IncidentStatusResolved {
 		return nil, errors.New("incident_closed")
 	}
 	var logRow models.AuditLog
@@ -397,7 +465,7 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved || incident.Status == models.IncidentStatusDismissed {
+	if incident.Status == models.IncidentStatusResolved {
 		return nil, errors.New("incident_closed")
 	}
 
@@ -481,12 +549,10 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 	if err := s.ensureTargetNeedsRecovery(ctx, request, snapshot.HashValue); err != nil {
 		return nil, err
 	}
+	// Incident lifecycle stays OPEN until the trusted snapshot is actually
+	// restored. Request status carries the pending/executing outcome.
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(request).Error; err != nil {
-			return err
-		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", incident.ID, models.IncidentStatusOpen).
-			Update("status", models.IncidentStatusUnderReview).Error
+		return tx.Create(request).Error
 	}); err != nil {
 		return nil, err
 	}
@@ -528,11 +594,6 @@ func (s *Service) transitionRequest(ctx context.Context, clientID, requestID, ac
 		if err := tx.Model(&request).Updates(updates).Error; err != nil {
 			return err
 		}
-		if next == models.RecoveryStatusRejected {
-			if err := tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusUnderReview).Update("status", models.IncidentStatusOpen).Error; err != nil {
-				return err
-			}
-		}
 		request.Status = next
 		return nil
 	})
@@ -565,7 +626,9 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ?", request.IncidentID).Update("status", models.IncidentStatusRecovering).Error
+		// The incident remains OPEN while the request is executing; a
+		// successful recovery changes it to RESOLVED in executeSnapshot.
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -833,7 +896,7 @@ func (s *Service) recordFailedExecution(ctx context.Context, request *models.Rec
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.TamperIncident{}).Where("id = ? AND status = ?", request.IncidentID, models.IncidentStatusRecovering).Update("status", models.IncidentStatusUnderReview).Error
+		return nil
 	})
 }
 
