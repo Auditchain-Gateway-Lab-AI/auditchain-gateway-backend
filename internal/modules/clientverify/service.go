@@ -67,13 +67,12 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 		Table:      tableName,
 		VerifiedAt: time.Now().UTC(),
 		Summary: map[string]int{
-			"total":             len(latestLogs),
-			"valid":             0,
-			"tampered_offchain": 0,
-			"tampered_onchain":  0,
-			"pending":           0,
-			"agent_error":       0,
-			"fabric_error":      0,
+			"total":            len(latestLogs),
+			"valid":            0,
+			"tampered_onchain": 0,
+			"pending":          0,
+			"agent_error":      0,
+			"fabric_error":     0,
 		},
 		Results: make([]RowVerificationResult, 0, len(latestLogs)),
 	}
@@ -93,21 +92,12 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 			res.BlockchainTxID = *logRow.BlockchainTxID
 		}
 
-		// 1. Offchain Verification (Agent)
+		// Ambil hash aktual dari data klien (Agent)
 		agentResult, err := s.agent.VerifyAgainstAgent(&logRow)
 		if err != nil {
 			res.Status = "AGENT_ERROR"
 			res.Message = "Gagal menghubungi agen klien: " + err.Error()
 			response.Summary["agent_error"]++
-			response.Results = append(response.Results, res)
-			continue
-		}
-
-		if !agentResult.IsMatch {
-			res.Status = "TAMPERED_OFFCHAIN"
-			res.Message = "Metadata log tidak sesuai dengan data aktual di database klien."
-			res.Discrepancies = agentResult.Discrepancies
-			response.Summary["tampered_offchain"]++
 			response.Results = append(response.Results, res)
 			continue
 		}
@@ -155,21 +145,26 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 			anchors[anchorID] = chainRoot
 		}
 
-		// Re-hash lokal untuk memastikan data log di gateway belum dirusak
-		recalculatedHash := hasher.GenerateLogHash(&logRow)
-		if recalculatedHash != logRow.HashValue {
-			res.Status = "TAMPERED_OFFCHAIN"
-			res.Message = "Hash lokal tidak cocok (data log di gateway telah dirusak)."
-			response.Summary["tampered_offchain"]++
-			response.Results = append(response.Results, res)
-			continue
+		// 3. Tentukan Hash Klien
+		// Jika data klien tidak cocok dengan log (agentResult.IsMatch == false),
+		// maka secara logis hash klien berbeda dengan hash di log.
+		clientHash := logRow.HashValue
+		if !agentResult.IsMatch {
+			clientHash = "tampered_client_data"
 		}
 
-		// Reconstruct Merkle Root
+		// Pastikan log gateway tidak dirusak agar Merkle Proof valid
+		recalculatedHash := hasher.GenerateLogHash(&logRow)
+		if recalculatedHash != logRow.HashValue {
+			clientHash = "tampered_gateway_log"
+		}
+
+		// 4. Reconstruct Merkle Root
+		// Menggunakan clientHash agar validasi dilakukan pure terhadap Onchain Root.
 		var proofs []models.MerkleProof
 		s.db.Where("transaction_hash = ?", logRow.HashValue).Order("tree_level asc").Find(&proofs)
 
-		reconstructedRoot := logRow.HashValue
+		reconstructedRoot := clientHash
 		if len(proofs) > 0 {
 			proofData := make([]crypto.MerkleProofData, len(proofs))
 			for i, p := range proofs {
@@ -183,7 +178,10 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 
 		if reconstructedRoot != chainRoot {
 			res.Status = "TAMPERED_ONCHAIN"
-			res.Message = "Merkle Root tidak cocok dengan data anchor di blockchain."
+			res.Message = "Data klien tidak cocok dengan state yang terverifikasi di blockchain."
+			if !agentResult.IsMatch {
+				res.Discrepancies = agentResult.Discrepancies
+			}
 			response.Summary["tampered_onchain"]++
 			response.Results = append(response.Results, res)
 			continue
