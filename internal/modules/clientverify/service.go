@@ -53,59 +53,84 @@ func NewService(db *gorm.DB, agent *agentverifier.Service, fabric *blockchain.Fa
 }
 
 func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVerificationResponse, error) {
-	// Temukan semua log terbaru per baris dari tabel yang diminta
+	// 1. Ambil data full dari Agent (Ini menyelesaikan masalah row yang di-insert tanpa lewat Kafka)
+	agentRecords, err := s.agent.FetchTableData(clientID, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("gagal memuat data dari Agent: %w", err)
+	}
+
+	// 2. Ambil log terbaru dari Gateway
 	var latestLogs []models.AuditLog
-	query := s.db.Where("client_id = ? AND is_latest = true AND (resource = ? OR resource LIKE ?)", clientID, tableName, tableName+":%").
-		Where("COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'"). // Abaikan recovery events internal
+	resourcePrefix := tableName + ":"
+	query := s.db.Where("client_id = ? AND is_latest = true AND (resource = ? OR resource LIKE ?)", clientID, tableName, resourcePrefix+"%").
+		Where("COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'").
 		Order("timestamp DESC")
 
 	if err := query.Find(&latestLogs).Error; err != nil {
 		return nil, fmt.Errorf("gagal query log terbaru: %w", err)
 	}
 
+	gatewayLogsMap := make(map[string]models.AuditLog)
+	for _, log := range latestLogs {
+		gatewayLogsMap[log.Resource] = log
+	}
+
+	// Some gateway logs might not be in agent (deleted), so total could be bigger
+	// We will calculate total dynamically
+	
 	response := &BatchVerificationResponse{
 		Table:      tableName,
 		VerifiedAt: time.Now().UTC(),
 		Summary: map[string]int{
-			"total":            len(latestLogs),
+			"total":            0,
 			"valid":            0,
 			"tampered_onchain": 0,
 			"pending":          0,
 			"agent_error":      0,
 			"fabric_error":     0,
 		},
-		Results: make([]RowVerificationResult, 0, len(latestLogs)),
+		Results: make([]RowVerificationResult, 0),
 	}
 
-	// Cache fabric anchors untuk menghindari query berulang
 	anchors := make(map[string]string)
 
-	for _, logRow := range latestLogs {
+	// Verifikasi setiap record dari Agent
+	for _, agentRec := range agentRecords {
+		resourceID := tableName + ":" + agentRec.ID
+		logRow, exists := gatewayLogsMap[resourceID]
+
 		res := RowVerificationResult{
-			Resource:      logRow.Resource,
-			LogID:         logRow.LogID,
-			LastAction:    logRow.Action,
-			LastTimestamp: logRow.Timestamp,
+			Resource: resourceID,
 		}
+
+		if !exists {
+			// Data ada di klien tapi tidak ada di blockchain (Tampered)
+			res.Status = "TAMPERED_ONCHAIN"
+			res.Message = "Data ada di klien tapi tidak ada/hilang dari rekam jejak blockchain."
+			response.Summary["tampered_onchain"]++
+			response.Results = append(response.Results, res)
+			continue
+		}
+
+		// Hapus dari map untuk melacak mana yang sudah dihapus di klien
+		delete(gatewayLogsMap, resourceID)
+
+		res.LogID = logRow.LogID
+		res.LastAction = logRow.Action
+		res.LastTimestamp = logRow.Timestamp
 
 		if logRow.BlockchainTxID != nil {
 			res.BlockchainTxID = *logRow.BlockchainTxID
 		}
 
-		// Ambil hash aktual dari data klien (Agent)
-		agentResult, err := s.agent.VerifyAgainstAgent(&logRow)
-		if err != nil {
-			res.Status = "AGENT_ERROR"
-			res.Message = "Gagal menghubungi agen klien: " + err.Error()
-			response.Summary["agent_error"]++
-			response.Results = append(response.Results, res)
-			continue
-		}
+		// Bandingkan data dari agent dengan metadata log
+		diffs := s.agent.CompareResourceData(&logRow, &agentRec)
+		isMatch := len(diffs) == 0
 
-		// 2. Onchain Verification (Fabric)
+		// Onchain Verification
 		if logRow.Status != "ANCHORED" || logRow.BlockchainTxID == nil || strings.TrimSpace(*logRow.BlockchainTxID) == "" {
 			res.Status = "PENDING"
-			res.Message = "Data klien sesuai log (offchain valid), tetapi belum terjangkar di blockchain."
+			res.Message = "Data menunggu antrean anchoring ke blockchain."
 			response.Summary["pending"]++
 			response.Results = append(response.Results, res)
 			continue
@@ -145,22 +170,16 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 			anchors[anchorID] = chainRoot
 		}
 
-		// 3. Tentukan Hash Klien
-		// Jika data klien tidak cocok dengan log (agentResult.IsMatch == false),
-		// maka secara logis hash klien berbeda dengan hash di log.
 		clientHash := logRow.HashValue
-		if !agentResult.IsMatch {
+		if !isMatch {
 			clientHash = "tampered_client_data"
+			res.Discrepancies = diffs
 		}
-
-		// Pastikan log gateway tidak dirusak agar Merkle Proof valid
 		recalculatedHash := hasher.GenerateLogHash(&logRow)
 		if recalculatedHash != logRow.HashValue {
 			clientHash = "tampered_gateway_log"
 		}
 
-		// 4. Reconstruct Merkle Root
-		// Menggunakan clientHash agar validasi dilakukan pure terhadap Onchain Root.
 		var proofs []models.MerkleProof
 		s.db.Where("transaction_hash = ?", logRow.HashValue).Order("tree_level asc").Find(&proofs)
 
@@ -173,14 +192,14 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 					IsLeft:      p.IsLeft,
 				}
 			}
-			reconstructedRoot = crypto.ReconstructMerkleRoot(logRow.HashValue, proofData)
+			reconstructedRoot = crypto.ReconstructMerkleRoot(clientHash, proofData)
 		}
 
 		if reconstructedRoot != chainRoot {
 			res.Status = "TAMPERED_ONCHAIN"
 			res.Message = "Data klien tidak cocok dengan state yang terverifikasi di blockchain."
-			if !agentResult.IsMatch {
-				res.Discrepancies = agentResult.Discrepancies
+			if !isMatch {
+				res.Discrepancies = diffs
 			}
 			response.Summary["tampered_onchain"]++
 			response.Results = append(response.Results, res)
@@ -193,5 +212,23 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 		response.Results = append(response.Results, res)
 	}
 
+	// Sisanya di gatewayLogsMap berarti dihapus tanpa log (Tampered)
+	for resourceID, logRow := range gatewayLogsMap {
+		var res RowVerificationResult
+		res.Resource = resourceID
+		res.LogID = logRow.LogID
+		res.LastAction = logRow.Action
+		res.LastTimestamp = logRow.Timestamp
+		if logRow.BlockchainTxID != nil {
+			res.BlockchainTxID = *logRow.BlockchainTxID
+		}
+		res.Status = "TAMPERED_ONCHAIN"
+		res.Message = "Data tercatat di blockchain tapi hilang/dihapus dari database klien tanpa audit."
+		response.Summary["tampered_onchain"]++
+		response.Results = append(response.Results, res)
+	}
+
+	response.Summary["total"] = len(response.Results)
 	return response, nil
 }
+
