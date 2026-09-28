@@ -10,7 +10,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	dashAPI := routerGroup.Group("/dashboard")
 	dashAPI.Use(middleware.JWTAuth())
 	{
-		dashAPI.GET("/stats", h.GetStats)
+		// dashAPI.GET("/stats", h.GetStats) (Moved to client module)
 		dashAPI.GET("/logs", h.GetRecentLogs)
 		dashAPI.GET("/logs/by-resource/:resource", h.GetLogsByResource)
 		dashAPI.GET("/verify/:log_id", h.VerifyLog)
