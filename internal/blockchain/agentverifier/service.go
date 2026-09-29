@@ -45,9 +45,10 @@ type Discrepancy struct {
 type VerifyResult struct {
 	IsMatch       bool
 	SourceFound   bool
-	AgentUsed     bool
-	Discrepancies []Discrepancy
-	AgentRecord   *AuditTrailRecord
+	AgentUsed      bool
+	Discrepancies  []Discrepancy
+	AgentRecord    *AuditTrailRecord
+	ClientMetadata string
 }
 
 // Service mengelola request verifikasi ke Agent klien
@@ -149,13 +150,23 @@ func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.
 		}, nil
 	}
 
+	agentMeta := map[string]interface{}{}
+	if agentRec.DataLama != nil {
+		agentMeta["data_lama"] = agentRec.DataLama
+	}
+	if agentRec.DataBaru != nil {
+		agentMeta["data_baru"] = agentRec.DataBaru
+	}
+	clientMetadata := marshalToJSON(agentMeta)
+
 	discrepancies := s.compareFields(auditLog, agentRec)
 	return &VerifyResult{
-		IsMatch:       len(discrepancies) == 0,
-		SourceFound:   true,
-		AgentUsed:     true,
-		Discrepancies: discrepancies,
-		AgentRecord:   agentRec,
+		IsMatch:        len(discrepancies) == 0,
+		SourceFound:    true,
+		AgentUsed:      true,
+		Discrepancies:  discrepancies,
+		AgentRecord:    agentRec,
+		ClientMetadata: clientMetadata,
 	}, nil
 }
 
@@ -217,11 +228,13 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 
 	// Bandingkan metadata log dengan data aktual dari Agent
 	discrepancies := s.CompareResourceData(auditLog, resourceRec)
+	clientMetadata := marshalToJSON(resourceRec.Data)
 	return &VerifyResult{
-		IsMatch:       len(discrepancies) == 0,
-		SourceFound:   true,
-		AgentUsed:     true,
-		Discrepancies: discrepancies,
+		IsMatch:        len(discrepancies) == 0,
+		SourceFound:    true,
+		AgentUsed:      true,
+		Discrepancies:  discrepancies,
+		ClientMetadata: clientMetadata,
 	}, nil
 }
 
