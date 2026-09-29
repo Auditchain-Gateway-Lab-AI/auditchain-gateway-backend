@@ -15,6 +15,19 @@ import (
 type Engine struct {
 	DB             *gorm.DB
 	RecoveryCutoff *time.Time
+	// SnapshotRequired is an optional deployment-level override. A nil value
+	// preserves the legacy environment behaviour for callers that construct an
+	// Engine directly. The direct client-DB recovery mode sets this explicitly
+	// to false so the normal client CDC pipeline can still hash/anchor events
+	// when MinIO is intentionally disabled.
+	SnapshotRequired *bool
+}
+
+func (a *Engine) snapshotRequired() bool {
+	if a != nil && a.SnapshotRequired != nil {
+		return *a.SnapshotRequired
+	}
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true")
 }
 
 // ProcessBatch mengelompokkan log transaksi yang sudah di-hash dan membuat Merkle Root
@@ -33,7 +46,7 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 		// re-anchored by the new pipeline or keep the new-scope gate blocked.
 		query = query.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *a.RecoveryCutoff)
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("SNAPSHOT_REQUIRED_FOR_ANCHOR")), "true") {
+	if a.snapshotRequired() {
 		query = query.Where("snapshot_status = ?", models.SnapshotStatusVerified)
 	}
 	if err := query.Order("timestamp asc").Limit(batchSize).Find(&logs).Error; err != nil {
@@ -120,11 +133,12 @@ func (a *Engine) ProcessBatch(batchSize int) error {
 }
 
 // ProcessRecoveryBatch anchors recovery execution evidence independently from
-// client audit logs. A recovery event is eligible only after its own encrypted
-// MinIO snapshot has been verified.
+// client audit logs. Legacy events still require a verified snapshot; direct
+// client-DB events deliberately have no snapshot and are eligible once their
+// immutable Agent readback evidence has been recorded.
 func (a *Engine) ProcessRecoveryBatch(batchSize int) error {
 	var events []models.RecoveryEvent
-	if err := a.DB.Where("pipeline_status = ? AND snapshot_status = ?", models.RecoveryPipelineHashed, models.SnapshotStatusVerified).
+	if err := a.DB.Where("pipeline_status = ? AND (snapshot_status = ? OR (source_snapshot_object_key = '' AND cdc_status IN ?))", models.RecoveryPipelineHashed, models.SnapshotStatusVerified, []string{models.CDCStatusConfirmed, models.CDCStatusConflict, models.CDCStatusTimeout}).
 		Order("executed_at asc").Limit(batchSize).Find(&events).Error; err != nil {
 		return err
 	}

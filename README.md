@@ -132,6 +132,8 @@ MINIO_SECRET_KEY=ganti-dengan-secret-writer
 MINIO_USE_TLS=false
 APP_ENV=local
 RECOVERY_ENABLED=false
+RECOVERY_MODE=snapshot_legacy
+RECOVERY_CDC_TIMEOUT_SECONDS=120
 SNAPSHOT_WRITER_ENABLED=false
 SNAPSHOT_REQUIRED_FOR_ANCHOR=false
 SNAPSHOT_WORKER_CONCURRENCY=1
@@ -171,12 +173,19 @@ docker-compose logs -f api-gateway
 MinIO lokal tersedia pada S3 API `http://localhost:9000` dan console `http://localhost:9001`.
 Bucket `auditchain-recovery` dibuat oleh service initializer dengan versioning dan Object Lock.
 Jangan mengaktifkan `SNAPSHOT_WRITER_ENABLED` sebelum secret MinIO dan encryption key lokal sudah diganti.
-Aktifkan `RECOVERY_ENABLED=true` hanya setelah snapshot writer, validasi
-client-scope, dan smoke test recovery tervalidasi.
+Untuk jalur direct client-DB, gunakan `RECOVERY_ENABLED=true` dan
+`RECOVERY_MODE=agent_direct`. Jalur ini tidak memakai MinIO untuk recovery baru,
+tetapi tetap membutuhkan Fabric, konfigurasi Agent aktif, recovery token
+terpisah, dan endpoint `POST /recover/:table/:record_id` pada Agent client.
+Aktifkan recovery hanya setelah migration additive dan smoke test staging
+berhasil.
 Jika `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`, `SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan menolak start bila tidak.
 
-Recovery MVP memulihkan audit log target yang rusak dari snapshot MinIO yang dipilih.
-Pemulihan langsung ke database operasional klien (write-back lintas event, misalnya memilih V1 untuk menggantikan V3) tetap memerlukan Agent adapter terotorisasi dan menjadi fase lanjutan.
+Mode `snapshot_legacy` memulihkan audit log target dari snapshot MinIO untuk
+kompatibilitas. Mode `agent_direct` memulihkan row database operasional client
+yang sudah ada melalui Agent, tanpa SQL arbitrer dan tanpa membuat tabel baru.
+Request client tidak membutuhkan approval admin; tenant tetap dibatasi oleh
+`client_id` JWT.
 
 ### Deployment development melalui GitHub Actions
 
@@ -215,7 +224,7 @@ Detail secret, prasyarat server, verifikasi, dan troubleshooting tersedia pada
 | `GET` | `/api/dashboard/inventory` | 🔐 JWT | Daftar resource unik yang termonitor |
 | `GET` | `/api/dashboard/recovery/incidents` | 🔐 JWT | Daftar tamper incident |
 | `GET` | `/api/dashboard/recovery/incidents/:id` | 🔐 JWT | Detail tamper incident |
-| `GET` | `/api/dashboard/recovery/resources/:resource/versions` | 🔐 JWT | Daftar snapshot recovery terverifikasi |
+| `GET` | `/api/dashboard/recovery/resources/:resource/versions` | 🔐 JWT | Daftar event client ter-anchor untuk referensi recovery |
 | `GET` | `/api/dashboard/recovery/requests` | 🔐 JWT | Daftar recovery request, opsional filter `status` |
 | `GET` | `/api/dashboard/recovery/requests/:id` | 🔐 JWT | Detail recovery request |
 | `POST` | `/api/dashboard/recovery/requests` | 🔐 JWT | Membuat permintaan recovery |
@@ -224,6 +233,9 @@ Detail secret, prasyarat server, verifikasi, dan troubleshooting tersedia pada
 | `GET` | `/api/dashboard/agent/ping` | 🔐 JWT | Cek konektivitas Agent klien |
 
 > Catatan: dua endpoint `logs/by-resource` dan `verify-resource` direncanakan digabung menjadi satu endpoint, namun masih tertunda menunggu penyelesaian debugging konfigurasi Agent.
+
+Kontrak recovery direct, state machine, payload Agent, dan failure behavior
+dirangkum pada [Recovery API Contract](docs/RECOVERY_API_CONTRACT.md).
 
 ### Kontrak status riwayat resource
 

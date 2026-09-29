@@ -71,12 +71,14 @@ DB_DSN=...
 JWT_SECRET=...
 ```
 
-Tambahkan key Fabric, Redis, MinIO, recovery, snapshot, dan Tailscale yang
-memang dipakai deployment production. Nilai secret tidak boleh dicetak pada
-log workflow. Setiap key harus hanya muncul sekali; `deploy.sh` menolak baris
-malformed, key duplikat, dan nilai kosong untuk key wajib. Jika `.env` server
-lama memiliki konfigurasi yang berulang, pilih satu nilai canonical sebelum
-menyalinnya ke `BACKEND_ENV`.
+Tambahkan key Fabric, Redis, recovery, snapshot, Agent, dan Tailscale yang
+memang dipakai deployment production. Untuk cutover direct client-DB, gunakan
+`RECOVERY_MODE=agent_direct` hanya setelah Agent write contract sudah live dan
+staging E2E lulus. Nilai secret tidak boleh dicetak pada log workflow. Setiap
+key harus hanya muncul sekali; `deploy.sh` menolak baris malformed, key
+duplikat, dan nilai kosong untuk key wajib. Jika `.env` server lama memiliki
+konfigurasi yang berulang, pilih satu nilai canonical sebelum menyalinnya ke
+`BACKEND_ENV`.
 
 ## 2. Sebelum klik Run workflow
 
@@ -134,6 +136,23 @@ docker compose logs --tail=200 api-gateway
 curl -fsS http://127.0.0.1:8080/healthz
 curl -fsS http://127.0.0.1:8080/readyz
 ```
+
+Setelah cutover direct, verifikasi minimal:
+
+1. Agent `GET /health` dan `GET /verify/:table/:id` dapat dijangkau dari
+   container Gateway menggunakan verify token tenant yang benar;
+2. endpoint recovery Agent memakai recovery token terpisah dan menolak SQL atau
+   tabel/kolom di luar allowlist;
+3. preflight Gateway berhasil tanpa MinIO untuk incident pilot;
+4. satu recovery pilot menghasilkan `recovery_events` terpisah, event CDC
+   client, status `SUCCEEDED`, dan incident `RESOLVED` setelah verifikasi
+   Fabric;
+5. Agent/Fabric/CDC failure drill dilakukan sebelum traffic recovery diperluas.
+
+Jika Agent tidak dapat dijangkau, jangan menganggap data tampered. Status
+`agent_status=unreachable` hanya berarti pemeriksaan source belum dapat
+diselesaikan; integritas Gateway/Fabric harus tetap dibaca dari dimensinya
+sendiri.
 
 Jangan menyalin output yang berisi secret ke tiket atau chat.
 

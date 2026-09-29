@@ -448,7 +448,8 @@ func (h *Handler) DeleteClientUser(c *gin.Context) {
 
 type CreateAgentConfigRequest struct {
 	AgentURL       string `json:"agent_url" binding:"required" example:"http://192.168.11.50:9090"`
-	VerifyToken    string `json:"verify_token" binding:"required" example:"token-rahasia-acak-panjang"`
+	VerifyToken    string `json:"verify_token" binding:"required" example:"token-read-rahasia"`
+	RecoveryToken  string `json:"recovery_token,omitempty" example:"token-write-rahasia"`
 	TimeoutSeconds int    `json:"timeout_seconds" example:"5"`
 }
 
@@ -473,12 +474,16 @@ func (h *Handler) CreateAgentConfig(c *gin.Context) {
 	var existing models.AgentConfig
 	err := h.DB.Where("client_id = ?", clientID).First(&existing).Error
 	if err == nil {
-		h.DB.Model(&existing).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"agent_url":       req.AgentURL,
 			"verify_token":    req.VerifyToken,
 			"timeout_seconds": timeout,
 			"is_active":       true,
-		})
+		}
+		if strings.TrimSpace(req.RecoveryToken) != "" {
+			updates["recovery_token"] = req.RecoveryToken
+		}
+		h.DB.Model(&existing).Updates(updates)
 		c.JSON(http.StatusOK, gin.H{
 			"message":   "Konfigurasi Agent berhasil diperbarui",
 			"agent_url": req.AgentURL,
@@ -490,6 +495,7 @@ func (h *Handler) CreateAgentConfig(c *gin.Context) {
 		ClientID:       clientID,
 		AgentURL:       req.AgentURL,
 		VerifyToken:    req.VerifyToken,
+		RecoveryToken:  req.RecoveryToken,
 		TimeoutSeconds: timeout,
 		IsActive:       true,
 	}

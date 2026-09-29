@@ -63,7 +63,8 @@ func (h *Handler) clientOperator(c *gin.Context) bool {
 	roleName, _ := c.Get("role")
 	role, _ := roleName.(string)
 	role = strings.TrimSpace(role)
-	if strings.EqualFold(role, "admin") || strings.EqualFold(role, "administrator") {
+	normalizedRole := strings.ToLower(role)
+	if normalizedRole == "admin" || normalizedRole == "administrator" || strings.Contains(normalizedRole, "admin") || normalizedRole == "superuser" || normalizedRole == "platform_operator" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Recovery hanya dapat dijalankan oleh user client; admin platform tidak dapat mengeksekusi recovery."})
 		return false
 	}
@@ -115,13 +116,13 @@ func (h *Handler) GetIncident(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": incident})
 }
 
-// @Summary List candidate snapshots for recovery
-// @Description Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery pada insiden tertentu.
+// @Summary List trusted client recovery references
+// @Description Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Incident ID"
-// @Success 200 {object} map[string]interface{} "Daftar kandidat snapshot"
+// @Success 200 {object} map[string]interface{} "Daftar kandidat recovery"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 404 {object} ErrorResponse "Insiden tidak ditemukan"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil daftar kandidat"
@@ -140,7 +141,7 @@ func (h *Handler) ListCandidates(c *gin.Context) {
 }
 
 // @Summary Preflight check for recovery
-// @Description Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan tidak ada konflik sebelum recovery.
+// @Description Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
@@ -164,15 +165,15 @@ func (h *Handler) Preflight(c *gin.Context) {
 }
 
 // @Summary List snapshot versions by resource
-// @Description Mengambil histori versi snapshot dari sebuah resource (table).
+// @Description Mengambil histori event client ter-anchor dari sebuah resource (table).
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
 // @Param resource path string true "Resource/Table Name"
-// @Success 200 {object} map[string]interface{} "Histori versi snapshot"
+// @Success 200 {object} map[string]interface{} "Histori event client ter-anchor"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
-// @Failure 500 {object} ErrorResponse "Gagal mengambil histori snapshot recovery"
-// @Router /recovery/snapshots/{resource}/versions [get]
+// @Failure 500 {object} ErrorResponse "Gagal mengambil histori recovery"
+// @Router /recovery/resources/{resource}/versions [get]
 func (h *Handler) ListVersions(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -180,7 +181,7 @@ func (h *Handler) ListVersions(c *gin.Context) {
 	}
 	versions, err := h.Service.ListVersions(c.Request.Context(), clientID, c.Param("resource"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil histori snapshot recovery."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil histori recovery."})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": versions})
@@ -277,7 +278,7 @@ func (h *Handler) GetRequest(c *gin.Context) {
 }
 
 // @Summary Create recovery request
-// @Description Membuat permintaan baru untuk melakukan recovery data ke snapshot tertentu.
+// @Description Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.
 // @Tags Recovery
 // @Accept json
 // @Produce json
@@ -310,17 +311,6 @@ func (h *Handler) CreateRequest(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": request})
 }
 
-// @Summary Approve recovery request
-// @Description Menyetujui sebuah permintaan recovery (untuk backward compatibility).
-// @Tags Recovery
-// @Produce json
-// @Security BearerAuth
-// @Param id path string true "Request ID"
-// @Success 200 {object} RequestDetailResponse "Request berhasil disetujui"
-// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
-// @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
-// @Failure 409 {object} ErrorResponse "State request tidak sesuai"
-// @Router /recovery/requests/{id}/approve [post]
 func (h *Handler) Approve(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -334,17 +324,6 @@ func (h *Handler) Approve(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": request})
 }
 
-// @Summary Reject recovery request
-// @Description Menolak sebuah permintaan recovery.
-// @Tags Recovery
-// @Produce json
-// @Security BearerAuth
-// @Param id path string true "Request ID"
-// @Success 200 {object} RequestDetailResponse "Request berhasil ditolak"
-// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
-// @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
-// @Failure 409 {object} ErrorResponse "State request tidak sesuai"
-// @Router /recovery/requests/{id}/reject [post]
 func (h *Handler) Reject(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -359,7 +338,7 @@ func (h *Handler) Reject(c *gin.Context) {
 }
 
 // @Summary Execute recovery request
-// @Description Mengeksekusi permintaan recovery yang telah disetujui atau siap dieksekusi, memulihkan data dari S3.
+// @Description Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
@@ -390,9 +369,9 @@ func (h *Handler) respondServiceError(c *gin.Context, err error) {
 	switch {
 	case serviceErrorCode(err, "incident_not_found"), serviceErrorCode(err, "request_not_found"), serviceErrorCode(err, "snapshot_not_found"), serviceErrorCode(err, "recovery_event_not_found"):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Data recovery tidak ditemukan."})
-	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "legacy_recovery_out_of_scope"), serviceErrorCode(err, "snapshot_belum_verified"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "snapshot_checksum_missing"), serviceErrorCode(err, "snapshot_plaintext_hash_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"), serviceErrorCode(err, "anchor_missing"), serviceErrorCode(err, "merkle_root_missing"), serviceErrorCode(err, "recovery_not_required"):
+	case serviceErrorCode(err, "invalid_request"), serviceErrorCode(err, "invalid_request_state"), serviceErrorCode(err, "incident_closed"), serviceErrorCode(err, "legacy_recovery_out_of_scope"), serviceErrorCode(err, "snapshot_belum_verified"), serviceErrorCode(err, "snapshot_reference_missing"), serviceErrorCode(err, "snapshot_checksum_missing"), serviceErrorCode(err, "snapshot_plaintext_hash_missing"), serviceErrorCode(err, "cross_log_recovery_not_allowed"), serviceErrorCode(err, "anchor_missing"), serviceErrorCode(err, "merkle_root_missing"), serviceErrorCode(err, "recovery_not_required"), serviceErrorCode(err, "idempotency_conflict"), serviceErrorCode(err, "recovery_active_conflict"), serviceErrorCode(err, "client_source_incident_required"), serviceErrorCode(err, "reference_resource_mismatch"), serviceErrorCode(err, "client_source_unreachable"), serviceErrorCode(err, "reference_changed"), serviceErrorCode(err, "source_state_changed"), serviceErrorCode(err, "execution_timeout_unknown"), serviceErrorCode(err, "cdc_start_time_missing"), serviceErrorCode(err, "request_execution_state_changed"), serviceErrorCode(err, "reference_not_latest_client_event"), serviceErrorCode(err, "reference_latest_client_event_missing"), serviceErrorCode(err, "reference_local_hash_mismatch"), serviceErrorCode(err, "reference_merkle_proof_mismatch"), serviceErrorCode(err, "reference_fabric_root_mismatch"), serviceErrorCode(err, "reference_metadata_invalid"):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-	case serviceErrorCode(err, "recovery_storage_unavailable"), serviceErrorCode(err, "fabric_unavailable"):
+	case serviceErrorCode(err, "recovery_storage_unavailable"), serviceErrorCode(err, "fabric_unavailable"), serviceErrorCode(err, "fabric_anchor_unreachable"), serviceErrorCode(err, "reference_proof_read_failed"), serviceErrorCode(err, "agent_recovery_client_unavailable"), serviceErrorCode(err, "agent_not_configured"), serviceErrorCode(err, "agent_recovery_token_missing"), serviceErrorCode(err, "agent_recovery_unreachable"):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})

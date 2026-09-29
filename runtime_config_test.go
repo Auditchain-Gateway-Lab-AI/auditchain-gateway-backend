@@ -12,6 +12,7 @@ func TestValidateRecoveryScopeFlags(t *testing.T) {
 		recovery         bool
 		snapshotRequired bool
 		cutoff           *time.Time
+		mode             string
 		wantErr          bool
 	}{
 		{name: "disabled local", wantErr: false},
@@ -19,12 +20,19 @@ func TestValidateRecoveryScopeFlags(t *testing.T) {
 		{name: "recovery requires gate", recovery: true, cutoff: &cutoff, wantErr: true},
 		{name: "gate requires cutoff", snapshotRequired: true, wantErr: true},
 		{name: "production scope valid", recovery: true, snapshotRequired: true, cutoff: &cutoff, wantErr: false},
+		{name: "direct recovery does not require legacy cutoff", recovery: true, snapshotRequired: false, mode: "agent_direct", wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := validateRecoveryScopeFlags(tt.recovery, tt.snapshotRequired, tt.cutoff); (err != nil) != tt.wantErr {
+			if err := validateRecoveryScopeFlags(tt.recovery, tt.snapshotRequired, tt.cutoff, tt.mode); (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr=%v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateRecoveryScopeFlagsRejectsUnknownMode(t *testing.T) {
+	if err := validateRecoveryScopeFlags(false, false, nil, "unknown"); err == nil {
+		t.Fatal("unknown recovery mode accepted")
 	}
 }

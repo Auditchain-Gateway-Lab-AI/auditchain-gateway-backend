@@ -5,6 +5,7 @@
 package agentverifier
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,12 +44,17 @@ type Discrepancy struct {
 
 // VerifyResult adalah hasil verifikasi Lapis 3
 type VerifyResult struct {
-	IsMatch       bool
-	SourceFound   bool
+	IsMatch        bool
+	SourceFound    bool
 	AgentUsed      bool
 	Discrepancies  []Discrepancy
 	AgentRecord    *AuditTrailRecord
 	ClientMetadata string
+	// ClientStateHash is the canonical hash of the live operational row (or
+	// the canonical empty object when the row is missing). It is deliberately
+	// separate from the AuditLog leaf hash so source-state incidents can be
+	// correlated without pretending the client row is itself a Merkle leaf.
+	ClientStateHash string
 }
 
 // Service mengelola request verifikasi ke Agent klien
@@ -193,17 +199,21 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	// Jika action adalah DELETE, baris memang tidak boleh ada lagi
 	if auditLog.Action == "DELETE" {
 		if !resourceRec.Found {
+			clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
 			return &VerifyResult{
-				IsMatch:     true,
-				SourceFound: false,
-				AgentUsed:   true,
+				IsMatch:         true,
+				SourceFound:     false,
+				AgentUsed:       true,
+				ClientStateHash: clientHash,
 			}, nil
 		}
+		clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, resourceRec.Data)
 		// Baris masih ada padahal sudah di-DELETE — anomali
 		return &VerifyResult{
-			IsMatch:     false,
-			SourceFound: true,
-			AgentUsed:   true,
+			IsMatch:         false,
+			SourceFound:     true,
+			AgentUsed:       true,
+			ClientStateHash: clientHash,
 			Discrepancies: []Discrepancy{{
 				Field:   "existence",
 				InLog:   "DELETE — baris seharusnya tidak ada",
@@ -214,10 +224,12 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 
 	// Untuk INSERT/UPDATE — baris harus ada
 	if !resourceRec.Found {
+		clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
 		return &VerifyResult{
-			IsMatch:     false,
-			SourceFound: false,
-			AgentUsed:   true,
+			IsMatch:         false,
+			SourceFound:     false,
+			AgentUsed:       true,
+			ClientStateHash: clientHash,
 			Discrepancies: []Discrepancy{{
 				Field:   "existence",
 				InLog:   fmt.Sprintf("%s — baris seharusnya ada", auditLog.Action),
@@ -229,24 +241,30 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	// Bandingkan metadata log dengan data aktual dari Agent
 	discrepancies := s.CompareResourceData(auditLog, resourceRec)
 	clientMetadata := marshalToJSON(resourceRec.Data)
+	clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, resourceRec.Data)
 	return &VerifyResult{
-		IsMatch:        len(discrepancies) == 0,
-		SourceFound:    true,
-		AgentUsed:      true,
-		Discrepancies:  discrepancies,
-		ClientMetadata: clientMetadata,
+		IsMatch:         len(discrepancies) == 0,
+		SourceFound:     true,
+		AgentUsed:       true,
+		Discrepancies:   discrepancies,
+		ClientMetadata:  clientMetadata,
+		ClientStateHash: clientHash,
 	}, nil
 }
 
 // fetchResourceFromAgent memanggil GET <agent_url>/verify/<table>/<id>
 func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
+	return s.fetchResourceFromAgentContext(context.Background(), cfg, tableName, resourceID)
+}
+
+func (s *Service) fetchResourceFromAgentContext(ctx context.Context, cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 
 	url := agentVerifyURL(cfg.AgentURL, tableName, resourceID)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

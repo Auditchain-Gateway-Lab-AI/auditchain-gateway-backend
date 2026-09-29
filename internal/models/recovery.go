@@ -31,9 +31,32 @@ const (
 	RecoveryStatusSucceeded          = "SUCCEEDED"
 	RecoveryStatusFailedVerification = "FAILED_VERIFICATION"
 	RecoveryStatusFailedExecution    = "FAILED_EXECUTION"
+	RecoveryStatusAppliedAwaitingCDC = "APPLIED_AWAITING_CDC"
+	RecoveryStatusAppliedCDCTimeout  = "APPLIED_CDC_TIMEOUT"
+
+	RecoveryScopeGatewayIntegrity = "GATEWAY_INTEGRITY"
+	RecoveryScopeClientSource     = "CLIENT_SOURCE"
+
+	SourceStatusMatched           = "MATCHED"
+	SourceStatusMismatch          = "MISMATCH"
+	SourceStatusMissing           = "MISSING"
+	SourceStatusUnexpectedPresent = "UNEXPECTED_PRESENT"
+	SourceStatusUnreachable       = "UNREACHABLE"
+	SourceStatusNotComparable     = "NOT_COMPARABLE"
+
+	RecoveryOperationUpsert = "UPSERT"
+	RecoveryOperationDelete = "DELETE"
+	RecoveryOperationNoop   = "NOOP"
+
+	CDCStatusPending   = "PENDING"
+	CDCStatusConfirmed = "CONFIRMED"
+	CDCStatusTimeout   = "TIMEOUT"
+	CDCStatusConflict  = "CONFLICT"
 
 	RecoveryEventTypeExecution = "RECOVERY_EXECUTION"
 	RecoveryResultSucceeded    = "SUCCEEDED"
+	RecoveryResultAwaitingCDC  = "APPLIED_AWAITING_CDC"
+	RecoveryResultCDCTimeout   = "APPLIED_CDC_TIMEOUT"
 	RecoveryResultVerification = "FAILED_VERIFICATION"
 	RecoveryResultExecution    = "FAILED_EXECUTION"
 	RecoveryPipelineHashed     = "HASHED"
@@ -62,17 +85,23 @@ type SnapshotOutbox struct {
 }
 
 type TamperIncident struct {
-	ID              string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	ClientID        string     `gorm:"type:varchar(36);not null;index" json:"client_id"`
-	LogID           string     `gorm:"type:varchar(100);not null;index" json:"log_id"`
-	Resource        string     `gorm:"type:varchar(255);not null;index" json:"resource"`
-	IncidentType    string     `gorm:"type:varchar(80);not null;index" json:"incident_type"`
-	ExpectedHash    string     `gorm:"type:varchar(64)" json:"expected_hash"`
-	DetectedHash    string     `gorm:"type:varchar(64)" json:"detected_hash"`
-	TamperedPayload []byte     `gorm:"type:bytea" json:"-"`
-	Status          string     `gorm:"type:varchar(30);not null;index;default:'OPEN'" json:"status"`
-	DetectedAt      time.Time  `gorm:"autoCreateTime;index" json:"detected_at"`
-	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+	ID                 string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	ClientID           string     `gorm:"type:varchar(36);not null;index" json:"client_id"`
+	LogID              string     `gorm:"type:varchar(100);not null;index" json:"log_id"`
+	Resource           string     `gorm:"type:varchar(255);not null;index" json:"resource"`
+	IncidentType       string     `gorm:"type:varchar(80);not null;index" json:"incident_type"`
+	ExpectedHash       string     `gorm:"type:varchar(64)" json:"expected_hash"`
+	DetectedHash       string     `gorm:"type:varchar(64)" json:"detected_hash"`
+	TamperedPayload    []byte     `gorm:"type:bytea" json:"-"`
+	Status             string     `gorm:"type:varchar(30);not null;index;default:'OPEN'" json:"status"`
+	IncidentScope      string     `gorm:"type:varchar(30);not null;index;default:'GATEWAY_INTEGRITY'" json:"incident_scope"`
+	SourceStatus       string     `gorm:"type:varchar(30);index" json:"source_status,omitempty"`
+	ReferenceLogID     string     `gorm:"type:varchar(100);index" json:"reference_log_id,omitempty"`
+	DetectedStateHash  string     `gorm:"type:varchar(64)" json:"detected_state_hash,omitempty"`
+	DiscrepancySummary string     `gorm:"type:jsonb" json:"discrepancy_summary,omitempty"`
+	LastConfirmedAt    *time.Time `gorm:"index" json:"last_confirmed_at,omitempty"`
+	DetectedAt         time.Time  `gorm:"autoCreateTime;index" json:"detected_at"`
+	ResolvedAt         *time.Time `json:"resolved_at,omitempty"`
 }
 
 type RecoveryRequest struct {
@@ -81,29 +110,45 @@ type RecoveryRequest struct {
 	IncidentID        string `gorm:"type:varchar(36);not null;index" json:"incident_id"`
 	TargetLogID       string `gorm:"type:varchar(100);not null" json:"target_log_id"`
 	SelectedLogID     string `gorm:"type:varchar(100);not null" json:"selected_log_id"`
-	SnapshotObjectKey string `gorm:"type:text;not null" json:"snapshot_object_key"`
-	SnapshotVersionID string `gorm:"type:varchar(255);not null" json:"snapshot_version_id"`
+	SnapshotObjectKey string `gorm:"type:text" json:"snapshot_object_key,omitempty"`
+	SnapshotVersionID string `gorm:"type:varchar(255)" json:"snapshot_version_id,omitempty"`
 	// These frozen references are nullable at the database level so AutoMigrate
 	// can be applied safely to installations that already contain legacy
 	// recovery requests. New requests are rejected unless all values are set.
-	SnapshotChecksum      string     `gorm:"type:varchar(64)" json:"snapshot_checksum"`
-	SnapshotPlaintextHash string     `gorm:"type:varchar(64)" json:"snapshot_plaintext_hash"`
-	AnchorID              string     `gorm:"type:varchar(100)" json:"anchor_id"`
-	ExpectedMerkleRoot    string     `gorm:"type:varchar(64)" json:"expected_merkle_root"`
-	RequestedBy           string     `gorm:"type:varchar(36);not null" json:"requested_by"`
-	ApprovedBy            string     `gorm:"type:varchar(36)" json:"approved_by,omitempty"`
-	ExecutedBy            string     `gorm:"type:varchar(36)" json:"executed_by,omitempty"`
-	Reason                string     `gorm:"type:text;not null" json:"reason"`
-	Status                string     `gorm:"type:varchar(35);not null;index;default:'PENDING_EXECUTION'" json:"status"`
-	IdempotencyKey        string     `gorm:"type:varchar(100);not null;uniqueIndex:idx_recovery_idempotency" json:"idempotency_key"`
-	BeforeHash            string     `gorm:"type:varchar(64)" json:"before_hash,omitempty"`
-	AfterHash             string     `gorm:"type:varchar(64)" json:"after_hash,omitempty"`
-	FailureReason         string     `gorm:"type:text" json:"failure_reason,omitempty"`
-	RequestedAt           time.Time  `gorm:"autoCreateTime;index" json:"requested_at"`
-	ApprovedAt            *time.Time `json:"approved_at,omitempty"`
-	ExecutedAt            *time.Time `json:"executed_at,omitempty"`
-	ExecutionStartedAt    *time.Time `json:"execution_started_at,omitempty"`
-	RecoveryEventID       string     `gorm:"type:varchar(36);uniqueIndex" json:"recovery_event_id,omitempty"`
+	SnapshotChecksum      string `gorm:"type:varchar(64)" json:"snapshot_checksum"`
+	SnapshotPlaintextHash string `gorm:"type:varchar(64)" json:"snapshot_plaintext_hash"`
+	AnchorID              string `gorm:"type:varchar(100)" json:"anchor_id"`
+	ExpectedMerkleRoot    string `gorm:"type:varchar(64)" json:"expected_merkle_root"`
+	Resource              string `gorm:"type:varchar(255);index" json:"resource"`
+	Operation             string `gorm:"type:varchar(20)" json:"operation,omitempty"`
+	ReferenceLogHash      string `gorm:"type:varchar(64)" json:"reference_log_hash,omitempty"`
+	ReferenceMerkleRoot   string `gorm:"type:varchar(64)" json:"reference_merkle_root,omitempty"`
+	ReferenceAnchorID     string `gorm:"type:varchar(100)" json:"reference_anchor_id,omitempty"`
+	DesiredStateHash      string `gorm:"type:varchar(64)" json:"desired_state_hash,omitempty"`
+	// DesiredState is the exact state sent to the Agent. It is intentionally
+	// not serialized in API responses; previews/evidence use the redaction
+	// policy instead of returning credentials or bearer material.
+	DesiredState       string     `gorm:"type:jsonb" json:"-"`
+	ClientBeforeHash   string     `gorm:"type:varchar(64)" json:"client_before_hash,omitempty"`
+	AgentCommandID     string     `gorm:"type:varchar(100);index" json:"agent_command_id,omitempty"`
+	AgentAppliedAt     *time.Time `json:"agent_applied_at,omitempty"`
+	CDCStatus          string     `gorm:"type:varchar(20);index;default:'PENDING'" json:"cdc_status"`
+	CDCDeadlineAt      *time.Time `gorm:"index" json:"cdc_deadline_at,omitempty"`
+	ResultAuditLogID   string     `gorm:"type:varchar(100);index" json:"result_audit_log_id,omitempty"`
+	RequestedBy        string     `gorm:"type:varchar(36);not null" json:"requested_by"`
+	ApprovedBy         string     `gorm:"type:varchar(36)" json:"approved_by,omitempty"`
+	ExecutedBy         string     `gorm:"type:varchar(36)" json:"executed_by,omitempty"`
+	Reason             string     `gorm:"type:text;not null" json:"reason"`
+	Status             string     `gorm:"type:varchar(35);not null;index;default:'PENDING_EXECUTION'" json:"status"`
+	IdempotencyKey     string     `gorm:"type:varchar(100);not null;uniqueIndex:idx_recovery_idempotency" json:"idempotency_key"`
+	BeforeHash         string     `gorm:"type:varchar(64)" json:"before_hash,omitempty"`
+	AfterHash          string     `gorm:"type:varchar(64)" json:"after_hash,omitempty"`
+	FailureReason      string     `gorm:"type:text" json:"failure_reason,omitempty"`
+	RequestedAt        time.Time  `gorm:"autoCreateTime;index" json:"requested_at"`
+	ApprovedAt         *time.Time `json:"approved_at,omitempty"`
+	ExecutedAt         *time.Time `json:"executed_at,omitempty"`
+	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
+	RecoveryEventID    string     `gorm:"type:varchar(36);uniqueIndex" json:"recovery_event_id,omitempty"`
 }
 
 // RecoveryEvent is the immutable, tenant-scoped evidence of one execution
@@ -119,6 +164,7 @@ type RecoveryEvent struct {
 	SelectedLogID string `gorm:"type:varchar(100);not null" json:"selected_log_id"`
 	EventType     string `gorm:"type:varchar(50);not null" json:"event_type"`
 	ResultStatus  string `gorm:"type:varchar(35);not null;index" json:"result_status"`
+	Operation     string `gorm:"type:varchar(20)" json:"operation,omitempty"`
 
 	Resource             string     `gorm:"type:varchar(255);not null;index" json:"resource"`
 	TargetActor          string     `gorm:"type:varchar(100)" json:"target_actor"`
@@ -134,6 +180,14 @@ type RecoveryEvent struct {
 	Reason               string     `gorm:"type:text;not null" json:"reason"`
 	BeforeHash           string     `gorm:"type:varchar(64)" json:"before_hash"`
 	AfterHash            string     `gorm:"type:varchar(64)" json:"after_hash"`
+	ReferenceLogHash     string     `gorm:"type:varchar(64)" json:"reference_log_hash,omitempty"`
+	ReferenceMerkleRoot  string     `gorm:"type:varchar(64)" json:"reference_merkle_root,omitempty"`
+	ReferenceAnchorID    string     `gorm:"type:varchar(100)" json:"reference_anchor_id,omitempty"`
+	ClientBeforeHash     string     `gorm:"type:varchar(64)" json:"client_before_hash,omitempty"`
+	ClientAfterHash      string     `gorm:"type:varchar(64)" json:"client_after_hash,omitempty"`
+	ReadbackStatus       string     `gorm:"type:varchar(30)" json:"readback_status,omitempty"`
+	ResultAuditLogID     string     `gorm:"type:varchar(100);index" json:"result_audit_log_id,omitempty"`
+	CDCStatus            string     `gorm:"type:varchar(20);index;default:'PENDING'" json:"cdc_status"`
 
 	SourceSnapshotObjectKey  string `gorm:"type:text" json:"source_snapshot_object_key"`
 	SourceSnapshotVersionID  string `gorm:"type:varchar(255)" json:"source_snapshot_version_id"`

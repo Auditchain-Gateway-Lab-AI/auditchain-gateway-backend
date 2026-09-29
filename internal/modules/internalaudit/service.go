@@ -30,6 +30,7 @@ type VerificationResult struct {
 	LogID              string                      `json:"log_id"`
 	TxID               *string                     `json:"blockchain_tx_id,omitempty"`
 	AgentStatus        string                      `json:"agent_status,omitempty"`
+	SourceStatus       string                      `json:"source_status,omitempty"`
 	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
 
@@ -120,6 +121,9 @@ type ResourceLogVerification struct {
 	RecoveryStatus     string     `json:"recovery_status"`
 	RecoveryRequestID  string     `json:"recovery_request_id,omitempty"`
 	RecoveryExecutedAt *time.Time `json:"recovery_executed_at,omitempty"`
+	// SourceStatus is the live-client comparison dimension. It must not be
+	// folded into IntegrityStatus/ChainStatus, which describe Gateway + Fabric.
+	SourceStatus string `json:"source_status,omitempty"`
 	// IsLatest marks the newest event in the timeline. A RECOVERY event can be
 	// latest because it is a valid AuditChain event.
 	IsLatest bool `json:"is_latest"`
@@ -336,10 +340,10 @@ func (s *auditService) VerifyInternalLogRange(from, to time.Time, clientID, requ
 
 			// Tally per table
 			type tblSum struct {
-				Total    int `json:"total"`
-				Valid    int `json:"valid"`
-				Invalid  int `json:"invalid"`
-				Pending  int `json:"pending"`
+				Total   int `json:"total"`
+				Valid   int `json:"valid"`
+				Invalid int `json:"invalid"`
+				Pending int `json:"pending"`
 			}
 			tableAgg := make(map[string]*tblSum)
 
@@ -463,10 +467,10 @@ func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, reques
 
 			// Tally per table
 			type tblSum struct {
-				Total    int `json:"total"`
-				Valid    int `json:"valid"`
-				Invalid  int `json:"invalid"`
-				Pending  int `json:"pending"`
+				Total   int `json:"total"`
+				Valid   int `json:"valid"`
+				Invalid int `json:"invalid"`
+				Pending int `json:"pending"`
 			}
 			tableAgg := make(map[string]*tblSum)
 
@@ -880,6 +884,7 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 	}
 
 	agentStatus := "skipped_historical"
+	sourceStatus := ""
 	var agentDiscrepancies []agentverifier.Discrepancy
 
 	if !skipAgent {
@@ -897,13 +902,22 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 				logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
 				if agentErr != nil {
 					agentStatus = "unreachable"
+					sourceStatus = models.SourceStatusUnreachable
+				} else if agentResult == nil {
+					agentStatus = "unreachable"
+					sourceStatus = models.SourceStatusUnreachable
 				} else if agentResult.AgentUsed {
 					if agentResult.IsMatch {
 						agentStatus = "matched"
+						sourceStatus = models.SourceStatusMatched
 					} else {
 						agentStatus = "mismatch"
+						sourceStatus = sourceStatusFromAgentResult(*auditLog, agentResult)
 						agentDiscrepancies = agentResult.Discrepancies
+						s.recordClientSourceIncident(*auditLog, sourceStatusFromAgentResult(*auditLog, agentResult), agentResult.ClientStateHash, agentResult.Discrepancies)
 					}
+				} else {
+					sourceStatus = models.SourceStatusNotComparable
 				}
 			}
 		}
@@ -918,6 +932,7 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 		DBRoot:             reconstructedRoot,
 		TxID:               auditLog.BlockchainTxID,
 		AgentStatus:        agentStatus,
+		SourceStatus:       sourceStatus,
 		AgentDiscrepancies: agentDiscrepancies,
 	}, nil
 }
@@ -1221,6 +1236,100 @@ func (s *auditService) recordTamperIncident(auditLog models.AuditLog, incidentTy
 	// A concurrent verification may win the insert race. The unique/lookup
 	// guard is intentionally best-effort; verification itself remains read-only
 	// from the caller's perspective if this insert fails.
+	_ = s.db.Create(incident).Error
+}
+
+func sourceStatusFromAgentResult(auditLog models.AuditLog, result *agentverifier.VerifyResult) string {
+	if result == nil {
+		return models.SourceStatusNotComparable
+	}
+	if strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") {
+		if result.SourceFound {
+			return models.SourceStatusUnexpectedPresent
+		}
+		return models.SourceStatusMatched
+	}
+	if !result.SourceFound {
+		return models.SourceStatusMissing
+	}
+	return models.SourceStatusMismatch
+}
+
+func sourceStatusFromAgentStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "matched":
+		return models.SourceStatusMatched
+	case "mismatch":
+		return models.SourceStatusMismatch
+	case "unreachable":
+		return models.SourceStatusUnreachable
+	case "not_configured":
+		return models.SourceStatusNotComparable
+	default:
+		return ""
+	}
+}
+
+// recordClientSourceIncident records a discrepancy between a trusted latest
+// client event and the live operational row. It is intentionally separate
+// from Gateway/Fabric integrity incidents: the AuditChain evidence can remain
+// VALID while the client source is MISMATCH/MISSING/UNEXPECTED_PRESENT.
+func (s *auditService) recordClientSourceIncident(auditLog models.AuditLog, sourceStatus, detectedStateHash string, discrepancies []agentverifier.Discrepancy) {
+	if s.db == nil || strings.TrimSpace(auditLog.ClientID) == "" || strings.TrimSpace(auditLog.Resource) == "" || strings.TrimSpace(sourceStatus) == "" || sourceStatus == models.SourceStatusMatched {
+		return
+	}
+	incidentType := "CLIENT_STATE_MISMATCH"
+	switch sourceStatus {
+	case models.SourceStatusMissing:
+		incidentType = "CLIENT_ROW_MISSING"
+	case models.SourceStatusUnexpectedPresent:
+		incidentType = "CLIENT_ROW_UNEXPECTED_PRESENT"
+	}
+	// Do not persist client row values in the incident table. The hash and the
+	// field names are enough to correlate the source-state problem; raw values
+	// may contain credentials, identifiers, or other client-sensitive data.
+	redactedFields := make([]map[string]interface{}, 0, len(discrepancies))
+	for _, discrepancy := range discrepancies {
+		redactedFields = append(redactedFields, map[string]interface{}{
+			"field":   discrepancy.Field,
+			"changed": true,
+		})
+	}
+	redacted, err := json.Marshal(redactedFields)
+	if err != nil {
+		redacted = []byte("[]")
+	}
+	var existing models.TamperIncident
+	lookupErr := s.db.Where(
+		"client_id = ? AND resource = ? AND incident_type = ? AND incident_scope = ? AND status = ?",
+		auditLog.ClientID, auditLog.Resource, incidentType, models.RecoveryScopeClientSource, models.IncidentStatusOpen,
+	).First(&existing).Error
+	now := time.Now().UTC()
+	if lookupErr == nil {
+		_ = s.db.Model(&existing).Updates(map[string]interface{}{
+			"log_id":              auditLog.LogID,
+			"expected_hash":       auditLog.HashValue,
+			"detected_hash":       detectedStateHash,
+			"detected_state_hash": detectedStateHash,
+			"source_status":       sourceStatus,
+			"reference_log_id":    auditLog.LogID,
+			"discrepancy_summary": string(redacted),
+			"last_confirmed_at":   now,
+		}).Error
+		return
+	}
+	if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		return
+	}
+	incident := &models.TamperIncident{
+		ID: uuid.NewString(), ClientID: auditLog.ClientID, LogID: auditLog.LogID,
+		Resource: auditLog.Resource, IncidentType: incidentType,
+		ExpectedHash: auditLog.HashValue, DetectedHash: detectedStateHash,
+		Status: models.IncidentStatusOpen, IncidentScope: models.RecoveryScopeClientSource,
+		SourceStatus: sourceStatus, ReferenceLogID: auditLog.LogID,
+		DetectedStateHash: detectedStateHash, DiscrepancySummary: string(redacted),
+		DetectedAt: now, LastConfirmedAt: &now,
+	}
 	_ = s.db.Create(incident).Error
 }
 
@@ -1546,13 +1655,21 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 	agentResult, err := s.agent.VerifyAgainstAgent(&logCopy)
 	if err != nil {
 		item.AgentStatus = "unreachable"
+		item.SourceStatus = models.SourceStatusUnreachable
 	} else if agentResult.AgentUsed {
 		if agentResult.IsMatch {
 			item.AgentStatus = "matched"
+			item.SourceStatus = models.SourceStatusMatched
 		} else {
 			item.AgentStatus = "mismatch"
+			item.SourceStatus = sourceStatusFromAgentResult(auditLog, agentResult)
 			item.AgentDiscrepancies = agentResult.Discrepancies
+			if baseStatus == "valid" {
+				s.recordClientSourceIncident(auditLog, item.SourceStatus, agentResult.ClientStateHash, agentResult.Discrepancies)
+			}
 		}
+	} else {
+		item.SourceStatus = models.SourceStatusNotComparable
 	}
 
 	// AgentStatus hanya menjelaskan verifikasi Layer 3 terhadap database

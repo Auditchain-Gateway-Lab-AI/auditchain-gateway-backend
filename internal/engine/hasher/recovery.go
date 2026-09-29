@@ -10,6 +10,7 @@ import (
 )
 
 const RecoveryEventSchemaVersion = 1
+const DirectRecoveryEventSchemaVersion = 2
 
 // GenerateRecoveryEventHash hashes only immutable recovery semantics. Pipeline
 // fields (snapshot references, Merkle root, Fabric tx id and integrity cache)
@@ -28,7 +29,7 @@ func GenerateRecoveryEventHash(event *models.RecoveryEvent) string {
 		sourceSystem = event.TargetSourceSystem
 	}
 
-	canonical := strings.Join([]string{
+	parts := []string{
 		strconv.Itoa(RecoveryEventSchemaVersion),
 		event.ID,
 		event.ClientID,
@@ -60,8 +61,33 @@ func GenerateRecoveryEventHash(event *models.RecoveryEvent) string {
 		event.FailureCode,
 		event.FailureReason,
 		strconv.FormatInt(event.ExecutedAt.UnixMicro(), 10),
-	}, "|")
+	}
+	// Legacy snapshot-backed events keep their original hash contract. Direct
+	// client recovery events use an explicit v2 contract that binds the
+	// trusted Fabric reference and Agent readback without making asynchronous
+	// CDC/pipeline fields mutable hash inputs.
+	if isDirectRecoveryEvent(event) {
+		parts[0] = strconv.Itoa(DirectRecoveryEventSchemaVersion)
+		parts = append(parts,
+			event.Operation,
+			event.ReferenceLogHash,
+			event.ReferenceMerkleRoot,
+			event.ReferenceAnchorID,
+			event.ClientBeforeHash,
+			event.ClientAfterHash,
+			event.ReadbackStatus,
+			event.CDCStatus,
+			event.ResultAuditLogID,
+		)
+	}
+	canonical := strings.Join(parts, "|")
 	return crypto.GenerateSHA3_256(canonical)
+}
+
+func isDirectRecoveryEvent(event *models.RecoveryEvent) bool {
+	return event != nil && (strings.TrimSpace(event.Operation) != "" ||
+		strings.TrimSpace(event.ReferenceLogHash) != "" ||
+		strings.TrimSpace(event.ClientAfterHash) != "")
 }
 
 func canonicalRecoveryJSON(raw string) string {
