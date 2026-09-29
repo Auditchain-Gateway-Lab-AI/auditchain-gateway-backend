@@ -1,4 +1,4 @@
-package audit
+package internalaudit
 
 import (
 	"errors"
@@ -555,7 +555,7 @@ func (h *Handler) EstimateLogRange(c *gin.Context) {
 	})
 }
 
-func (h *Handler) VerifyLogRange(c *gin.Context) {
+func (h *Handler) VerifyInternalLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
 		return
@@ -566,7 +566,7 @@ func (h *Handler) VerifyLogRange(c *gin.Context) {
 		return
 	}
 
-	result, err := h.Service.VerifyLogRange(from, to, clientID, middleware.GetRequestID(c))
+	result, err := h.Service.VerifyInternalLogRange(from, to, clientID, middleware.GetRequestID(c))
 	if err != nil {
 		var tooLarge *VerifyRangeTooLargeError
 		if errors.As(err, &tooLarge) {
@@ -579,6 +579,26 @@ func (h *Handler) VerifyLogRange(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memverifikasi range log"})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) VerifyClientLogRange(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	from, to, ok := parseVerifyRangeBounds(c)
+	if !ok {
+		return
+	}
+
+	result, err := h.Service.VerifyClientLogRange(from, to, clientID, middleware.GetRequestID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memverifikasi client range log"})
 		return
 	}
 

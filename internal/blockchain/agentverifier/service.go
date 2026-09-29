@@ -45,9 +45,10 @@ type Discrepancy struct {
 type VerifyResult struct {
 	IsMatch       bool
 	SourceFound   bool
-	AgentUsed     bool
-	Discrepancies []Discrepancy
-	AgentRecord   *AuditTrailRecord
+	AgentUsed      bool
+	Discrepancies  []Discrepancy
+	AgentRecord    *AuditTrailRecord
+	ClientMetadata string
 }
 
 // Service mengelola request verifikasi ke Agent klien
@@ -149,13 +150,23 @@ func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.
 		}, nil
 	}
 
+	agentMeta := map[string]interface{}{}
+	if agentRec.DataLama != nil {
+		agentMeta["data_lama"] = agentRec.DataLama
+	}
+	if agentRec.DataBaru != nil {
+		agentMeta["data_baru"] = agentRec.DataBaru
+	}
+	clientMetadata := marshalToJSON(agentMeta)
+
 	discrepancies := s.compareFields(auditLog, agentRec)
 	return &VerifyResult{
-		IsMatch:       len(discrepancies) == 0,
-		SourceFound:   true,
-		AgentUsed:     true,
-		Discrepancies: discrepancies,
-		AgentRecord:   agentRec,
+		IsMatch:        len(discrepancies) == 0,
+		SourceFound:    true,
+		AgentUsed:      true,
+		Discrepancies:  discrepancies,
+		AgentRecord:    agentRec,
+		ClientMetadata: clientMetadata,
 	}, nil
 }
 
@@ -216,12 +227,14 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	}
 
 	// Bandingkan metadata log dengan data aktual dari Agent
-	discrepancies := s.compareResourceData(auditLog, resourceRec)
+	discrepancies := s.CompareResourceData(auditLog, resourceRec)
+	clientMetadata := marshalToJSON(resourceRec.Data)
 	return &VerifyResult{
-		IsMatch:       len(discrepancies) == 0,
-		SourceFound:   true,
-		AgentUsed:     true,
-		Discrepancies: discrepancies,
+		IsMatch:        len(discrepancies) == 0,
+		SourceFound:    true,
+		AgentUsed:      true,
+		Discrepancies:  discrepancies,
+		ClientMetadata: clientMetadata,
 	}, nil
 }
 
@@ -269,8 +282,8 @@ func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, res
 	return &rec, nil
 }
 
-// compareResourceData membandingkan metadata di log dengan data aktual dari Agent
-func (s *Service) compareResourceData(auditLog *models.AuditLog, rec *ResourceRecord) []Discrepancy {
+// CompareResourceData membandingkan metadata di log dengan data aktual dari Agent
+func (s *Service) CompareResourceData(auditLog *models.AuditLog, rec *ResourceRecord) []Discrepancy {
 	var diffs []Discrepancy
 
 	if auditLog.Metadata == "" || auditLog.Metadata == "{}" {
@@ -519,4 +532,68 @@ func normalizeJSON(raw string) string {
 func marshalToJSON(m map[string]interface{}) string {
 	b, _ := json.Marshal(m)
 	return string(b)
+}
+
+// FetchTableData memuat konfigurasi lalu memanggil FetchTableFromAgent
+func (s *Service) FetchTableData(clientID, tableName string) ([]ResourceRecord, error) {
+	cfg, err := s.loadAgentConfig(clientID)
+	if err != nil {
+		return nil, fmt.Errorf("gagal memuat konfigurasi Agent: %w", err)
+	}
+	if !cfg.IsActive {
+		return nil, fmt.Errorf("agent tidak aktif")
+	}
+	return s.FetchTableFromAgent(cfg, tableName)
+}
+
+// FetchTableFromAgent memanggil GET <agent_url>/table/<table>
+func (s *Service) FetchTableFromAgent(cfg *models.AgentConfig, tableName string) ([]ResourceRecord, error) {
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+
+	url := agentFetchTableURL(cfg.AgentURL, tableName)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.VerifyToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.VerifyToken)
+	}
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request ke Agent gagal: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("token verifikasi Agent tidak valid (401)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Agent mengembalikan status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	if err != nil {
+		return nil, fmt.Errorf("gagal membaca response Agent: %w", err)
+	}
+
+	var records []ResourceRecord
+	if err := json.Unmarshal(body, &records); err != nil {
+		return nil, fmt.Errorf("gagal parse response Agent: %w", err)
+	}
+
+	return records, nil
+}
+
+func agentFetchTableURL(agentURL, tableName string) string {
+	baseURL := strings.TrimRight(agentURL, "/")
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
+	return fmt.Sprintf("%s/table/%s", baseURL, tableName)
 }

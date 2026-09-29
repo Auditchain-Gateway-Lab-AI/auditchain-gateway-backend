@@ -23,6 +23,7 @@ type Service interface {
 	AddUserToClient(clientID string, username, password string) (*models.User, error)
 	AddUser(clientID, username, password, fullName, role string) (*models.User, error)
 	RemoveUser(userID string) error
+	RegenerateAPIKey(id string) (string, error)
 }
 
 type KafkaConfigWithClient struct {
@@ -85,6 +86,30 @@ func (s *clientService) RegisterClient(req CreateClientRequest) (*models.Client,
 	}
 
 	return newClient, rawAPIKey, nil
+}
+
+func (s *clientService) RegenerateAPIKey(id string) (string, error) {
+	client, err := s.repo.GetClientByID(id)
+	if err != nil {
+		return "", errors.New("klien tidak ditemukan")
+	}
+
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", errors.New("gagal generate API key yang aman")
+	}
+
+	rawAPIKey := "ak_live_" + hex.EncodeToString(randomBytes)
+	hash := sha256.Sum256([]byte(rawAPIKey))
+
+	client.APIKeyHash = hex.EncodeToString(hash[:])
+	client.APIKeyPrefix = rawAPIKey[:16]
+
+	if err := s.repo.UpdateClient(client); err != nil {
+		return "", errors.New("gagal mengupdate API key klien")
+	}
+
+	return rawAPIKey, nil
 }
 
 func (s *clientService) GetClients() ([]models.Client, error) {

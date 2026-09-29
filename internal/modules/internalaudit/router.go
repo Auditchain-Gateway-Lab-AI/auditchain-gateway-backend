@@ -1,4 +1,4 @@
-package audit
+package internalaudit
 
 import (
 	"go-blockchain-api/internal/middleware"
@@ -10,7 +10,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	dashAPI := routerGroup.Group("/dashboard")
 	dashAPI.Use(middleware.JWTAuth())
 	{
-		dashAPI.GET("/stats", h.GetStats)
+		// dashAPI.GET("/stats", h.GetStats) (Moved to client module)
 		dashAPI.GET("/logs", h.GetRecentLogs)
 		dashAPI.GET("/logs/by-resource/:resource", h.GetLogsByResource)
 		dashAPI.GET("/verify/:log_id", h.VerifyLog)
@@ -19,6 +19,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashAPI.GET("/inventory", h.GetResourceInventory)
 		dashAPI.GET("/verify-resource/:resource", h.VerifyResourceHistory)
 		dashAPI.GET("/verify-range/estimate", h.EstimateLogRange)
-		dashAPI.GET("/verify-range", h.VerifyLogRange)
+		dashAPI.GET("/verify-range/internal", h.VerifyInternalLogRange)
+		dashAPI.GET("/verify-range/client", h.VerifyClientLogRange)
 	}
 }
