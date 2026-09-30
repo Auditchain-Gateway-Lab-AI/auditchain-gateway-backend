@@ -10,11 +10,17 @@ BRANCH="${DEPLOY_BRANCH:-$CURRENT_BRANCH}"
 EXPECTED_SHA="${EXPECTED_SHA:-}"
 SERVICE="${DEPLOY_SERVICE:-api-gateway}"
 CONTAINER_NAME="${DEPLOY_CONTAINER_NAME:-auditchain-api}"
+COMPOSE_PROJECT_NAME="${DEPLOY_COMPOSE_PROJECT_NAME:-middleware-auditchain-gateway}"
 HEALTH_URL="${DEPLOY_HEALTH_URL:-http://127.0.0.1:8080/healthz}"
 READY_URL="${DEPLOY_READY_URL:-http://127.0.0.1:8080/readyz}"
 HEALTH_RETRIES="${DEPLOY_HEALTH_RETRIES:-60}"
 HEALTH_INTERVAL_SECONDS="${DEPLOY_HEALTH_INTERVAL_SECONDS:-2}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-}"
+
+if [[ ! "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+	echo "Deploy failed: DEPLOY_COMPOSE_PROJECT_NAME contains invalid characters." >&2
+	exit 1
+fi
 
 if [[ "$DEPLOY_MODE" == "production" ]]; then
 	umask 077
@@ -48,9 +54,9 @@ if [[ -n "$(git status --porcelain=v1 --untracked-files=no)" ]]; then
 fi
 
 if docker compose version >/dev/null 2>&1; then
-	compose() { docker compose "$@"; }
+	compose() { docker compose --project-name "$COMPOSE_PROJECT_NAME" "$@"; }
 elif command -v docker-compose >/dev/null 2>&1; then
-	compose() { docker-compose "$@"; }
+	compose() { docker-compose --project-name "$COMPOSE_PROJECT_NAME" "$@"; }
 else
 	echo "Deploy failed: docker compose or docker-compose is not installed." >&2
 	exit 1
@@ -66,7 +72,7 @@ ENV_PREVIOUS_REPOSITORY_BACKUP=""
 ENV_PREVIOUS_LINK_TARGET=""
 OLD_IMAGE_ID=""
 OLD_IMAGE_REF=""
-NEW_CONTAINER_STARTED=false
+CONTAINER_RECREATE_ATTEMPTED=false
 TRAP_RUNNING=false
 
 mkdir -p "$SHARED_DIR" "$ENV_BACKUP_DIR"
@@ -114,15 +120,24 @@ restore_environment() {
 }
 
 rollback_container() {
-	if [[ "$NEW_CONTAINER_STARTED" != true || -z "$OLD_IMAGE_ID" || -z "$OLD_IMAGE_REF" ]]; then
+	if [[ "$CONTAINER_RECREATE_ATTEMPTED" != true || -z "$OLD_IMAGE_ID" || -z "$OLD_IMAGE_REF" ]]; then
 		echo "No previous API image was available for automatic rollback." >&2
 		return 1
 	fi
 
 	echo "Rolling back api-gateway to the previous image..."
-	docker tag "$OLD_IMAGE_ID" "$OLD_IMAGE_REF"
-	compose up -d --no-deps --no-build --force-recreate "$SERVICE"
-	wait_for_health "rollback"
+	if ! docker tag "$OLD_IMAGE_ID" "$OLD_IMAGE_REF"; then
+		echo "Automatic rollback failed: unable to restore the previous API image tag." >&2
+		return 1
+	fi
+	if ! compose up -d --no-deps --no-build --force-recreate "$SERVICE"; then
+		echo "Automatic rollback failed: Docker Compose could not recreate the previous API container." >&2
+		return 1
+	fi
+	if ! wait_for_health "rollback"; then
+		echo "Automatic rollback failed: the previous API image did not become healthy." >&2
+		return 1
+	fi
 }
 
 on_exit() {
@@ -299,14 +314,9 @@ if [[ "$DEPLOY_MODE" == "production" ]]; then
 fi
 
 compose build "$SERVICE"
-NEW_CONTAINER_STARTED=true
-if [[ "$DEPLOY_MODE" == "production" ]]; then
-	compose up -d --no-deps --no-build --force-recreate "$SERVICE"
-	wait_for_health "deployment"
-else
-	compose up -d --no-build --force-recreate "$SERVICE"
-	wait_for_health "development deployment"
-fi
+CONTAINER_RECREATE_ATTEMPTED=true
+compose up -d --no-deps --no-build "$SERVICE"
+wait_for_health "${DEPLOY_MODE} deployment"
 
 compose ps "$SERVICE"
 echo "Deploy complete for commit $DEPLOYED_SHA in $DEPLOY_MODE mode."
