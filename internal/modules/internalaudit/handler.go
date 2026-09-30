@@ -11,10 +11,12 @@ import (
 	"go-blockchain-api/internal/middleware"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type Handler struct {
-	Service Service
+	Service          Service
+	VerificationJobs *VerificationJobService
 }
 
 const (
@@ -24,6 +26,10 @@ const (
 
 func NewHandler(service Service) *Handler {
 	return &Handler{Service: service}
+}
+
+func NewHandlerWithVerificationJobs(service Service, jobs *VerificationJobService) *Handler {
+	return &Handler{Service: service, VerificationJobs: jobs}
 }
 
 func normalizeAuditLogPageSize(raw string) int {
@@ -110,6 +116,21 @@ type VerifyRangeEstimateResponse struct {
 type ClientRangeVerificationResponse struct {
 	Range   RangeInfo    `json:"range"`
 	Summary RangeSummary `json:"summary"`
+}
+
+type CreateVerificationRunRequest struct {
+	From      string `json:"from" binding:"required" example:"2026-09-29T00:00:00Z"`
+	To        string `json:"to" binding:"required" example:"2026-09-30T23:59:59Z"`
+	BatchSize int    `json:"batch_size,omitempty" example:"100"`
+}
+
+type VerificationRunResponseEnvelope struct {
+	Message string                  `json:"message,omitempty"`
+	Data    VerificationRunResponse `json:"data"`
+}
+
+type LatestVerificationRunResponse struct {
+	Data *VerificationRunResponse `json:"data"`
 }
 
 // @Summary Verify a specific log
@@ -638,4 +659,129 @@ func (h *Handler) VerifyClientLogRange(c *gin.Context) {
 		Range:   result.Range,
 		Summary: result.Summary,
 	})
+}
+
+// @Summary Queue a background verification run
+// @Description Membuat job verifikasi range yang diproses backend secara bertahap. Ukuran batch membatasi pekerjaan per iterasi, bukan total log dalam range.
+// @Tags Audit
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateVerificationRunRequest true "Rentang verifikasi dan ukuran batch"
+// @Param client_id query string false "Client ID; hanya admin yang boleh memilih tenant"
+// @Success 202 {object} VerificationRunResponseEnvelope "Job berhasil diantrikan"
+// @Failure 400 {object} ErrorResponse "Rentang tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 503 {object} ErrorResponse "Background verifier belum tersedia"
+// @Router /dashboard/verification-runs [post]
+func (h *Handler) CreateVerificationRun(c *gin.Context) {
+	if h.VerificationJobs == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Background verifier belum tersedia"})
+		return
+	}
+
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	var req CreateVerificationRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Body wajib memuat from dan to."})
+		return
+	}
+
+	from, err := parseTimeRobust(strings.TrimSpace(req.From))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'from' tidak valid. Gunakan RFC3339."})
+		return
+	}
+	to, err := parseTimeRobust(strings.TrimSpace(req.To))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format 'to' tidak valid. Gunakan RFC3339."})
+		return
+	}
+	if to.Before(from) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "'to' tidak boleh lebih awal dari 'from'."})
+		return
+	}
+
+	requestedBy, _ := c.Get("user_id")
+	requestedByValue, _ := requestedBy.(string)
+	run, err := h.VerificationJobs.Enqueue(from.UTC(), to.UTC(), clientID, requestedByValue, req.BatchSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengantrikan verification run."})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Verification run berhasil diantrikan.",
+		"data":    ToVerificationRunResponse(run),
+	})
+}
+
+// @Summary Get a background verification run
+// @Description Mengambil progress dan summary verification run yang hanya boleh diakses oleh tenant pada token.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Verification run ID"
+// @Param client_id query string false "Client ID; hanya admin yang boleh memilih tenant"
+// @Success 200 {object} VerificationRunResponseEnvelope "Progress verification run"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Verification run tidak ditemukan"
+// @Router /dashboard/verification-runs/{id} [get]
+func (h *Handler) GetVerificationRun(c *gin.Context) {
+	if h.VerificationJobs == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Background verifier belum tersedia"})
+		return
+	}
+
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+	run, err := h.VerificationJobs.GetRun(c.Param("id"), clientID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Verification run tidak ditemukan."})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil verification run."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": ToVerificationRunResponse(run)})
+}
+
+// @Summary Get the latest background verification run
+// @Description Mengambil verification run terakhir untuk tenant yang sedang login. Jika belum ada run, data bernilai null.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param client_id query string false "Client ID; hanya admin yang boleh memilih tenant"
+// @Success 200 {object} LatestVerificationRunResponse "Verification run terakhir"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Router /dashboard/verification-runs/latest [get]
+func (h *Handler) GetLatestVerificationRun(c *gin.Context) {
+	if h.VerificationJobs == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Background verifier belum tersedia"})
+		return
+	}
+
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+	run, err := h.VerificationJobs.GetLatestRun(clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil verification run terakhir."})
+		return
+	}
+	if run == nil {
+		c.JSON(http.StatusOK, gin.H{"data": nil})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": ToVerificationRunResponse(run)})
 }

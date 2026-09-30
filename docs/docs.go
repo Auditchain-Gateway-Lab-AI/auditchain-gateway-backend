@@ -541,6 +541,160 @@ const docTemplate = `{
                 }
             }
         },
+        "/dashboard/verification-runs": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Membuat job verifikasi range yang diproses backend secara bertahap. Ukuran batch membatasi pekerjaan per iterasi, bukan total log dalam range.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Queue a background verification run",
+                "parameters": [
+                    {
+                        "description": "Rentang verifikasi dan ukuran batch",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.CreateVerificationRunRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Client ID; hanya admin yang boleh memilih tenant",
+                        "name": "client_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Job berhasil diantrikan",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.VerificationRunResponseEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Background verifier belum tersedia",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/verification-runs/latest": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil verification run terakhir untuk tenant yang sedang login. Jika belum ada run, data bernilai null.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get the latest background verification run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Client ID; hanya admin yang boleh memilih tenant",
+                        "name": "client_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Verification run terakhir",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.LatestVerificationRunResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/verification-runs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil progress dan summary verification run yang hanya boleh diakses oleh tenant pada token.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Get a background verification run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Verification run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Client ID; hanya admin yang boleh memilih tenant",
+                        "name": "client_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Progress verification run",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.VerificationRunResponseEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Verification run tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/dashboard/verify-range": {
             "get": {
                 "security": [
@@ -1790,12 +1944,41 @@ const docTemplate = `{
                 }
             }
         },
+        "internalaudit.CreateVerificationRunRequest": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "batch_size": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "from": {
+                    "type": "string",
+                    "example": "2026-09-29T00:00:00Z"
+                },
+                "to": {
+                    "type": "string",
+                    "example": "2026-09-30T23:59:59Z"
+                }
+            }
+        },
         "internalaudit.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string",
                     "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "internalaudit.LatestVerificationRunResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internalaudit.VerificationRunResponse"
                 }
             }
         },
@@ -1903,6 +2086,82 @@ const docTemplate = `{
                             "type": "integer"
                         }
                     }
+                }
+            }
+        },
+        "internalaudit.VerificationRunResponse": {
+            "type": "object",
+            "properties": {
+                "already_verified": {
+                    "type": "integer"
+                },
+                "batch_size": {
+                    "type": "integer"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "processed_items": {
+                    "type": "integer"
+                },
+                "progress_percent": {
+                    "type": "number"
+                },
+                "requested_by": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "total_invalid": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pending": {
+                    "type": "integer"
+                },
+                "total_valid": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verified_now": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internalaudit.VerificationRunResponseEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internalaudit.VerificationRunResponse"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },

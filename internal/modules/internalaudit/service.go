@@ -93,6 +93,7 @@ type Service interface {
 	EstimateLogRange(from, to time.Time, clientID string) (int64, error)
 	VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
+	VerifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error)
 }
 
 type auditService struct {
@@ -272,6 +273,10 @@ func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, reques
 	return s.verifyLogRange(from, to, clientID, requestID)
 }
 
+func (s *auditService) VerifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error) {
+	return s.verifyRangeBatch(from, to, clientID, requestID, limit, offset)
+}
+
 func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
 	// The checked timestamp is the durable idempotency marker. The mutex also
 	// closes the same-process race where two clicks read the row before either
@@ -299,11 +304,38 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 		return nil, err
 	}
 
-	result := &RangeVerificationResult{
+	summary, results := s.verifyRangeItems(logs, clientID, requestID)
+	return &RangeVerificationResult{
 		Range: RangeInfo{
 			From: formatPgTimestamp(from),
 			To:   formatPgTimestamp(to),
 		},
+		Summary: summary,
+		Results: results,
+	}, nil
+}
+
+// verifyRangeBatch is used by the background verifier. It deliberately shares
+// the per-log cache and stats update path with the synchronous endpoint, but
+// reads only one bounded page at a time so a large range never becomes one
+// oversized HTTP request or one unbounded in-memory slice.
+func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error) {
+	s.rangeVerificationMu.Lock()
+	defer s.rangeVerificationMu.Unlock()
+
+	started := time.Now()
+	logs, err := s.repo.GetLogsByTimeRangePage(from, to, clientID, limit, offset)
+	logRangeTiming(requestID, "load_verification_batch", started, err, "loaded_items", len(logs))
+	if err != nil {
+		return RangeSummary{}, 0, err
+	}
+
+	summary, _ := s.verifyRangeItems(logs, clientID, requestID)
+	return summary, len(logs), nil
+}
+
+func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID string) (RangeSummary, []RangeItemResult) {
+	result := &RangeVerificationResult{
 		Results: make([]RangeItemResult, 0, len(logs)),
 	}
 	newlyVerified := make([]RangeItemResult, 0, len(logs))
@@ -326,7 +358,7 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 	// inflating total_verifications, total_valid, or total_tampered.
 	s.updateRangeDashboardStats(clientID, newlyVerified)
 
-	return result, nil
+	return result.Summary, result.Results
 }
 
 func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID string) (RangeItemResult, bool) {

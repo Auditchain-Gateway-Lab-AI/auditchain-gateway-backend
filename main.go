@@ -322,7 +322,9 @@ func main() {
 
 	auditRepo := internalaudit.NewAuditRepository(db)
 	auditService := internalaudit.NewService(auditRepo, fabricSvc, db)
-	auditHandler := internalaudit.NewHandler(auditService)
+	verificationJobs := internalaudit.NewVerificationJobService(db, auditService)
+	go verificationJobs.Run(ctx)
+	auditHandler := internalaudit.NewHandlerWithVerificationJobs(auditService, verificationJobs)
 	if tamperScannerEnabled() {
 		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)
 		if configErr != nil {

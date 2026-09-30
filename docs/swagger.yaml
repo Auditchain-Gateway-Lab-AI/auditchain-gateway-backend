@@ -308,11 +308,31 @@ definitions:
       summary:
         $ref: '#/definitions/internalaudit.RangeSummary'
     type: object
+  internalaudit.CreateVerificationRunRequest:
+    properties:
+      batch_size:
+        example: 100
+        type: integer
+      from:
+        example: "2026-09-29T00:00:00Z"
+        type: string
+      to:
+        example: "2026-09-30T23:59:59Z"
+        type: string
+    required:
+    - from
+    - to
+    type: object
   internalaudit.ErrorResponse:
     properties:
       error:
         example: Pesan kesalahan atau validasi
         type: string
+    type: object
+  internalaudit.LatestVerificationRunResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internalaudit.VerificationRunResponse'
     type: object
   internalaudit.RangeInfo:
     properties:
@@ -383,6 +403,56 @@ definitions:
           total_rows:
             type: integer
         type: object
+    type: object
+  internalaudit.VerificationRunResponse:
+    properties:
+      already_verified:
+        type: integer
+      batch_size:
+        type: integer
+      client_id:
+        type: string
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      error_message:
+        type: string
+      from:
+        type: string
+      id:
+        type: string
+      processed_items:
+        type: integer
+      progress_percent:
+        type: number
+      requested_by:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      to:
+        type: string
+      total_invalid:
+        type: integer
+      total_items:
+        type: integer
+      total_pending:
+        type: integer
+      total_valid:
+        type: integer
+      updated_at:
+        type: string
+      verified_now:
+        type: integer
+    type: object
+  internalaudit.VerificationRunResponseEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/internalaudit.VerificationRunResponse'
+      message:
+        type: string
     type: object
   internalaudit.VerifyLogData:
     properties:
@@ -1168,6 +1238,106 @@ paths:
       summary: Get client dashboard statistics
       tags:
       - Dashboard
+  /dashboard/verification-runs:
+    post:
+      consumes:
+      - application/json
+      description: Membuat job verifikasi range yang diproses backend secara bertahap.
+        Ukuran batch membatasi pekerjaan per iterasi, bukan total log dalam range.
+      parameters:
+      - description: Rentang verifikasi dan ukuran batch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internalaudit.CreateVerificationRunRequest'
+      - description: Client ID; hanya admin yang boleh memilih tenant
+        in: query
+        name: client_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Job berhasil diantrikan
+          schema:
+            $ref: '#/definitions/internalaudit.VerificationRunResponseEnvelope'
+        "400":
+          description: Rentang tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "503":
+          description: Background verifier belum tersedia
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Queue a background verification run
+      tags:
+      - Audit
+  /dashboard/verification-runs/{id}:
+    get:
+      description: Mengambil progress dan summary verification run yang hanya boleh
+        diakses oleh tenant pada token.
+      parameters:
+      - description: Verification run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Client ID; hanya admin yang boleh memilih tenant
+        in: query
+        name: client_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Progress verification run
+          schema:
+            $ref: '#/definitions/internalaudit.VerificationRunResponseEnvelope'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "404":
+          description: Verification run tidak ditemukan
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a background verification run
+      tags:
+      - Audit
+  /dashboard/verification-runs/latest:
+    get:
+      description: Mengambil verification run terakhir untuk tenant yang sedang login.
+        Jika belum ada run, data bernilai null.
+      parameters:
+      - description: Client ID; hanya admin yang boleh memilih tenant
+        in: query
+        name: client_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verification run terakhir
+          schema:
+            $ref: '#/definitions/internalaudit.LatestVerificationRunResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get the latest background verification run
+      tags:
+      - Audit
   /dashboard/verify-range:
     get:
       description: Compatibility alias for the gateway dashboard. New clients should
