@@ -55,14 +55,19 @@ DB_DSN=...
 JWT_SECRET=...
 ```
 
-Nilai lain seperti Fabric, Redis, MinIO, recovery, snapshot, dan Agent
-mengikuti kebutuhan server development. Untuk pilot direct client-DB, gunakan:
+Nilai lain seperti Fabric, Redis, recovery, snapshot, dan Agent mengikuti
+kebutuhan server development. Compose utama tidak memulai MinIO karena pilot
+direct client-DB tidak membutuhkannya. Untuk pilot direct client-DB, gunakan:
 
 ```dotenv
 RECOVERY_ENABLED=true
 RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
 ```
+
+Mode `snapshot_legacy` tetap dapat dijalankan untuk rollback/kompatibilitas
+dengan `docker-compose.snapshot.yml`; mode tersebut membutuhkan konfigurasi
+MinIO yang lengkap dan tidak boleh menjadi dependency deployment direct.
 
 Pastikan setiap tenant pilot mempunyai `agent_url`, `verify_token`, dan
 `recovery_token` yang berbeda sesuai scope-nya. `recovery_token` tidak boleh

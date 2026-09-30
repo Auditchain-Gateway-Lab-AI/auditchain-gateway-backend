@@ -107,12 +107,6 @@ type VerifyRangeEstimateResponse struct {
 	CanVerifySync  bool  `json:"can_verify_sync"`
 }
 
-type ResourceInventoryItem struct {
-	Resource    string `json:"resource" example:"orders"`
-	TotalLogs   int    `json:"total_logs" example:"500"`
-	LatestLogID string `json:"latest_log_id" example:"log-abc"`
-}
-
 // @Summary Verify a specific log
 // @Description Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
 // @Tags Audit
@@ -334,7 +328,7 @@ func (h *Handler) GetRecentLogs(c *gin.Context) {
 // @Tags Audit
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {array} ResourceInventoryItem "Daftar resource inventory"
+// @Success 200 {array} models.ClientTable "Daftar resource inventory"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 500 {object} ErrorResponse "Gagal memuat daftar data"
 // @Router /dashboard/inventory [get]

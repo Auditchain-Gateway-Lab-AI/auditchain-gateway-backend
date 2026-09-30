@@ -392,7 +392,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/internalaudit.ResourceInventoryItem"
+                                "$ref": "#/definitions/models.ClientTable"
                             }
                         }
                     },
@@ -1419,6 +1419,10 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 80
                 },
+                "total_tables_audited": {
+                    "type": "integer",
+                    "example": 8
+                },
                 "total_tampered": {
                     "type": "integer",
                     "example": 2
@@ -1543,23 +1547,6 @@ const docTemplate = `{
                             "type": "integer"
                         }
                     }
-                }
-            }
-        },
-        "internalaudit.ResourceInventoryItem": {
-            "type": "object",
-            "properties": {
-                "latest_log_id": {
-                    "type": "string",
-                    "example": "log-abc"
-                },
-                "resource": {
-                    "type": "string",
-                    "example": "orders"
-                },
-                "total_logs": {
-                    "type": "integer",
-                    "example": 500
                 }
             }
         },
@@ -1762,6 +1749,39 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ClientTable": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_action": {
+                    "type": "string"
+                },
+                "last_actor": {
+                    "type": "string"
+                },
+                "last_updated_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "description": "Field alias untuk kompatibilitas frontend",
+                    "type": "string"
+                },
+                "row_count": {
+                    "type": "integer"
+                },
+                "table_name": {
                     "type": "string"
                 }
             }

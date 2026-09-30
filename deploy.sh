@@ -303,7 +303,10 @@ OLD_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER_NAME" 2>/dev/nu
 OLD_IMAGE_REF="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)"
 
 if [[ "$DEPLOY_MODE" == "production" ]]; then
-	for state_container in auditchain-postgres auditchain-minio; do
+	# The canonical agent_direct deployment has no MinIO container. The
+	# snapshot_legacy compatibility stack is opt-in through a separate Compose
+	# override and is not part of this deployment workflow.
+	for state_container in auditchain-postgres; do
 		state="$(docker inspect --format '{{.State.Status}}' "$state_container" 2>/dev/null || true)"
 		if [[ "$state" != "running" ]]; then
 			echo "Deploy failed: required stateful container $state_container is not running." >&2

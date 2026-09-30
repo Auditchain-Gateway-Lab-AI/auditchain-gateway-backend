@@ -124,15 +124,9 @@ FABRIC_KEY_PATH=./crypto-config/users/Admin@org1/msp/keystore/priv_key.pem
 FABRIC_CHANNEL=audit-channel
 FABRIC_CHAINCODE=audit-contract
 
-# MinIO Recovery Vault (Compose overrides endpoint to minio:9000 internally)
-MINIO_ENDPOINT=localhost:9000
-MINIO_BUCKET=auditchain-recovery
-MINIO_ACCESS_KEY=auditchain-writer
-MINIO_SECRET_KEY=ganti-dengan-secret-writer
-MINIO_USE_TLS=false
 APP_ENV=local
 RECOVERY_ENABLED=false
-RECOVERY_MODE=snapshot_legacy
+RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
 SNAPSHOT_WRITER_ENABLED=false
 SNAPSHOT_REQUIRED_FOR_ANCHOR=false
@@ -142,6 +136,14 @@ SNAPSHOT_RETRY_BASE_SECONDS=5
 SNAPSHOT_POLL_INTERVAL_SECONDS=2
 SNAPSHOT_ENCRYPTION_ACTIVE_KEY_ID=key-2026-01
 SNAPSHOT_ENCRYPTION_KEY=ganti-dengan-key-32-byte-base64-atau-hex
+
+# Optional only for the legacy snapshot compatibility path:
+# RECOVERY_MODE=snapshot_legacy
+# MINIO_ENDPOINT=minio:9000
+# MINIO_BUCKET=auditchain-recovery
+# MINIO_ACCESS_KEY=auditchain-writer
+# MINIO_SECRET_KEY=ganti-dengan-secret-writer
+# MINIO_USE_TLS=false
 ```
 
 ### Menjalankan Aplikasi
@@ -166,26 +168,36 @@ Swagger UI tersedia di `http://localhost:8080/swagger/index.html`.
 ### Menjalankan via Docker
 
 ```bash
-docker-compose up -d --build      # Build + jalankan gateway, PostgreSQL, dan MinIO
+docker-compose up -d --build      # Build + jalankan gateway dan PostgreSQL
 docker-compose logs -f api-gateway
 ```
 
-MinIO lokal tersedia pada S3 API `http://localhost:9000` dan console `http://localhost:9001`.
-Bucket `auditchain-recovery` dibuat oleh service initializer dengan versioning dan Object Lock.
-Jangan mengaktifkan `SNAPSHOT_WRITER_ENABLED` sebelum secret MinIO dan encryption key lokal sudah diganti.
-Untuk jalur direct client-DB, gunakan `RECOVERY_ENABLED=true` dan
-`RECOVERY_MODE=agent_direct`. Jalur ini tidak memakai MinIO untuk recovery baru,
-tetapi tetap membutuhkan Fabric, konfigurasi Agent aktif, recovery token
-terpisah, dan endpoint `POST /recover/:table/:record_id` pada Agent client.
+Compose utama memakai jalur direct client-DB dan tidak membuat container atau
+binding port MinIO. Jalur ini tetap membutuhkan Fabric, konfigurasi Agent aktif,
+recovery token terpisah, dan endpoint `POST /recover/:table/:record_id` pada
+Agent client ketika recovery diaktifkan.
 Aktifkan recovery hanya setelah migration additive dan smoke test staging
 berhasil.
-Jika `SNAPSHOT_REQUIRED_FOR_ANCHOR=true`, `SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan menolak start bila tidak.
+Dalam mode `snapshot_legacy`, `SNAPSHOT_REQUIRED_FOR_ANCHOR=true` membuat
+`SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan
+menolak start bila tidak. Pada mode `agent_direct`, flag snapshot lama
+diabaikan agar environment lama tidak menghidupkan dependency MinIO.
 
-Mode `snapshot_legacy` memulihkan audit log target dari snapshot MinIO untuk
-kompatibilitas. Mode `agent_direct` memulihkan row database operasional client
+Mode `agent_direct` memulihkan row database operasional client
 yang sudah ada melalui Agent, tanpa SQL arbitrer dan tanpa membuat tabel baru.
 Request client tidak membutuhkan approval admin; tenant tetap dibatasi oleh
 `client_id` JWT.
+
+Mode `snapshot_legacy` masih tersedia hanya untuk kompatibilitas/rollback. Jika
+mode itu memang diperlukan, jalankan Compose dengan override khusus berikut:
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.snapshot.yml up -d --build api-gateway
+```
+
+Override tersebut menggunakan port host `19000` dan `19001` untuk menghindari
+konflik dengan service MinIO lain. Jangan mengaktifkan snapshot legacy hanya
+karena variabel MinIO masih tersimpan di environment lama.
 
 ### Deployment development melalui GitHub Actions
 

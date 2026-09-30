@@ -1,0 +1,67 @@
+# Optional compatibility stack for RECOVERY_MODE=snapshot_legacy.
+# The default docker-compose.yml intentionally does not start MinIO.
+services:
+  minio:
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    container_name: auditchain-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password-change-me}
+    ports:
+      # Use non-conflicting loopback ports for the opt-in legacy stack.
+      - "127.0.0.1:${MINIO_HOST_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}
+    container_name: auditchain-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-auditchain-recovery}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password-change-me}
+      MINIO_WRITER_USER: ${MINIO_WRITER_USER:-auditchain-writer}
+      MINIO_WRITER_PASSWORD: ${MINIO_WRITER_PASSWORD:-local-writer-password-change-me}
+      MINIO_READER_USER: ${MINIO_READER_USER:-auditchain-reader}
+      MINIO_READER_PASSWORD: ${MINIO_READER_PASSWORD:-local-reader-password-change-me}
+      MINIO_RETENTION_MODE: ${MINIO_RETENTION_MODE:-COMPLIANCE}
+      MINIO_RETENTION_DAYS: ${MINIO_RETENTION_DAYS:-30}
+      APP_ENV: ${APP_ENV:-local}
+    volumes:
+      - ./scripts/minio:/bootstrap:ro
+    entrypoint: ["/bin/sh", "/bootstrap/init-bucket.sh"]
+    networks:
+      - gateway-net
+
+  api-gateway:
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USE_TLS: ${MINIO_USE_TLS:-false}
+      MINIO_BUCKET: ${MINIO_BUCKET:-auditchain-recovery}
+      MINIO_ACCESS_KEY: ${MINIO_WRITER_USER:-auditchain-writer}
+      MINIO_SECRET_KEY: ${MINIO_WRITER_PASSWORD:-local-writer-password-change-me}
+
+volumes:
+  minio-data:
+

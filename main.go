@@ -61,8 +61,16 @@ func tamperScannerEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAMPER_SCANNER_ENABLED")), "true")
 }
 
+func configuredRecoveryMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("RECOVERY_MODE")))
+	if mode == "" {
+		return "agent_direct"
+	}
+	return mode
+}
+
 func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Time, modes ...string) error {
-	mode := "snapshot_legacy"
+	mode := "agent_direct"
 	if len(modes) > 0 && strings.TrimSpace(modes[0]) != "" {
 		mode = strings.ToLower(strings.TrimSpace(modes[0]))
 	}
@@ -78,8 +86,10 @@ func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Ti
 	return nil
 }
 
-func buildSnapshotRuntime() (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
-	if !snapshotWriterEnabled() {
+func buildSnapshotRuntime(recoveryMode string) (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
+	// agent_direct writes through the client Agent and must remain independent
+	// of stale snapshot/MinIO flags left in an older environment file.
+	if recoveryMode == "agent_direct" || !snapshotWriterEnabled() {
 		return nil, nil, nil, nil
 	}
 
@@ -251,10 +261,7 @@ func main() {
 	if cutoffErr != nil {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", cutoffErr)
 	}
-	recoveryMode := strings.ToLower(strings.TrimSpace(os.Getenv("RECOVERY_MODE")))
-	if recoveryMode == "" {
-		recoveryMode = "snapshot_legacy"
-	}
+	recoveryMode := configuredRecoveryMode()
 	// The direct client-DB path has no MinIO dependency. Keep the legacy
 	// snapshot gate for the compatibility mode, but never let an old
 	// SNAPSHOT_REQUIRED_FOR_ANCHOR=true setting block direct recovery startup.
@@ -263,7 +270,7 @@ func main() {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", scopeErr)
 	}
 
-	snapshotBuilder, snapshotStore, snapshotCipher, err := buildSnapshotRuntime()
+	snapshotBuilder, snapshotStore, snapshotCipher, err := buildSnapshotRuntime(recoveryMode)
 	if err != nil {
 		log.Fatalf("❌ Konfigurasi snapshot writer tidak valid: %v", err)
 	}
