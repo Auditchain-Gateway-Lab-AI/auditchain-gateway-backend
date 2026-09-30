@@ -120,7 +120,11 @@ restore_environment() {
 }
 
 rollback_container() {
-	if [[ "$CONTAINER_RECREATE_ATTEMPTED" != true || -z "$OLD_IMAGE_ID" || -z "$OLD_IMAGE_REF" ]]; then
+	if [[ "$CONTAINER_RECREATE_ATTEMPTED" != true ]]; then
+		echo "No API container replacement was attempted; the existing API container was left untouched."
+		return 0
+	fi
+	if [[ -z "$OLD_IMAGE_ID" || -z "$OLD_IMAGE_REF" ]]; then
 		echo "No previous API image was available for automatic rollback." >&2
 		return 1
 	fi
@@ -313,7 +317,13 @@ if [[ "$DEPLOY_MODE" == "production" ]]; then
 	fi
 fi
 
-compose build "$SERVICE"
+if compose build "$SERVICE"; then
+	:
+else
+	build_status=$?
+	echo "Deploy failed: API image build failed before container replacement; the existing API container was left untouched." >&2
+	exit "$build_status"
+fi
 CONTAINER_RECREATE_ATTEMPTED=true
 compose up -d --no-deps --no-build "$SERVICE"
 wait_for_health "${DEPLOY_MODE} deployment"
