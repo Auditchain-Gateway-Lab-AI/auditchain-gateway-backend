@@ -20,6 +20,17 @@ func (r *rangeRepositoryStub) GetLogsByTimeRange(time.Time, time.Time, string) (
 	return r.logs, nil
 }
 
+func (r *rangeRepositoryStub) GetLogsByTimeRangePage(_ time.Time, _ time.Time, _ string, limit, offset int) ([]models.AuditLog, error) {
+	if offset >= len(r.logs) {
+		return []models.AuditLog{}, nil
+	}
+	end := offset + limit
+	if end > len(r.logs) {
+		end = len(r.logs)
+	}
+	return r.logs[offset:end], nil
+}
+
 func TestVerifyLogRangeUsesEveryLogAndCachedResults(t *testing.T) {
 	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
 	repo := &rangeRepositoryStub{logs: []models.AuditLog{
@@ -79,5 +90,25 @@ func TestCachedRangeStatus(t *testing.T) {
 				t.Fatalf("cachedRangeStatus(%q) = %q, want %q", tt.status, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
+	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
+	repo := &rangeRepositoryStub{logs: []models.AuditLog{
+		{LogID: "log-1", ClientID: "client-1", IntegrityStatus: models.IntegrityStatusValid, IntegrityCheckedAt: &checkedAt},
+		{LogID: "log-2", ClientID: "client-1", IntegrityStatus: models.IntegrityStatusPending, IntegrityCheckedAt: &checkedAt},
+	}}
+
+	service := &auditService{repo: repo}
+	summary, loaded, err := service.VerifyRangeBatch(time.Time{}, time.Time{}, "client-1", "batch-test", 1, 1)
+	if err != nil {
+		t.Fatalf("batch verification returned error: %v", err)
+	}
+	if loaded != 1 {
+		t.Fatalf("loaded = %d, want 1", loaded)
+	}
+	if summary.Total != 1 || summary.Pending != 1 || summary.AlreadyVerified != 1 || summary.VerifiedNow != 0 {
+		t.Fatalf("unexpected batch summary: %+v", summary)
 	}
 }

@@ -125,6 +125,7 @@ FABRIC_CHANNEL=audit-channel
 FABRIC_CHAINCODE=audit-contract
 
 APP_ENV=local
+VERIFICATION_JOB_BATCH_SIZE=100
 RECOVERY_ENABLED=false
 RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
@@ -164,6 +165,13 @@ go run main.go
 
 Aplikasi berjalan di `http://localhost:8080` (atau sesuai `PORT`).
 Swagger UI tersedia di `http://localhost:8080/swagger/index.html`.
+
+Worker background verification berjalan bersama proses Gateway. Gateway Dashboard
+atau scheduler dapat membuat job melalui `POST /api/dashboard/verification-runs`;
+worker memproses range dalam batch dengan ukuran default `100` dari
+`VERIFICATION_JOB_BATCH_SIZE`. Nilai tersebut adalah ukuran batch, bukan batas
+jumlah log dalam satu range. Client Portal hanya membaca progress dan hasil
+terakhir melalui `GET /api/dashboard/verification-runs/latest`.
 
 ### Menjalankan via Docker
 

@@ -36,6 +36,7 @@ func ConnectDB() *gorm.DB {
 		&models.RecoveryRequest{},
 		&models.RecoveryEvent{},
 		&models.ClientDashboardStats{},
+		&models.VerificationRun{},
 	)
 	if err != nil {
 		log.Fatalf("Gagal migrasi database: %v", err)
@@ -76,6 +77,9 @@ func ConnectDB() *gorm.DB {
 	if err := ensureDirectRecoverySchema(db); err != nil {
 		log.Fatalf("Gagal menyiapkan schema direct client recovery: %v", err)
 	}
+	if err := ensureVerificationRunSchema(db); err != nil {
+		log.Fatalf("Gagal menyiapkan schema verification run: %v", err)
+	}
 
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {
@@ -83,6 +87,14 @@ func ConnectDB() *gorm.DB {
 	}
 
 	return db
+}
+
+func ensureVerificationRunSchema(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_runs_active_range
+		ON verification_runs (client_id, from_time, to_time)
+		WHERE status IN ('QUEUED', 'RUNNING')
+	`).Error
 }
 
 func ensureTamperIncidentActiveIndex(db *gorm.DB) error {

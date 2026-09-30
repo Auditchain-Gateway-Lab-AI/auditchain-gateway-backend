@@ -31,6 +31,7 @@ type AuditRepository interface {
 	GetTableResources(tableName, clientID string) ([]models.AuditLog, error)
 	CountLogsByTimeRange(from, to time.Time, clientID string) (int64, error)
 	GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error)
+	GetLogsByTimeRangePage(from, to time.Time, clientID string, limit, offset int) ([]models.AuditLog, error)
 }
 
 type auditRepoImpl struct {
@@ -324,7 +325,23 @@ func (r *auditRepoImpl) GetClientTables(clientID string) ([]models.ClientTable, 
 func (r *auditRepoImpl) GetLogsByTimeRange(from, to time.Time, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ? AND "+clientAuditEventPredicate, clientID, from, to).
-		Order("timestamp asc").Find(&logs).Error
+		Order("timestamp asc, log_id asc").Find(&logs).Error
+	return logs, err
+}
+
+func (r *auditRepoImpl) GetLogsByTimeRangePage(from, to time.Time, clientID string, limit, offset int) ([]models.AuditLog, error) {
+	var logs []models.AuditLog
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	err := r.db.Where("client_id = ? AND timestamp BETWEEN ? AND ? AND "+clientAuditEventPredicate, clientID, from, to).
+		Order("timestamp asc, log_id asc").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error
 	return logs, err
 }
 
