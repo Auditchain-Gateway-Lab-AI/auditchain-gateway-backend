@@ -1,101 +1,4 @@
 definitions:
-  audit.DashboardStatsResponse:
-    properties:
-      integrity_score:
-        example: "99.79"
-        type: string
-      pending_logs:
-        example: 37
-        type: integer
-      tampered_logs:
-        example: 3
-        type: integer
-      total_logs:
-        example: 1500
-        type: integer
-      total_resources:
-        example: 45
-        type: integer
-      unreachable_logs:
-        example: 10
-        type: integer
-      valid_logs:
-        example: 1450
-        type: integer
-    type: object
-  audit.ErrorResponse:
-    properties:
-      error:
-        example: Pesan kesalahan atau validasi
-        type: string
-    type: object
-  audit.RecentLogsResponse:
-    properties:
-      data:
-        description: Array of logs
-        items: {}
-        type: array
-      note:
-        type: string
-      pagination:
-        properties:
-          page:
-            type: integer
-          page_size:
-            type: integer
-          total_pages:
-            type: integer
-          total_rows:
-            type: integer
-        type: object
-    type: object
-  audit.ResourceInventoryItem:
-    properties:
-      latest_log_id:
-        example: log-abc
-        type: string
-      resource:
-        example: orders
-        type: string
-      total_logs:
-        example: 500
-        type: integer
-    type: object
-  audit.VerifyLogData:
-    properties:
-      actual_hash:
-        type: string
-      agent_discrepancies: {}
-      agent_status:
-        type: string
-      blockchain_tx_id:
-        type: string
-      expected_hash:
-        type: string
-      is_valid:
-        type: boolean
-      log_id:
-        type: string
-      merkle_root:
-        type: string
-      message:
-        type: string
-    type: object
-  audit.VerifyLogResponse:
-    properties:
-      data:
-        $ref: '#/definitions/audit.VerifyLogData'
-      layer:
-        example: 4_blockchain
-        type: string
-      log_id:
-        type: string
-      message:
-        type: string
-      status:
-        example: success
-        type: string
-    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -266,6 +169,99 @@ definitions:
         example: Klien / Perusahaan SaaS berhasil didaftarkan
         type: string
     type: object
+  client.DashboardStatsDataResponse:
+    properties:
+      anchor_percentage:
+        example: 95
+        type: number
+      anchored_logs:
+        example: 95
+        type: integer
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      created_at:
+        type: string
+      id:
+        example: 1
+        type: integer
+      integrity_score:
+        example: 97.5
+        type: number
+      last_log_at:
+        type: string
+      last_verified_at:
+        type: string
+      last_verified_table:
+        example: users
+        type: string
+      logs_today:
+        example: 12
+        type: integer
+      pending_logs:
+        example: 5
+        type: integer
+      table_verify_results:
+        type: object
+      total_agent_error:
+        example: 0
+        type: integer
+      total_anchored:
+        example: 95
+        type: integer
+      total_deletes:
+        example: 10
+        type: integer
+      total_fabric_error:
+        example: 0
+        type: integer
+      total_inserts:
+        example: 40
+        type: integer
+      total_logs:
+        example: 100
+        type: integer
+      total_pending:
+        example: 5
+        type: integer
+      total_rows_verified:
+        example: 80
+        type: integer
+      total_tampered:
+        example: 2
+        type: integer
+      total_updates:
+        example: 50
+        type: integer
+      total_valid:
+        example: 78
+        type: integer
+      total_verifications:
+        example: 80
+        type: integer
+      total_verify_pending:
+        example: 0
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  client.DashboardStatsResponse:
+    properties:
+      anchored_logs:
+        example: 95
+        type: integer
+      data:
+        $ref: '#/definitions/client.DashboardStatsDataResponse'
+      message:
+        example: Berhasil mengambil statistik
+        type: string
+      pending_logs:
+        example: 5
+        type: integer
+      total_logs:
+        example: 100
+        type: integer
+    type: object
   client.ErrorResponse:
     properties:
       error:
@@ -292,6 +288,79 @@ definitions:
       total_success:
         example: 98
         type: integer
+    type: object
+  internalaudit.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  internalaudit.RecentLogsResponse:
+    properties:
+      data:
+        description: Array of logs
+        items: {}
+        type: array
+      note:
+        type: string
+      pagination:
+        properties:
+          page:
+            type: integer
+          page_size:
+            type: integer
+          total_pages:
+            type: integer
+          total_rows:
+            type: integer
+        type: object
+    type: object
+  internalaudit.ResourceInventoryItem:
+    properties:
+      latest_log_id:
+        example: log-abc
+        type: string
+      resource:
+        example: orders
+        type: string
+      total_logs:
+        example: 500
+        type: integer
+    type: object
+  internalaudit.VerifyLogData:
+    properties:
+      actual_hash:
+        type: string
+      agent_discrepancies: {}
+      agent_status:
+        type: string
+      blockchain_tx_id:
+        type: string
+      expected_hash:
+        type: string
+      is_valid:
+        type: boolean
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      message:
+        type: string
+    type: object
+  internalaudit.VerifyLogResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internalaudit.VerifyLogData'
+      layer:
+        example: 4_blockchain
+        type: string
+      log_id:
+        type: string
+      message:
+        type: string
+      status:
+        example: success
+        type: string
     type: object
   models.AgentConfig:
     properties:
@@ -410,6 +479,10 @@ definitions:
     properties:
       after_hash:
         type: string
+      agent_applied_at:
+        type: string
+      agent_command_id:
+        type: string
       anchor_id:
         type: string
       approved_at:
@@ -418,11 +491,21 @@ definitions:
         type: string
       before_hash:
         type: string
+      cdc_deadline_at:
+        type: string
+      cdc_status:
+        type: string
+      client_before_hash:
+        type: string
       client_id:
+        type: string
+      desired_state_hash:
         type: string
       executed_at:
         type: string
       executed_by:
+        type: string
+      execution_started_at:
         type: string
       expected_merkle_root:
         type: string
@@ -434,11 +517,25 @@ definitions:
         type: string
       incident_id:
         type: string
+      operation:
+        type: string
       reason:
+        type: string
+      recovery_event_id:
+        type: string
+      reference_anchor_id:
+        type: string
+      reference_log_hash:
+        type: string
+      reference_merkle_root:
         type: string
       requested_at:
         type: string
       requested_by:
+        type: string
+      resource:
+        type: string
+      result_audit_log_id:
         type: string
       selected_log_id:
         type: string
@@ -457,29 +554,6 @@ definitions:
       status:
         type: string
       target_log_id:
-        type: string
-    type: object
-  models.TamperIncident:
-    properties:
-      client_id:
-        type: string
-      detected_at:
-        type: string
-      detected_hash:
-        type: string
-      expected_hash:
-        type: string
-      id:
-        type: string
-      incident_type:
-        type: string
-      log_id:
-        type: string
-      resolved_at:
-        type: string
-      resource:
-        type: string
-      status:
         type: string
     type: object
   recovery.CreateRequestInput:
@@ -508,14 +582,45 @@ definitions:
   recovery.IncidentDetailResponse:
     properties:
       data:
-        $ref: '#/definitions/models.TamperIncident'
+        $ref: '#/definitions/recovery.IncidentDetailView'
     type: object
-  recovery.IncidentListResponse:
+  recovery.IncidentDetailView:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/models.TamperIncident'
-        type: array
+      client_id:
+        type: string
+      detected_at:
+        type: string
+      detected_hash:
+        type: string
+      detected_state_hash:
+        type: string
+      discrepancy_summary:
+        type: string
+      expected_hash:
+        type: string
+      id:
+        type: string
+      incident_scope:
+        type: string
+      incident_type:
+        type: string
+      last_confirmed_at:
+        type: string
+      log_id:
+        type: string
+      reference_log_id:
+        type: string
+      resolved_at:
+        type: string
+      resource:
+        type: string
+      source_status:
+        type: string
+      status:
+        type: string
+      tampered_evidence_available:
+        type: boolean
+      tampered_metadata: {}
     type: object
   recovery.RequestDetailResponse:
     properties:
@@ -802,16 +907,16 @@ paths:
           description: Daftar resource inventory
           schema:
             items:
-              $ref: '#/definitions/audit.ResourceInventoryItem'
+              $ref: '#/definitions/internalaudit.ResourceInventoryItem'
             type: array
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "500":
           description: Gagal memuat daftar data
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get resource inventory
@@ -859,19 +964,19 @@ paths:
         "200":
           description: Daftar log beserta data paginasi
           schema:
-            $ref: '#/definitions/audit.RecentLogsResponse'
+            $ref: '#/definitions/internalaudit.RecentLogsResponse'
         "400":
           description: Parameter tidak valid
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "500":
           description: Gagal mengambil log terbaru
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get recent audit logs
@@ -879,28 +984,29 @@ paths:
       - Audit
   /dashboard/stats:
     get:
-      description: Mengambil statistik ringkasan dashboard seperti jumlah log dan
-        status integritas.
+      description: Mengambil statistik tenant client yang sedang login. Counter audit
+        utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari
+        cache client_dashboard_stats.
       produces:
       - application/json
       responses:
         "200":
-          description: Statistik dashboard
+          description: Statistik dashboard client
           schema:
-            $ref: '#/definitions/audit.DashboardStatsResponse'
+            $ref: '#/definitions/client.DashboardStatsResponse'
         "401":
-          description: Identitas client tidak valid
+          description: Client ID tidak ditemukan atau tidak valid pada token
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/client.ErrorResponse'
         "500":
-          description: Gagal mengambil statistik
+          description: Gagal mengambil statistik dashboard
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/client.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Get dashboard statistics
+      summary: Get client dashboard statistics
       tags:
-      - Audit
+      - Dashboard
   /dashboard/verify/{log_id}:
     get:
       description: Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
@@ -916,27 +1022,27 @@ paths:
         "200":
           description: Verifikasi sukses dan log valid
           schema:
-            $ref: '#/definitions/audit.VerifyLogResponse'
+            $ref: '#/definitions/internalaudit.VerifyLogResponse'
         "202":
           description: Verifikasi pending/dalam proses
           schema:
-            $ref: '#/definitions/audit.VerifyLogResponse'
+            $ref: '#/definitions/internalaudit.VerifyLogResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "404":
           description: Log tidak ditemukan
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "409":
           description: Verifikasi gagal/tampered pada suatu layer
           schema:
-            $ref: '#/definitions/audit.VerifyLogResponse'
+            $ref: '#/definitions/internalaudit.VerifyLogResponse'
         "500":
           description: Kesalahan sistem saat verifikasi
           schema:
-            $ref: '#/definitions/audit.ErrorResponse'
+            $ref: '#/definitions/internalaudit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify a specific log
@@ -978,35 +1084,6 @@ paths:
       summary: Receive batch logs
       tags:
       - Ingestion
-  /recovery/incidents:
-    get:
-      description: Mengambil daftar semua insiden tamper berdasarkan client_id (opsional
-        difilter dengan status).
-      parameters:
-      - description: Filter Status Insiden (OPEN, RESOLVED)
-        in: query
-        name: status
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Daftar Insiden Tamper
-          schema:
-            $ref: '#/definitions/recovery.IncidentListResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil daftar tamper incident
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: List tamper incidents
-      tags:
-      - Recovery
   /recovery/incidents/{id}:
     get:
       description: Mengambil detail sebuah insiden tamper berdasarkan ID.
@@ -1042,8 +1119,8 @@ paths:
       - Recovery
   /recovery/incidents/{id}/candidates:
     get:
-      description: Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery
-        pada insiden tertentu.
+      description: Mengambil referensi event client yang valid terhadap Merkle proof
+        dan Fabric untuk insiden tertentu.
       parameters:
       - description: Incident ID
         in: path
@@ -1054,7 +1131,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Daftar kandidat snapshot
+          description: Daftar kandidat recovery
           schema:
             additionalProperties: true
             type: object
@@ -1072,13 +1149,13 @@ paths:
             $ref: '#/definitions/recovery.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: List candidate snapshots for recovery
+      summary: List trusted client recovery references
       tags:
       - Recovery
   /recovery/incidents/{id}/preflight:
     post:
-      description: Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan
-        tidak ada konflik sebelum recovery.
+      description: Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum
+        recovery tanpa melakukan write.
       parameters:
       - description: Incident ID
         in: path
@@ -1141,8 +1218,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Membuat permintaan baru untuk melakukan recovery data ke snapshot
-        tertentu.
+      description: Membekukan intent recovery state client melalui Agent setelah preflight
+        Fabric dan state live lulus.
       parameters:
       - description: Data Request Recovery
         in: body
@@ -1178,77 +1255,10 @@ paths:
       summary: Create recovery request
       tags:
       - Recovery
-  /recovery/requests/{id}:
-    get:
-      description: Mengambil detail sebuah permintaan (request) recovery berdasarkan
-        ID.
-      parameters:
-      - description: Request ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Detail recovery request
-          schema:
-            $ref: '#/definitions/recovery.RequestDetailResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Recovery request tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil detail recovery request
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get recovery request detail
-      tags:
-      - Recovery
-  /recovery/requests/{id}/approve:
-    post:
-      description: Menyetujui sebuah permintaan recovery (untuk backward compatibility).
-      parameters:
-      - description: Request ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Request berhasil disetujui
-          schema:
-            $ref: '#/definitions/recovery.RequestDetailResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Request tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "409":
-          description: State request tidak sesuai
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Approve recovery request
-      tags:
-      - Recovery
   /recovery/requests/{id}/execute:
     post:
-      description: Mengeksekusi permintaan recovery yang telah disetujui atau siap
-        dieksekusi, memulihkan data dari S3.
+      description: Mengeksekusi intent recovery ke row client existing melalui Agent;
+        tidak membuat tabel baru.
       parameters:
       - description: Request ID
         in: path
@@ -1283,42 +1293,10 @@ paths:
       summary: Execute recovery request
       tags:
       - Recovery
-  /recovery/requests/{id}/reject:
-    post:
-      description: Menolak sebuah permintaan recovery.
-      parameters:
-      - description: Request ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Request berhasil ditolak
-          schema:
-            $ref: '#/definitions/recovery.RequestDetailResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Request tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "409":
-          description: State request tidak sesuai
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Reject recovery request
-      tags:
-      - Recovery
-  /recovery/snapshots/{resource}/versions:
+  /recovery/resources/{resource}/versions:
     get:
-      description: Mengambil histori versi snapshot dari sebuah resource (table).
+      description: Mengambil histori event client ter-anchor dari sebuah resource
+        (table).
       parameters:
       - description: Resource/Table Name
         in: path
@@ -1329,7 +1307,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: Histori versi snapshot
+          description: Histori event client ter-anchor
           schema:
             additionalProperties: true
             type: object
@@ -1338,7 +1316,7 @@ paths:
           schema:
             $ref: '#/definitions/recovery.ErrorResponse'
         "500":
-          description: Gagal mengambil histori snapshot recovery
+          description: Gagal mengambil histori recovery
           schema:
             $ref: '#/definitions/recovery.ErrorResponse'
       security:

@@ -70,16 +70,6 @@ type ErrorResponse struct {
 	Error string `json:"error" example:"Pesan kesalahan atau validasi"`
 }
 
-type DashboardStatsResponse struct {
-	TotalLogs       int    `json:"total_logs" example:"1500"`
-	ValidLogs       int    `json:"valid_logs" example:"1450"`
-	TamperedLogs    int    `json:"tampered_logs" example:"3"`
-	UnreachableLogs int    `json:"unreachable_logs" example:"10"`
-	PendingLogs     int    `json:"pending_logs" example:"37"`
-	TotalResources  int    `json:"total_resources" example:"45"`
-	IntegrityScore  string `json:"integrity_score" example:"99.79"`
-}
-
 type VerifyLogData struct {
 	LogID              string      `json:"log_id"`
 	IsValid            bool        `json:"is_valid"`
@@ -121,28 +111,6 @@ type ResourceInventoryItem struct {
 	Resource    string `json:"resource" example:"orders"`
 	TotalLogs   int    `json:"total_logs" example:"500"`
 	LatestLogID string `json:"latest_log_id" example:"log-abc"`
-}
-
-// @Summary Get dashboard statistics
-// @Description Mengambil statistik ringkasan dashboard seperti jumlah log dan status integritas.
-// @Tags Audit
-// @Produce json
-// @Security BearerAuth
-// @Success 200 {object} DashboardStatsResponse "Statistik dashboard"
-// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
-// @Failure 500 {object} ErrorResponse "Gagal mengambil statistik"
-// @Router /dashboard/stats [get]
-func (h *Handler) GetStats(c *gin.Context) {
-	clientID, ok := h.getClientID(c)
-	if !ok {
-		return
-	}
-	stats, err := h.Service.GetDashboardStats(clientID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil statistik"})
-		return
-	}
-	c.JSON(http.StatusOK, stats)
 }
 
 // @Summary Verify a specific log
