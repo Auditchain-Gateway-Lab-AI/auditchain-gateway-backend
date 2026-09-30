@@ -71,6 +71,11 @@
         },
         "/auth/me": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
                 "consumes": [
                     "application/json"
@@ -101,14 +106,14 @@
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "put": {
+                ],
                 "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
                 "consumes": [
                     "application/json"
@@ -162,12 +167,7 @@
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/auth/register": {
@@ -230,6 +230,11 @@
         },
         "/client": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
                 "produces": [
                     "application/json"
@@ -254,14 +259,14 @@
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
                 "consumes": [
                     "application/json"
@@ -303,16 +308,16 @@
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/client/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
                 "produces": [
                     "application/json"
@@ -355,16 +360,16 @@
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/inventory": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
                 "produces": [
                     "application/json"
@@ -395,16 +400,16 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/logs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
                 "produces": [
                     "application/json"
@@ -488,16 +493,16 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/stats": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.",
                 "produces": [
                     "application/json"
@@ -525,16 +530,16 @@
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Compatibility alias for the gateway dashboard. New clients should use /dashboard/verify-range/internal.",
                 "produces": [
                     "application/json"
@@ -590,24 +595,24 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/client": {
             "get": {
-                "description": "Memilih resource yang muncul dalam rentang waktu lalu memverifikasi log client terbaru untuk setiap resource tersebut.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memverifikasi seluruh audit log dalam rentang waktu dengan kontrak yang sama seperti gateway dashboard. Client Portal hanya menerima summary tanpa daftar row log.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Audit"
                 ],
-                "summary": "Verify latest client resource state in a time range",
+                "summary": "Verify client logs in a time range",
                 "parameters": [
                     {
                         "type": "string",
@@ -626,9 +631,9 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Summary verifikasi resource client",
+                        "description": "Summary verifikasi log client",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                            "$ref": "#/definitions/internalaudit.ClientRangeVerificationResponse"
                         }
                     },
                     "400": {
@@ -643,22 +648,28 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
+                    "422": {
+                        "description": "Range terlalu besar untuk verifikasi sinkron",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Gagal memverifikasi client range log",
                         "schema": {
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/estimate": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi sinkron dijalankan.",
                 "produces": [
                     "application/json"
@@ -708,16 +719,16 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/internal": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.",
                 "produces": [
                     "application/json"
@@ -773,16 +784,16 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify/{log_id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
                 "produces": [
                     "application/json"
@@ -837,16 +848,16 @@
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/ingestion": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Menerima array of log dinamis dari sistem klien (Agent atau Kafka) untuk diproses dan diverifikasi ke blockchain.",
                 "consumes": [
                     "application/json"
@@ -892,16 +903,16 @@
                             "$ref": "#/definitions/ingestion.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/incidents/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil detail sebuah insiden tamper berdasarkan ID.",
                 "produces": [
                     "application/json"
@@ -944,16 +955,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/incidents/{id}/candidates": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.",
                 "produces": [
                     "application/json"
@@ -997,16 +1008,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/incidents/{id}/preflight": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.",
                 "produces": [
                     "application/json"
@@ -1050,16 +1061,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/requests": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
                 "produces": [
                     "application/json"
@@ -1095,14 +1106,14 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.",
                 "consumes": [
                     "application/json"
@@ -1156,16 +1167,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/requests/{id}/execute": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.",
                 "produces": [
                     "application/json"
@@ -1214,16 +1225,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/recovery/resources/{resource}/versions": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
                 "produces": [
                     "application/json"
@@ -1261,16 +1272,16 @@
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/report/generate": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.",
                 "consumes": [
                     "application/json"
@@ -1319,12 +1330,7 @@
                             "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         }
     },
@@ -1765,6 +1771,17 @@
                 }
             }
         },
+        "internalaudit.ClientRangeVerificationResponse": {
+            "type": "object",
+            "properties": {
+                "range": {
+                    "$ref": "#/definitions/internalaudit.RangeInfo"
+                },
+                "summary": {
+                    "$ref": "#/definitions/internalaudit.RangeSummary"
+                }
+            }
+        },
         "internalaudit.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -1814,6 +1831,9 @@
         "internalaudit.RangeSummary": {
             "type": "object",
             "properties": {
+                "already_verified": {
+                    "type": "integer"
+                },
                 "invalid": {
                     "type": "integer"
                 },
@@ -1824,6 +1844,9 @@
                     "type": "integer"
                 },
                 "valid": {
+                    "type": "integer"
+                },
+                "verified_now": {
                     "type": "integer"
                 }
             }

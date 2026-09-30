@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/blockchain/agentverifier"
@@ -94,10 +96,11 @@ type Service interface {
 }
 
 type auditService struct {
-	repo   AuditRepository
-	fabric *blockchain.FabricService
-	agent  *agentverifier.Service
-	db     *gorm.DB
+	repo                AuditRepository
+	fabric              *blockchain.FabricService
+	agent               *agentverifier.Service
+	db                  *gorm.DB
+	rangeVerificationMu sync.Mutex
 }
 
 type ResourceLogVerification struct {
@@ -186,10 +189,12 @@ type RangeInfo struct {
 }
 
 type RangeSummary struct {
-	Total   int `json:"total"`
-	Valid   int `json:"valid"`
-	Invalid int `json:"invalid"`
-	Pending int `json:"pending"`
+	Total           int `json:"total"`
+	Valid           int `json:"valid"`
+	Invalid         int `json:"invalid"`
+	Pending         int `json:"pending"`
+	AlreadyVerified int `json:"already_verified"`
+	VerifiedNow     int `json:"verified_now"`
 }
 
 type FabricAnchorData struct {
@@ -256,6 +261,24 @@ func (s *auditService) EstimateLogRange(from, to time.Time, clientID string) (in
 
 // Implementasi
 func (s *auditService) VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+	return s.verifyLogRange(from, to, clientID, requestID)
+}
+
+// VerifyClientLogRange intentionally uses the same all-log verification
+// contract as the gateway dashboard. The client portal only renders Summary;
+// it must not silently change the meaning of a date-range verification to
+// "latest resource per table".
+func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+	return s.verifyLogRange(from, to, clientID, requestID)
+}
+
+func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
+	// The checked timestamp is the durable idempotency marker. The mutex also
+	// closes the same-process race where two clicks read the row before either
+	// request has persisted its result.
+	s.rangeVerificationMu.Lock()
+	defer s.rangeVerificationMu.Unlock()
+
 	countStarted := time.Now()
 	estimatedItems, err := s.EstimateLogRange(from, to, clientID)
 	logRangeTiming(requestID, "count_logs", countStarted, err, "estimated_items", estimatedItems)
@@ -281,235 +304,195 @@ func (s *auditService) VerifyInternalLogRange(from, to time.Time, clientID, requ
 			From: formatPgTimestamp(from),
 			To:   formatPgTimestamp(to),
 		},
-		Results: []RangeItemResult{},
+		Results: make([]RangeItemResult, 0, len(logs)),
 	}
+	newlyVerified := make([]RangeItemResult, 0, len(logs))
 
 	for _, auditLog := range logs {
-		item := RangeItemResult{
-			LogID: auditLog.LogID,
-			Log:   auditLog,
-		}
-
-		verifyStarted := time.Now()
-		verifyResult, err := s.verifyLogIntegrity(auditLog.LogID, clientID, requestID, true)
-		logRangeTiming(requestID, "verify_log", verifyStarted, err, "log_id", auditLog.LogID)
-		if err != nil {
-			item.VerifyStatus = "error"
-			item.Message = err.Error()
+		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID)
+		if verifiedNow {
+			result.Summary.VerifiedNow++
+			newlyVerified = append(newlyVerified, item)
 		} else {
-			item.VerifyStatus = verifyResult.Status
-			item.Message = verifyResult.Message
-			item.AgentStatus = verifyResult.AgentStatus
-			item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
+			result.Summary.AlreadyVerified++
 		}
 
-		switch item.VerifyStatus {
-		case "success":
-			result.Summary.Valid++
-		case "pending":
-			result.Summary.Pending++
-		default:
-			result.Summary.Invalid++
-		}
-		result.Summary.Total++
+		addRangeSummary(&result.Summary, item.VerifyStatus)
 		result.Results = append(result.Results, item)
 	}
 
-	// Update Dashboard Stats untuk Client Audit
-	if len(result.Results) > 0 {
-		var stat models.ClientDashboardStats
-		if err := s.db.Where("client_id = ?", clientID).First(&stat).Error; err == nil {
-			totalValid := int64(result.Summary.Valid)
-			totalTampered := int64(result.Summary.Invalid)
-			totalPending := int64(result.Summary.Pending)
-			totalVerified := totalValid + totalTampered + totalPending
-
-			newTotalVerifications := stat.TotalVerifications + totalVerified
-			newTotalValid := stat.TotalValid + totalValid
-			var pct float64
-			if newTotalVerifications > 0 {
-				pct = float64(newTotalValid) / float64(newTotalVerifications) * 100
-			}
-
-			// Aggregate by table from Resource string (Format: TABLE_NAME:ID)
-			var tableResults map[string]interface{}
-			json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
-			if tableResults == nil {
-				tableResults = make(map[string]interface{})
-			}
-
-			// Tally per table
-			type tblSum struct {
-				Total   int `json:"total"`
-				Valid   int `json:"valid"`
-				Invalid int `json:"invalid"`
-				Pending int `json:"pending"`
-			}
-			tableAgg := make(map[string]*tblSum)
-
-			for _, item := range result.Results {
-				parts := strings.SplitN(item.Log.Resource, ":", 2)
-				tbl := parts[0]
-				if _, ok := tableAgg[tbl]; !ok {
-					tableAgg[tbl] = &tblSum{}
-				}
-				tableAgg[tbl].Total++
-				if item.VerifyStatus == "success" {
-					tableAgg[tbl].Valid++
-				} else if item.VerifyStatus == "pending" {
-					tableAgg[tbl].Pending++
-				} else {
-					tableAgg[tbl].Invalid++
-				}
-			}
-
-			for tbl, sum := range tableAgg {
-				tableResults[tbl] = sum
-			}
-			newJSON, _ := json.Marshal(tableResults)
-
-			s.db.Model(&stat).Updates(map[string]interface{}{
-				"last_verified_at":     time.Now(),
-				"last_verified_table":  "MULTIPLE (Client Audit)",
-				"total_verifications":  newTotalVerifications,
-				"total_rows_verified":  gorm.Expr("total_rows_verified + ?", totalVerified),
-				"total_valid":          newTotalValid,
-				"total_tampered":       stat.TotalTampered + totalTampered,
-				"total_verify_pending": stat.TotalVerifyPending + totalPending,
-				"integrity_score":      pct,
-				"table_verify_results": string(newJSON),
-			})
-		}
-	}
+	// Only newly processed log IDs contribute to cumulative dashboard stats.
+	// Replaying the same date range therefore returns the same summary without
+	// inflating total_verifications, total_valid, or total_tampered.
+	s.updateRangeDashboardStats(clientID, newlyVerified)
 
 	return result, nil
 }
 
-func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
-	countStarted := time.Now()
-	logs, err := s.repo.GetLogsByTimeRange(from, to, clientID)
-	logRangeTiming(requestID, "load_logs", countStarted, err, "loaded_items", len(logs))
-	if err != nil {
-		return nil, err
+func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID string) (RangeItemResult, bool) {
+	item := RangeItemResult{
+		LogID: auditLog.LogID,
+		Log:   auditLog,
 	}
 
-	uniqueResources := make(map[string]bool)
-	for _, l := range logs {
-		uniqueResources[l.Resource] = true
+	if hasCachedIntegrity(&auditLog) {
+		item.VerifyStatus, item.Message = cachedRangeStatus(auditLog.IntegrityStatus)
+		return item, false
 	}
 
-	result := &RangeVerificationResult{
-		Range: RangeInfo{
-			From: formatPgTimestamp(from),
-			To:   formatPgTimestamp(to),
-		},
-		Results: []RangeItemResult{},
-	}
+	verifyStarted := time.Now()
+	verifyResult, err := s.verifyLogIntegrity(auditLog.LogID, clientID, requestID, true)
+	logRangeTiming(requestID, "verify_log", verifyStarted, err, "log_id", auditLog.LogID)
 
-	for res := range uniqueResources {
-		latestLog, err := s.repo.GetLatestClientLogByResource(res, clientID)
-		if err != nil || latestLog == nil {
-			continue
-		}
-
-		item := RangeItemResult{
-			LogID: latestLog.LogID,
-			Log:   *latestLog,
-		}
-
-		verifyStarted := time.Now()
-		verifyResult, err := s.verifyClientLogIntegrity(latestLog.LogID, clientID, requestID)
-		logRangeTiming(requestID, "verify_client_log", verifyStarted, err, "log_id", latestLog.LogID)
+	persistedStatus := models.IntegrityStatusUnreachable
+	if err != nil || verifyResult == nil {
+		item.VerifyStatus = "error"
 		if err != nil {
-			item.VerifyStatus = "error"
 			item.Message = err.Error()
 		} else {
-			item.VerifyStatus = verifyResult.Status
-			item.Message = verifyResult.Message
-			item.AgentStatus = verifyResult.AgentStatus
-			item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
+			item.Message = "hasil verifikasi kosong"
 		}
-
-		switch item.VerifyStatus {
-		case "success":
-			result.Summary.Valid++
-		case "pending":
-			result.Summary.Pending++
-		default:
-			result.Summary.Invalid++
-		}
-		result.Summary.Total++
-		result.Results = append(result.Results, item)
+		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, err)
+	} else {
+		item.VerifyStatus = verifyResult.Status
+		item.Message = verifyResult.Message
+		item.AgentStatus = verifyResult.AgentStatus
+		item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
+		persistedStatus = integrityStatusFromVerificationResult(verifyResult)
+		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, nil)
 	}
 
-	// Update Dashboard Stats untuk Client Audit
-	if len(result.Results) > 0 {
+	item.Log.IntegrityStatus = persistedStatus
+	now := time.Now().UTC()
+	item.Log.IntegrityCheckedAt = &now
+	return item, true
+}
+
+func hasCachedIntegrity(auditLog *models.AuditLog) bool {
+	if auditLog == nil || auditLog.IntegrityCheckedAt == nil {
+		return false
+	}
+
+	status := strings.ToUpper(strings.TrimSpace(auditLog.IntegrityStatus))
+	return status != "" && status != models.IntegrityStatusNotChecked
+}
+
+func cachedRangeStatus(status string) (string, string) {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case models.IntegrityStatusValid:
+		return "success", "Hasil verifikasi tersimpan dan digunakan kembali."
+	case models.IntegrityStatusPending:
+		return "pending", "Hasil verifikasi pending tersimpan dan digunakan kembali."
+	case models.IntegrityStatusTampered:
+		return "failed_cached", "Hasil verifikasi tampered tersimpan dan digunakan kembali."
+	case models.IntegrityStatusUnreachable:
+		return "error", "Hasil verifikasi unavailable tersimpan dan digunakan kembali."
+	default:
+		return "error", "Hasil verifikasi tersimpan dengan status tidak dikenal."
+	}
+}
+
+func integrityStatusFromVerificationResult(result *VerificationResult) string {
+	if result == nil {
+		return models.IntegrityStatusUnreachable
+	}
+
+	switch result.Status {
+	case "success":
+		return models.IntegrityStatusValid
+	case "pending":
+		return models.IntegrityStatusPending
+	case "failed_local", "failed_onchain", "failed_source":
+		return models.IntegrityStatusTampered
+	default:
+		return models.IntegrityStatusUnreachable
+	}
+}
+
+func addRangeSummary(summary *RangeSummary, status string) {
+	summary.Total++
+	switch status {
+	case "success":
+		summary.Valid++
+	case "pending":
+		summary.Pending++
+	default:
+		summary.Invalid++
+	}
+}
+
+type rangeTableSummary struct {
+	Total            int `json:"total"`
+	Valid            int `json:"valid"`
+	Invalid          int `json:"invalid"`
+	Pending          int `json:"pending"`
+	Unavailable      int `json:"unavailable,omitempty"`
+	TamperedOnchain  int `json:"tampered_onchain,omitempty"`
+	TamperedOffchain int `json:"tampered_offchain,omitempty"`
+}
+
+func (s *auditService) updateRangeDashboardStats(clientID string, newlyVerified []RangeItemResult) {
+	if s.db == nil || len(newlyVerified) == 0 {
+		return
+	}
+
+	_ = s.db.Transaction(func(tx *gorm.DB) error {
 		var stat models.ClientDashboardStats
-		if err := s.db.Where("client_id = ?", clientID).First(&stat).Error; err == nil {
-			totalValid := int64(result.Summary.Valid)
-			totalTampered := int64(result.Summary.Invalid)
-			totalPending := int64(result.Summary.Pending)
-			totalVerified := totalValid + totalTampered + totalPending
-
-			newTotalVerifications := stat.TotalVerifications + totalVerified
-			newTotalValid := stat.TotalValid + totalValid
-			var pct float64
-			if newTotalVerifications > 0 {
-				pct = float64(newTotalValid) / float64(newTotalVerifications) * 100
-			}
-
-			// Aggregate by table from Resource string (Format: TABLE_NAME:ID)
-			var tableResults map[string]interface{}
-			json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
-			if tableResults == nil {
-				tableResults = make(map[string]interface{})
-			}
-
-			// Tally per table
-			type tblSum struct {
-				Total   int `json:"total"`
-				Valid   int `json:"valid"`
-				Invalid int `json:"invalid"`
-				Pending int `json:"pending"`
-			}
-			tableAgg := make(map[string]*tblSum)
-
-			for _, item := range result.Results {
-				parts := strings.SplitN(item.Log.Resource, ":", 2)
-				tbl := parts[0]
-				if _, ok := tableAgg[tbl]; !ok {
-					tableAgg[tbl] = &tblSum{}
-				}
-				tableAgg[tbl].Total++
-				if item.VerifyStatus == "success" {
-					tableAgg[tbl].Valid++
-				} else if item.VerifyStatus == "pending" {
-					tableAgg[tbl].Pending++
-				} else {
-					tableAgg[tbl].Invalid++
-				}
-			}
-
-			for tbl, sum := range tableAgg {
-				tableResults[tbl] = sum
-			}
-			newJSON, _ := json.Marshal(tableResults)
-
-			s.db.Model(&stat).Updates(map[string]interface{}{
-				"last_verified_at":     time.Now(),
-				"last_verified_table":  "MULTIPLE (Client Audit)",
-				"total_verifications":  newTotalVerifications,
-				"total_rows_verified":  gorm.Expr("total_rows_verified + ?", totalVerified),
-				"total_valid":          newTotalValid,
-				"total_tampered":       stat.TotalTampered + totalTampered,
-				"total_verify_pending": stat.TotalVerifyPending + totalPending,
-				"integrity_score":      pct,
-				"table_verify_results": string(newJSON),
-			})
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("client_id = ?", clientID).First(&stat).Error; err != nil {
+			return nil
 		}
-	}
 
-	return result, nil
+		var tableResults map[string]rangeTableSummary
+		if err := json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults); err != nil || tableResults == nil {
+			tableResults = make(map[string]rangeTableSummary)
+		}
+
+		totalValid := int64(0)
+		totalTampered := int64(0)
+		totalPending := int64(0)
+		for _, item := range newlyVerified {
+			tableName := strings.TrimSpace(strings.SplitN(item.Log.Resource, ":", 2)[0])
+			if tableName == "" {
+				tableName = "UNKNOWN"
+			}
+
+			table := tableResults[tableName]
+			table.Total++
+			switch item.VerifyStatus {
+			case "success":
+				totalValid++
+				table.Valid++
+			case "pending":
+				totalPending++
+				table.Pending++
+			default:
+				totalTampered++
+				table.Invalid++
+			}
+			tableResults[tableName] = table
+		}
+
+		newJSON, _ := json.Marshal(tableResults)
+		newTotalVerifications := stat.TotalVerifications + int64(len(newlyVerified))
+		newTotalValid := stat.TotalValid + totalValid
+		newIntegrityScore := float64(0)
+		if newTotalVerifications > 0 {
+			newIntegrityScore = float64(newTotalValid) / float64(newTotalVerifications) * 100
+		}
+
+		return tx.Model(&stat).Updates(map[string]interface{}{
+			"last_verified_at":     time.Now().UTC(),
+			"last_verified_table":  "MULTIPLE (Audit Range)",
+			"total_verifications":  newTotalVerifications,
+			"total_rows_verified":  gorm.Expr("total_rows_verified + ?", len(newlyVerified)),
+			"total_valid":          newTotalValid,
+			"total_tampered":       stat.TotalTampered + totalTampered,
+			"total_verify_pending": stat.TotalVerifyPending + totalPending,
+			"integrity_score":      newIntegrityScore,
+			"table_verify_results": string(newJSON),
+		}).Error
+	})
 }
 
 func logRangeTiming(requestID, operation string, started time.Time, err error, field string, value interface{}) {

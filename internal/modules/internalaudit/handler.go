@@ -107,6 +107,11 @@ type VerifyRangeEstimateResponse struct {
 	CanVerifySync  bool  `json:"can_verify_sync"`
 }
 
+type ClientRangeVerificationResponse struct {
+	Range   RangeInfo    `json:"range"`
+	Summary RangeSummary `json:"summary"`
+}
+
 // @Summary Verify a specific log
 // @Description Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).
 // @Tags Audit
@@ -589,16 +594,17 @@ func (h *Handler) VerifyLegacyLogRange(c *gin.Context) {
 	h.VerifyInternalLogRange(c)
 }
 
-// @Summary Verify latest client resource state in a time range
-// @Description Memilih resource yang muncul dalam rentang waktu lalu memverifikasi log client terbaru untuk setiap resource tersebut.
+// @Summary Verify client logs in a time range
+// @Description Memverifikasi seluruh audit log dalam rentang waktu dengan kontrak yang sama seperti gateway dashboard. Client Portal hanya menerima summary tanpa daftar row log.
 // @Tags Audit
 // @Produce json
 // @Security BearerAuth
 // @Param from query string true "Waktu mulai (RFC3339)"
 // @Param to query string true "Waktu selesai (RFC3339)"
-// @Success 200 {object} RangeVerificationResult "Summary verifikasi resource client"
+// @Success 200 {object} ClientRangeVerificationResponse "Summary verifikasi log client"
 // @Failure 400 {object} ErrorResponse "Parameter rentang tidak valid"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 422 {object} ErrorResponse "Range terlalu besar untuk verifikasi sinkron"
 // @Failure 500 {object} ErrorResponse "Gagal memverifikasi client range log"
 // @Router /dashboard/verify-range/client [get]
 func (h *Handler) VerifyClientLogRange(c *gin.Context) {
@@ -614,9 +620,22 @@ func (h *Handler) VerifyClientLogRange(c *gin.Context) {
 
 	result, err := h.Service.VerifyClientLogRange(from, to, clientID, middleware.GetRequestID(c))
 	if err != nil {
+		var tooLarge *VerifyRangeTooLargeError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"code":            "VERIFY_RANGE_TOO_LARGE",
+				"error":           "Range terlalu besar untuk verifikasi sinkron. Persempit date range atau tunggu fitur background job.",
+				"estimated_items": tooLarge.EstimatedItems,
+				"sync_limit":      tooLarge.Limit,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memverifikasi client range log"})
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, ClientRangeVerificationResponse{
+		Range:   result.Range,
+		Summary: result.Summary,
+	})
 }
