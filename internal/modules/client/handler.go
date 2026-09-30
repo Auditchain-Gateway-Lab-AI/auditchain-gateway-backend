@@ -1210,20 +1210,50 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 
 // GetClientStats mengambil statistik dashboard dari klien yang sedang login
 func (h *Handler) GetClientStats(c *gin.Context) {
-	clientID, exists := c.Get("client_id")
+	clientIDValue, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan pada token"})
 		return
 	}
+	clientID, ok := clientIDValue.(string)
+	if !ok || strings.TrimSpace(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID pada token tidak valid"})
+		return
+	}
+
+	// The audit-log table is the source of truth for the three headline
+	// counters. ClientDashboardStats is an operational cache and may not have
+	// been backfilled for logs that existed before the cache was introduced.
+	var liveCounts struct {
+		TotalLogs    int64 `gorm:"column:total_logs"`
+		AnchoredLogs int64 `gorm:"column:anchored_logs"`
+		PendingLogs  int64 `gorm:"column:pending_logs"`
+	}
+	if err := h.DB.Raw(`
+		SELECT
+			COUNT(*) AS total_logs,
+			COUNT(*) FILTER (WHERE status = 'ANCHORED') AS anchored_logs,
+			COUNT(*) FILTER (WHERE status IN ('RECEIVED', 'HASHED', 'AGGREGATED')) AS pending_logs
+		FROM audit_logs
+		WHERE client_id = ?
+		  AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'
+	`, clientID).Scan(&liveCounts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung statistik audit"})
+		return
+	}
 
 	var stats models.ClientDashboardStats
-	if err := h.DB.Where("client_id = ?", clientID).First(&stats).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Data statistik belum tersedia"})
-			return
-		}
+	if err := h.DB.Where("client_id = ?", clientID).First(&stats).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik"})
 		return
+	}
+	if stats.ClientID == "" {
+		stats.ClientID = clientID
+	}
+
+	anchorPercentage := float64(0)
+	if liveCounts.TotalLogs > 0 {
+		anchorPercentage = float64(liveCounts.AnchoredLogs) / float64(liveCounts.TotalLogs) * 100
 	}
 
 	// Parsing JSON String ke Object jika diperlukan agar rapi di response
@@ -1232,33 +1262,42 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		_ = json.Unmarshal([]byte(stats.TableVerifyResults), &tableResults)
 	}
 
+	data := gin.H{
+		"id":                   stats.ID,
+		"client_id":            stats.ClientID,
+		"total_logs":           liveCounts.TotalLogs,
+		"logs_today":           stats.LogsToday,
+		"total_inserts":        stats.TotalInserts,
+		"total_updates":        stats.TotalUpdates,
+		"total_deletes":        stats.TotalDeletes,
+		"last_log_at":          stats.LastLogAt,
+		"total_anchored":       liveCounts.AnchoredLogs,
+		"anchored_logs":        liveCounts.AnchoredLogs,
+		"total_pending":        liveCounts.PendingLogs,
+		"pending_logs":         liveCounts.PendingLogs,
+		"anchor_percentage":    anchorPercentage,
+		"total_verifications":  stats.TotalVerifications,
+		"total_rows_verified":  stats.TotalRowsVerified,
+		"total_valid":          stats.TotalValid,
+		"total_tampered":       stats.TotalTampered,
+		"total_verify_pending": stats.TotalVerifyPending,
+		"total_agent_error":    stats.TotalAgentError,
+		"total_fabric_error":   stats.TotalFabricError,
+		"integrity_score":      stats.IntegrityScore,
+		"last_verified_at":     stats.LastVerifiedAt,
+		"last_verified_table":  stats.LastVerifiedTable,
+		"table_verify_results": tableResults,
+		"created_at":           stats.CreatedAt,
+		"updated_at":           stats.UpdatedAt,
+	}
+
+	// Keep the legacy top-level shape consumed by the dashboard while retaining
+	// the richer nested response for existing API consumers.
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Berhasil mengambil statistik",
-		"data": gin.H{
-			"id":                   stats.ID,
-			"client_id":            stats.ClientID,
-			"total_logs":           stats.TotalLogs,
-			"logs_today":           stats.LogsToday,
-			"total_inserts":        stats.TotalInserts,
-			"total_updates":        stats.TotalUpdates,
-			"total_deletes":        stats.TotalDeletes,
-			"last_log_at":          stats.LastLogAt,
-			"total_anchored":       stats.TotalAnchored,
-			"total_pending":        stats.TotalPending,
-			"anchor_percentage":    stats.AnchorPercentage,
-			"total_verifications":  stats.TotalVerifications,
-			"total_rows_verified":  stats.TotalRowsVerified,
-			"total_valid":          stats.TotalValid,
-			"total_tampered":       stats.TotalTampered,
-			"total_verify_pending": stats.TotalVerifyPending,
-			"total_agent_error":    stats.TotalAgentError,
-			"total_fabric_error":   stats.TotalFabricError,
-			"integrity_score":      stats.IntegrityScore,
-			"last_verified_at":     stats.LastVerifiedAt,
-			"last_verified_table":  stats.LastVerifiedTable,
-			"table_verify_results": tableResults,
-			"created_at":           stats.CreatedAt,
-			"updated_at":           stats.UpdatedAt,
-		},
+		"message":       "Berhasil mengambil statistik",
+		"total_logs":    liveCounts.TotalLogs,
+		"pending_logs":  liveCounts.PendingLogs,
+		"anchored_logs": liveCounts.AnchoredLogs,
+		"data":          data,
 	})
 }
