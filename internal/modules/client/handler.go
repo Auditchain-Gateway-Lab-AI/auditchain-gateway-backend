@@ -85,6 +85,46 @@ type ClientDetailResponse struct {
 	KafkaConfig models.ClientKafkaConfig `json:"kafka_config"`
 }
 
+// DashboardStatsResponse describes the nested response returned by the
+// client dashboard statistics endpoint. The headline counters are calculated
+// from audit_logs; the verification counters come from the client stats cache.
+type DashboardStatsResponse struct {
+	Message      string                     `json:"message" example:"Berhasil mengambil statistik"`
+	TotalLogs    int64                      `json:"total_logs" example:"100"`
+	PendingLogs  int64                      `json:"pending_logs" example:"5"`
+	AnchoredLogs int64                      `json:"anchored_logs" example:"95"`
+	Data         DashboardStatsDataResponse `json:"data"`
+}
+
+type DashboardStatsDataResponse struct {
+	ID                 uint                   `json:"id" example:"1"`
+	ClientID           string                 `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	TotalLogs          int64                  `json:"total_logs" example:"100"`
+	LogsToday          int64                  `json:"logs_today" example:"12"`
+	TotalInserts       int64                  `json:"total_inserts" example:"40"`
+	TotalUpdates       int64                  `json:"total_updates" example:"50"`
+	TotalDeletes       int64                  `json:"total_deletes" example:"10"`
+	LastLogAt          *time.Time             `json:"last_log_at,omitempty"`
+	TotalAnchored      int64                  `json:"total_anchored" example:"95"`
+	AnchoredLogs       int64                  `json:"anchored_logs" example:"95"`
+	TotalPending       int64                  `json:"total_pending" example:"5"`
+	PendingLogs        int64                  `json:"pending_logs" example:"5"`
+	AnchorPercentage   float64                `json:"anchor_percentage" example:"95.00"`
+	TotalVerifications int64                  `json:"total_verifications" example:"80"`
+	TotalRowsVerified  int64                  `json:"total_rows_verified" example:"80"`
+	TotalValid         int64                  `json:"total_valid" example:"78"`
+	TotalTampered      int64                  `json:"total_tampered" example:"2"`
+	TotalVerifyPending int64                  `json:"total_verify_pending" example:"0"`
+	TotalAgentError    int64                  `json:"total_agent_error" example:"0"`
+	TotalFabricError   int64                  `json:"total_fabric_error" example:"0"`
+	IntegrityScore     float64                `json:"integrity_score" example:"97.50"`
+	LastVerifiedAt     *time.Time             `json:"last_verified_at,omitempty"`
+	LastVerifiedTable  string                 `json:"last_verified_table" example:"users"`
+	TableVerifyResults map[string]interface{} `json:"table_verify_results" swaggertype:"object"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+}
+
 func (h *Handler) CreateKafkaConfig(c *gin.Context) {
 	var req CreateKafkaConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1208,7 +1248,15 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 	})
 }
 
-// GetClientStats mengambil statistik dashboard dari klien yang sedang login
+// @Summary Get client dashboard statistics
+// @Description Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari cache client_dashboard_stats.
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} DashboardStatsResponse "Statistik dashboard client"
+// @Failure 401 {object} ErrorResponse "Client ID tidak ditemukan atau tidak valid pada token"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil statistik dashboard"
+// @Router /dashboard/stats [get]
 func (h *Handler) GetClientStats(c *gin.Context) {
 	clientIDValue, exists := c.Get("client_id")
 	if !exists {

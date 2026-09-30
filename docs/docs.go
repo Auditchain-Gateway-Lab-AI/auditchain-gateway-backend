@@ -392,20 +392,20 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/audit.ResourceInventoryItem"
+                                "$ref": "#/definitions/internalaudit.ResourceInventoryItem"
                             }
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memuat daftar data",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
                 }
@@ -480,25 +480,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Daftar log beserta data paginasi",
                         "schema": {
-                            "$ref": "#/definitions/audit.RecentLogsResponse"
+                            "$ref": "#/definitions/internalaudit.RecentLogsResponse"
                         }
                     },
                     "400": {
                         "description": "Parameter tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mengambil log terbaru",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
                 }
@@ -511,31 +511,31 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengambil statistik ringkasan dashboard seperti jumlah log dan status integritas.",
+                "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari cache client_dashboard_stats.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Audit"
+                    "Dashboard"
                 ],
-                "summary": "Get dashboard statistics",
+                "summary": "Get client dashboard statistics",
                 "responses": {
                     "200": {
-                        "description": "Statistik dashboard",
+                        "description": "Statistik dashboard client",
                         "schema": {
-                            "$ref": "#/definitions/audit.DashboardStatsResponse"
+                            "$ref": "#/definitions/client.DashboardStatsResponse"
                         }
                     },
                     "401": {
-                        "description": "Identitas client tidak valid",
+                        "description": "Client ID tidak ditemukan atau tidak valid pada token",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     },
                     "500": {
-                        "description": "Gagal mengambil statistik",
+                        "description": "Gagal mengambil statistik dashboard",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
                 }
@@ -569,37 +569,37 @@ const docTemplate = `{
                     "200": {
                         "description": "Verifikasi sukses dan log valid",
                         "schema": {
-                            "$ref": "#/definitions/audit.VerifyLogResponse"
+                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
                         }
                     },
                     "202": {
                         "description": "Verifikasi pending/dalam proses",
                         "schema": {
-                            "$ref": "#/definitions/audit.VerifyLogResponse"
+                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Log tidak ditemukan",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Verifikasi gagal/tampered pada suatu layer",
                         "schema": {
-                            "$ref": "#/definitions/audit.VerifyLogResponse"
+                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
                         }
                     },
                     "500": {
                         "description": "Kesalahan sistem saat verifikasi",
                         "schema": {
-                            "$ref": "#/definitions/audit.ErrorResponse"
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
                 }
@@ -655,51 +655,6 @@ const docTemplate = `{
                         "description": "Identitas klien tidak ditemukan atau gagal memproses konfigurasi",
                         "schema": {
                             "$ref": "#/definitions/ingestion.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/incidents": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil daftar semua insiden tamper berdasarkan client_id (opsional difilter dengan status).",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "List tamper incidents",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Filter Status Insiden (OPEN, RESOLVED)",
-                        "name": "status",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Daftar Insiden Tamper",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.IncidentListResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil daftar tamper incident",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
                 }
@@ -764,14 +719,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengambil daftar snapshot valid yang tersedia di S3 untuk di-recovery pada insiden tertentu.",
+                "description": "Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Recovery"
                 ],
-                "summary": "List candidate snapshots for recovery",
+                "summary": "List trusted client recovery references",
                 "parameters": [
                     {
                         "type": "string",
@@ -783,7 +738,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Daftar kandidat snapshot",
+                        "description": "Daftar kandidat recovery",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -817,7 +772,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Melakukan pengecekan preflight pada kandidat snapshot untuk memastikan tidak ada konflik sebelum recovery.",
+                "description": "Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.",
                 "produces": [
                     "application/json"
                 ],
@@ -913,7 +868,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Membuat permintaan baru untuk melakukan recovery data ke snapshot tertentu.",
+                "description": "Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.",
                 "consumes": [
                     "application/json"
                 ],
@@ -969,110 +924,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/recovery/requests/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil detail sebuah permintaan (request) recovery berdasarkan ID.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Get recovery request detail",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Request ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Detail recovery request",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestDetailResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Recovery request tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil detail recovery request",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/requests/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Menyetujui sebuah permintaan recovery (untuk backward compatibility).",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Approve recovery request",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Request ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Request berhasil disetujui",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestDetailResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Request tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "State request tidak sesuai",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/recovery/requests/{id}/execute": {
             "post": {
                 "security": [
@@ -1080,7 +931,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengeksekusi permintaan recovery yang telah disetujui atau siap dieksekusi, memulihkan data dari S3.",
+                "description": "Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.",
                 "produces": [
                     "application/json"
                 ],
@@ -1131,66 +982,14 @@ const docTemplate = `{
                 }
             }
         },
-        "/recovery/requests/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Menolak sebuah permintaan recovery.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Reject recovery request",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Request ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Request berhasil ditolak",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestDetailResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Request tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "State request tidak sesuai",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/snapshots/{resource}/versions": {
+        "/recovery/resources/{resource}/versions": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengambil histori versi snapshot dari sebuah resource (table).",
+                "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
                 "produces": [
                     "application/json"
                 ],
@@ -1209,7 +1008,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Histori versi snapshot",
+                        "description": "Histori event client ter-anchor",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -1222,7 +1021,7 @@ const docTemplate = `{
                         }
                     },
                     "500": {
-                        "description": "Gagal mengambil histori snapshot recovery",
+                        "description": "Gagal mengambil histori recovery",
                         "schema": {
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
@@ -1290,147 +1089,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "audit.DashboardStatsResponse": {
-            "type": "object",
-            "properties": {
-                "integrity_score": {
-                    "type": "string",
-                    "example": "99.79"
-                },
-                "pending_logs": {
-                    "type": "integer",
-                    "example": 37
-                },
-                "tampered_logs": {
-                    "type": "integer",
-                    "example": 3
-                },
-                "total_logs": {
-                    "type": "integer",
-                    "example": 1500
-                },
-                "total_resources": {
-                    "type": "integer",
-                    "example": 45
-                },
-                "unreachable_logs": {
-                    "type": "integer",
-                    "example": 10
-                },
-                "valid_logs": {
-                    "type": "integer",
-                    "example": 1450
-                }
-            }
-        },
-        "audit.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Pesan kesalahan atau validasi"
-                }
-            }
-        },
-        "audit.RecentLogsResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "description": "Array of logs",
-                    "type": "array",
-                    "items": {}
-                },
-                "note": {
-                    "type": "string"
-                },
-                "pagination": {
-                    "type": "object",
-                    "properties": {
-                        "page": {
-                            "type": "integer"
-                        },
-                        "page_size": {
-                            "type": "integer"
-                        },
-                        "total_pages": {
-                            "type": "integer"
-                        },
-                        "total_rows": {
-                            "type": "integer"
-                        }
-                    }
-                }
-            }
-        },
-        "audit.ResourceInventoryItem": {
-            "type": "object",
-            "properties": {
-                "latest_log_id": {
-                    "type": "string",
-                    "example": "log-abc"
-                },
-                "resource": {
-                    "type": "string",
-                    "example": "orders"
-                },
-                "total_logs": {
-                    "type": "integer",
-                    "example": 500
-                }
-            }
-        },
-        "audit.VerifyLogData": {
-            "type": "object",
-            "properties": {
-                "actual_hash": {
-                    "type": "string"
-                },
-                "agent_discrepancies": {},
-                "agent_status": {
-                    "type": "string"
-                },
-                "blockchain_tx_id": {
-                    "type": "string"
-                },
-                "expected_hash": {
-                    "type": "string"
-                },
-                "is_valid": {
-                    "type": "boolean"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "merkle_root": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "audit.VerifyLogResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/audit.VerifyLogData"
-                },
-                "layer": {
-                    "type": "string",
-                    "example": "4_blockchain"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "success"
-                }
-            }
-        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -1682,6 +1340,134 @@ const docTemplate = `{
                 }
             }
         },
+        "client.DashboardStatsDataResponse": {
+            "type": "object",
+            "properties": {
+                "anchor_percentage": {
+                    "type": "number",
+                    "example": 95
+                },
+                "anchored_logs": {
+                    "type": "integer",
+                    "example": 95
+                },
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 97.5
+                },
+                "last_log_at": {
+                    "type": "string"
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "last_verified_table": {
+                    "type": "string",
+                    "example": "users"
+                },
+                "logs_today": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "pending_logs": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "table_verify_results": {
+                    "type": "object"
+                },
+                "total_agent_error": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_anchored": {
+                    "type": "integer",
+                    "example": 95
+                },
+                "total_deletes": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_fabric_error": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_inserts": {
+                    "type": "integer",
+                    "example": 40
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "total_updates": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 78
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_verify_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "client.DashboardStatsResponse": {
+            "type": "object",
+            "properties": {
+                "anchored_logs": {
+                    "type": "integer",
+                    "example": 95
+                },
+                "data": {
+                    "$ref": "#/definitions/client.DashboardStatsDataResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil statistik"
+                },
+                "pending_logs": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 100
+                }
+            }
+        },
         "client.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -1718,6 +1504,114 @@ const docTemplate = `{
                 "total_success": {
                     "type": "integer",
                     "example": 98
+                }
+            }
+        },
+        "internalaudit.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "internalaudit.RecentLogsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Array of logs",
+                    "type": "array",
+                    "items": {}
+                },
+                "note": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "type": "object",
+                    "properties": {
+                        "page": {
+                            "type": "integer"
+                        },
+                        "page_size": {
+                            "type": "integer"
+                        },
+                        "total_pages": {
+                            "type": "integer"
+                        },
+                        "total_rows": {
+                            "type": "integer"
+                        }
+                    }
+                }
+            }
+        },
+        "internalaudit.ResourceInventoryItem": {
+            "type": "object",
+            "properties": {
+                "latest_log_id": {
+                    "type": "string",
+                    "example": "log-abc"
+                },
+                "resource": {
+                    "type": "string",
+                    "example": "orders"
+                },
+                "total_logs": {
+                    "type": "integer",
+                    "example": 500
+                }
+            }
+        },
+        "internalaudit.VerifyLogData": {
+            "type": "object",
+            "properties": {
+                "actual_hash": {
+                    "type": "string"
+                },
+                "agent_discrepancies": {},
+                "agent_status": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "is_valid": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internalaudit.VerifyLogResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internalaudit.VerifyLogData"
+                },
+                "layer": {
+                    "type": "string",
+                    "example": "4_blockchain"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
                 }
             }
         },
@@ -1878,6 +1772,12 @@ const docTemplate = `{
                 "after_hash": {
                     "type": "string"
                 },
+                "agent_applied_at": {
+                    "type": "string"
+                },
+                "agent_command_id": {
+                    "type": "string"
+                },
                 "anchor_id": {
                     "type": "string"
                 },
@@ -1890,13 +1790,28 @@ const docTemplate = `{
                 "before_hash": {
                     "type": "string"
                 },
+                "cdc_deadline_at": {
+                    "type": "string"
+                },
+                "cdc_status": {
+                    "type": "string"
+                },
+                "client_before_hash": {
+                    "type": "string"
+                },
                 "client_id": {
+                    "type": "string"
+                },
+                "desired_state_hash": {
                     "type": "string"
                 },
                 "executed_at": {
                     "type": "string"
                 },
                 "executed_by": {
+                    "type": "string"
+                },
+                "execution_started_at": {
                     "type": "string"
                 },
                 "expected_merkle_root": {
@@ -1914,13 +1829,34 @@ const docTemplate = `{
                 "incident_id": {
                     "type": "string"
                 },
+                "operation": {
+                    "type": "string"
+                },
                 "reason": {
+                    "type": "string"
+                },
+                "recovery_event_id": {
+                    "type": "string"
+                },
+                "reference_anchor_id": {
+                    "type": "string"
+                },
+                "reference_log_hash": {
+                    "type": "string"
+                },
+                "reference_merkle_root": {
                     "type": "string"
                 },
                 "requested_at": {
                     "type": "string"
                 },
                 "requested_by": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "result_audit_log_id": {
                     "type": "string"
                 },
                 "selected_log_id": {
@@ -1943,41 +1879,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "target_log_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.TamperIncident": {
-            "type": "object",
-            "properties": {
-                "client_id": {
-                    "type": "string"
-                },
-                "detected_at": {
-                    "type": "string"
-                },
-                "detected_hash": {
-                    "type": "string"
-                },
-                "expected_hash": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "incident_type": {
-                    "type": "string"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "resolved_at": {
-                    "type": "string"
-                },
-                "resource": {
-                    "type": "string"
-                },
-                "status": {
                     "type": "string"
                 }
             }
@@ -2019,19 +1920,65 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.TamperIncident"
+                    "$ref": "#/definitions/recovery.IncidentDetailView"
                 }
             }
         },
-        "recovery.IncidentListResponse": {
+        "recovery.IncidentDetailView": {
             "type": "object",
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.TamperIncident"
-                    }
-                }
+                "client_id": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "detected_hash": {
+                    "type": "string"
+                },
+                "detected_state_hash": {
+                    "type": "string"
+                },
+                "discrepancy_summary": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_scope": {
+                    "type": "string"
+                },
+                "incident_type": {
+                    "type": "string"
+                },
+                "last_confirmed_at": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "reference_log_id": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "source_status": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tampered_evidence_available": {
+                    "type": "boolean"
+                },
+                "tampered_metadata": {}
             }
         },
         "recovery.RequestDetailResponse": {
