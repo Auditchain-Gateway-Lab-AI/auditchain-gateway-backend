@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"go-blockchain-api/internal/engine/hasher"
-	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/engine/stats"
+	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/storage/snapshotstore"
 
 	"github.com/segmentio/kafka-go"
