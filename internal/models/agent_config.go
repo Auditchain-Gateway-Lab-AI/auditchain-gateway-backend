@@ -34,8 +34,11 @@ type AgentConfig struct {
 	UserTableName  string `gorm:"type:varchar(100)" json:"user_table_name"`
 	UserColumnName string `gorm:"type:varchar(100)" json:"user_column_name"`
 
-	// Bearer token untuk autentikasi — harus cocok dengan AGENT_VERIFY_TOKEN di Agent.
-	VerifyToken string `gorm:"type:varchar(255)" json:"-"`
+	// Bearer token untuk autentikasi read — harus cocok dengan AGENT_VERIFY_TOKEN
+	// di Agent. RecoveryToken sengaja dipisahkan agar token read tidak dapat
+	// dipakai untuk menulis database client.
+	VerifyToken   string `gorm:"type:varchar(255)" json:"-"`
+	RecoveryToken string `gorm:"type:varchar(255)" json:"-"`
 
 	// Timeout dalam detik untuk request ke Agent (default: 5)
 	TimeoutSeconds int `gorm:"default:5" json:"timeout_seconds"`

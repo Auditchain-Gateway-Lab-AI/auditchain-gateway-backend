@@ -36,10 +36,10 @@ import (
 	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/engine/snapshotworker"
 	"go-blockchain-api/internal/engine/tamperscanner"
-	"go-blockchain-api/internal/modules/internalaudit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
 	"go-blockchain-api/internal/modules/clientaudit"
+	"go-blockchain-api/internal/modules/internalaudit"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"go-blockchain-api/internal/storage/snapshotstore"
@@ -61,11 +61,18 @@ func tamperScannerEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAMPER_SCANNER_ENABLED")), "true")
 }
 
-func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Time) error {
-	if (recovery || snapshotRequired) && cutoff == nil {
+func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Time, modes ...string) error {
+	mode := "snapshot_legacy"
+	if len(modes) > 0 && strings.TrimSpace(modes[0]) != "" {
+		mode = strings.ToLower(strings.TrimSpace(modes[0]))
+	}
+	if mode != "snapshot_legacy" && mode != "agent_direct" {
+		return fmt.Errorf("RECOVERY_MODE tidak dikenal: %s", mode)
+	}
+	if mode != "agent_direct" && (recovery || snapshotRequired) && cutoff == nil {
 		return fmt.Errorf("RECOVERY_CUTOFF_AT wajib diisi saat recovery atau anchoring gate aktif")
 	}
-	if recovery && !snapshotRequired {
+	if mode != "agent_direct" && recovery && !snapshotRequired {
 		return fmt.Errorf("RECOVERY_ENABLED=true membutuhkan SNAPSHOT_REQUIRED_FOR_ANCHOR=true")
 	}
 	return nil
@@ -166,9 +173,9 @@ func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, e
 	}, nil
 }
 
-func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time, recoveryService *recovery.Service) {
+func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time, recoveryService *recovery.Service, snapshotRequired bool) {
 	hashEngine := &hasher.Engine{DB: db}
-	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff}
+	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff, SnapshotRequired: &snapshotRequired}
 	kafkaEngine := &kafkaconsumer.Engine{DB: db, SnapshotBuilder: snapshotBuilder}
 
 	// Ticker pipeline: hasher + aggregator (batch=10) + anchoring setiap 10 detik
@@ -184,6 +191,11 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 			case <-ticker.C:
 				if err := hashEngine.ProcessPendingLogs(); err != nil {
 					log.Printf("❌ [Hasher] Error: %v\n", err)
+				}
+				if recoveryService != nil {
+					if err := recoveryService.ReconcilePendingCDC(ctx, 100); err != nil {
+						log.Printf("⚠️ [RecoveryCDC] Rekonsiliasi CDC selesai dengan status non-valid: %v\n", err)
+					}
 				}
 				if err := aggEngine.ProcessBatch(10); err != nil {
 					log.Printf("❌ [Aggregator] Error: %v\n", err)
@@ -239,7 +251,15 @@ func main() {
 	if cutoffErr != nil {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", cutoffErr)
 	}
-	if scopeErr := validateRecoveryScopeFlags(recoveryEnabled(), snapshotRequiredForAnchor(), recoveryCutoff); scopeErr != nil {
+	recoveryMode := strings.ToLower(strings.TrimSpace(os.Getenv("RECOVERY_MODE")))
+	if recoveryMode == "" {
+		recoveryMode = "snapshot_legacy"
+	}
+	// The direct client-DB path has no MinIO dependency. Keep the legacy
+	// snapshot gate for the compatibility mode, but never let an old
+	// SNAPSHOT_REQUIRED_FOR_ANCHOR=true setting block direct recovery startup.
+	effectiveSnapshotRequired := snapshotRequiredForAnchor() && recoveryMode != "agent_direct"
+	if scopeErr := validateRecoveryScopeFlags(recoveryEnabled(), effectiveSnapshotRequired, recoveryCutoff, recoveryMode); scopeErr != nil {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", scopeErr)
 	}
 
@@ -247,7 +267,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Konfigurasi snapshot writer tidak valid: %v", err)
 	}
-	if snapshotRequiredForAnchor() && snapshotBuilder == nil {
+	if effectiveSnapshotRequired && snapshotBuilder == nil {
 		log.Fatal("❌ SNAPSHOT_REQUIRED_FOR_ANCHOR=true membutuhkan SNAPSHOT_WRITER_ENABLED=true dan konfigurasi MinIO yang valid")
 	}
 	if snapshotStore != nil {
@@ -268,11 +288,14 @@ func main() {
 	} else {
 		defer fabricSvc.Close()
 	}
-	if snapshotRequiredForAnchor() && fabricSvc == nil {
+	if effectiveSnapshotRequired && fabricSvc == nil {
 		log.Fatal("❌ SNAPSHOT_REQUIRED_FOR_ANCHOR=true membutuhkan koneksi Fabric yang valid")
 	}
-	if recoveryEnabled() && (snapshotStore == nil || snapshotCipher == nil || snapshotBuilder == nil || fabricSvc == nil) {
+	if recoveryEnabled() && recoveryMode != "agent_direct" && (snapshotStore == nil || snapshotCipher == nil || snapshotBuilder == nil || fabricSvc == nil) {
 		log.Fatal("❌ RECOVERY_ENABLED=true membutuhkan MinIO, encryption key, snapshot builder, dan Fabric yang valid")
+	}
+	if recoveryEnabled() && recoveryMode == "agent_direct" && fabricSvc == nil {
+		log.Fatal("❌ RECOVERY_MODE=agent_direct membutuhkan koneksi Fabric yang valid")
 	}
 	if tamperScannerEnabled() && fabricSvc == nil {
 		log.Fatal("❌ TAMPER_SCANNER_ENABLED=true membutuhkan koneksi Fabric yang valid")
@@ -284,8 +307,11 @@ func main() {
 	}
 	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, recoverySnapshotBuilder)
 	recoveryService.SetRecoveryCutoff(recoveryCutoff)
+	recoveryService.SetRecoveryMode(recoveryMode)
+	agentService := agentverifier.NewService(db)
+	recoveryService.SetAgentVerifier(agentService)
 
-	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService)
+	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService, effectiveSnapshotRequired)
 
 	auditRepo := internalaudit.NewAuditRepository(db)
 	auditService := internalaudit.NewService(auditRepo, fabricSvc, db)
@@ -320,7 +346,7 @@ func main() {
 	reportHandler := report.NewHandler(reportService)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	clientVerifyService := clientaudit.NewService(db, agentverifier.NewService(db), fabricSvc)
+	clientVerifyService := clientaudit.NewService(db, agentService, fabricSvc)
 	clientVerifyHandler := clientaudit.NewHandler(clientVerifyService)
 
 	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, clientVerifyHandler, db)

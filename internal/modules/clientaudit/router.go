@@ -13,9 +13,9 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler, db *gorm.DB) {
 	// Di sini kita gunakan APIKeyAuth dan JWTAuth sebagai opsi jika klien
 	// menggunakan keduanya.
 	clientAPI := routerGroup.Group("/client")
-	
+
 	// Gunakan middleware auth. Pastikan middleware menset client_id
-	clientAPI.Use(middleware.APIKeyAuth(db)) 
+	clientAPI.Use(middleware.APIKeyAuth(db))
 	{
 		clientAPI.POST("/verify-table", h.VerifyTable)
 	}

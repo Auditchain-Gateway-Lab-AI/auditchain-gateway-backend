@@ -12,11 +12,13 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/config"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/storage/snapshotstore"
 	"go-blockchain-api/pkg/crypto"
+	"go-blockchain-api/pkg/redaction"
 )
 
 type FabricReader interface {
@@ -30,6 +32,8 @@ type Service struct {
 	fabric          FabricReader
 	snapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
 	recoveryCutoff  *time.Time
+	agent           *agentverifier.Service
+	mode            string
 }
 
 type IncidentFilter struct {
@@ -62,6 +66,12 @@ type VersionView struct {
 
 type CandidateView struct {
 	LogID                 string     `json:"log_id"`
+	Resource              string     `json:"resource,omitempty"`
+	Operation             string     `json:"operation,omitempty"`
+	ReferenceLogHash      string     `json:"reference_log_hash,omitempty"`
+	ReferenceMerkleRoot   string     `json:"reference_merkle_root,omitempty"`
+	ReferenceAnchorID     string     `json:"reference_anchor_id,omitempty"`
+	SourceStatus          string     `json:"source_status,omitempty"`
 	SnapshotObjectKey     string     `json:"snapshot_object_key"`
 	SnapshotVersionID     string     `json:"snapshot_version_id"`
 	SnapshotChecksum      string     `json:"snapshot_checksum"`
@@ -94,6 +104,14 @@ type PreflightResult struct {
 	AnchorID         string          `json:"anchor_id"`
 	ObjectVersionID  string          `json:"object_version_id"`
 	SnapshotPreview  SnapshotPreview `json:"snapshot_preview"`
+	Operation        string          `json:"operation,omitempty"`
+	ReferenceLogHash string          `json:"reference_log_hash,omitempty"`
+	FabricRoot       string          `json:"fabric_root,omitempty"`
+	ClientStateHash  string          `json:"client_state_hash,omitempty"`
+	DesiredStateHash string          `json:"desired_state_hash,omitempty"`
+	SourceStatus     string          `json:"source_status,omitempty"`
+	AgentStatus      string          `json:"agent_status,omitempty"`
+	SourceFound      bool            `json:"source_found,omitempty"`
 }
 
 type CreateRequestInput struct {
@@ -108,7 +126,7 @@ func NewService(db *gorm.DB, store snapshotstore.SnapshotStore, cipher *snapshot
 	if len(builders) > 0 {
 		builder = builders[0]
 	}
-	return &Service{db: db, store: store, cipher: cipher, fabric: fabric, snapshotBuilder: builder}
+	return &Service{db: db, store: store, cipher: cipher, fabric: fabric, snapshotBuilder: builder, mode: recoveryModeFromEnv()}
 }
 
 // SetRecoveryCutoff sets the default deployment boundary for recovery. Rows
@@ -258,7 +276,23 @@ func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (in
 	if err := json.Unmarshal(payload.Metadata, &metadata); err != nil {
 		return nil, err
 	}
-	return metadata, nil
+	redacted, err := redaction.JSON(mustMarshalJSON(metadata))
+	if err != nil {
+		return nil, err
+	}
+	var safe interface{}
+	if err := json.Unmarshal(redacted, &safe); err != nil {
+		return nil, err
+	}
+	return safe, nil
+}
+
+func mustMarshalJSON(value interface{}) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte("null")
+	}
+	return encoded
 }
 
 func (s *Service) ListRequests(ctx context.Context, clientID, status string) ([]models.RecoveryRequest, error) {
@@ -285,6 +319,9 @@ func (s *Service) GetRequest(ctx context.Context, clientID, requestID string) (*
 }
 
 func (s *Service) ListVersions(ctx context.Context, clientID, resource string) ([]VersionView, error) {
+	if s.directRecoveryEnabled() {
+		return s.listDirectVersions(ctx, clientID, resource)
+	}
 	var logs []models.AuditLog
 	if err := s.db.WithContext(ctx).
 		Where("client_id = ? AND resource = ? AND snapshot_status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", clientID, resource, models.SnapshotStatusVerified).
@@ -320,6 +357,9 @@ func (s *Service) ListVersions(ctx context.Context, clientID, resource string) (
 }
 
 func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID string) ([]CandidateView, error) {
+	if s.directRecoveryEnabled() {
+		return s.listDirectCandidate(ctx, clientID, incidentID)
+	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -372,6 +412,9 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 }
 
 func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*PreflightResult, error) {
+	if s.directRecoveryEnabled() {
+		return s.preflightDirect(ctx, clientID, incidentID)
+	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -421,8 +464,8 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 		preflightStatus = "NO_RECOVERY_REQUIRED"
 		currentIntegrity = models.IntegrityStatusValid
 	}
-	var metadata interface{}
-	if err := json.Unmarshal(snapshot.Metadata, &metadata); err != nil {
+	metadata, err := redaction.Value(snapshot.Metadata)
+	if err != nil {
 		return nil, fmt.Errorf("snapshot_metadata_invalid: %w", err)
 	}
 	return &PreflightResult{
@@ -455,7 +498,13 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 	}
 	var existing models.RecoveryRequest
 	if err := s.db.WithContext(ctx).Where("idempotency_key = ? AND client_id = ?", input.IdempotencyKey, clientID).First(&existing).Error; err == nil {
+		if existing.IncidentID != input.IncidentID || existing.SelectedLogID != input.SelectedLogID || existing.Reason != strings.TrimSpace(input.Reason) {
+			return nil, errors.New("idempotency_conflict")
+		}
 		return &existing, nil
+	}
+	if s.directRecoveryEnabled() {
+		return s.createDirectRequest(ctx, clientID, userID, input)
 	}
 
 	var incident models.TamperIncident
@@ -604,6 +653,9 @@ func (s *Service) transitionRequest(ctx context.Context, clientID, requestID, ac
 }
 
 func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID string) (*models.RecoveryRequest, error) {
+	if s.directRecoveryEnabled() {
+		return s.executeDirect(ctx, clientID, requestID, executorID)
+	}
 	if s.store == nil || s.cipher == nil || s.snapshotBuilder == nil {
 		return nil, errors.New("recovery_storage_unavailable")
 	}
@@ -776,7 +828,7 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			TargetSourceSystem:       reconstructed.SourceSystem,
 			TargetAuthorization:      reconstructed.AuthorizationContext,
 			TargetSourceRecordID:     reconstructed.SourceRecordID,
-			RecoveredMetadata:        reconstructed.Metadata,
+			RecoveredMetadata:        redactedRecoveryMetadata([]byte(reconstructed.Metadata)),
 			ExecutorSystem:           "AuditChain Gateway",
 			ExecutedBy:               executorID,
 			Reason:                   request.Reason,

@@ -77,7 +77,7 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 
 	// Some gateway logs might not be in agent (deleted), so total could be bigger
 	// We will calculate total dynamically
-	
+
 	response := &BatchVerificationResponse{
 		Table:      tableName,
 		VerifiedAt: time.Now().UTC(),
@@ -274,4 +274,3 @@ func (s *clientVerifyService) VerifyTable(clientID, tableName string) (*BatchVer
 
 	return response, nil
 }
-

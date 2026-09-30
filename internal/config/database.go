@@ -73,6 +73,9 @@ func ConnectDB() *gorm.DB {
 	if err := db.Exec("ALTER TABLE recovery_requests ALTER COLUMN status SET DEFAULT 'PENDING_EXECUTION'").Error; err != nil {
 		log.Fatalf("Gagal menyiapkan default status recovery request: %v", err)
 	}
+	if err := ensureDirectRecoverySchema(db); err != nil {
+		log.Fatalf("Gagal menyiapkan schema direct client recovery: %v", err)
+	}
 
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {
@@ -101,5 +104,39 @@ func normalizeLegacyTamperStatuses(db *gorm.DB) error {
 			return err
 		}
 		return tx.Exec("UPDATE tamper_incidents SET status = 'RESOLVED' WHERE status = 'DISMISSED'").Error
+	})
+}
+
+// ensureDirectRecoverySchema keeps the new client-DB recovery fields
+// compatible with installations that were created with the snapshot/MinIO
+// workflow. The statements are intentionally idempotent so a rolling deploy
+// can restart the gateway safely.
+func ensureDirectRecoverySchema(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		statements := []string{
+			`ALTER TABLE recovery_requests ALTER COLUMN snapshot_object_key DROP NOT NULL`,
+			`ALTER TABLE recovery_requests ALTER COLUMN snapshot_version_id DROP NOT NULL`,
+			`ALTER TABLE tamper_incidents ALTER COLUMN incident_scope SET DEFAULT 'GATEWAY_INTEGRITY'`,
+			`UPDATE tamper_incidents SET incident_scope = 'GATEWAY_INTEGRITY' WHERE incident_scope IS NULL OR incident_scope = ''`,
+			`ALTER TABLE recovery_requests ALTER COLUMN cdc_status SET DEFAULT 'PENDING'`,
+			`UPDATE recovery_requests SET cdc_status = 'PENDING' WHERE cdc_status IS NULL OR cdc_status = ''`,
+			`ALTER TABLE recovery_events ALTER COLUMN cdc_status SET DEFAULT 'PENDING'`,
+			`UPDATE recovery_events SET cdc_status = 'PENDING' WHERE cdc_status IS NULL OR cdc_status = ''`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_recovery_active_resource
+			 ON recovery_requests (client_id, resource)
+			 WHERE resource <> '' AND status IN ('PENDING_EXECUTION', 'PENDING_APPROVAL', 'APPROVED', 'EXECUTING', 'APPLIED_AWAITING_CDC')`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_recovery_agent_command
+			 ON recovery_requests (agent_command_id)
+			 WHERE agent_command_id <> ''`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_tamper_active_client_source
+			 ON tamper_incidents (client_id, resource, incident_type)
+			 WHERE incident_scope = 'CLIENT_SOURCE' AND status = 'OPEN'`,
+		}
+		for _, statement := range statements {
+			if err := tx.Exec(statement).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

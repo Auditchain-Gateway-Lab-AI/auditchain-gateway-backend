@@ -73,7 +73,7 @@ func RecordAnchorStats(db *gorm.DB, clientID string, count int) error {
 		if newPending < 0 {
 			newPending = 0
 		}
-		
+
 		var pct float64
 		if stat.TotalLogs > 0 {
 			pct = float64(newAnchored) / float64(stat.TotalLogs) * 100

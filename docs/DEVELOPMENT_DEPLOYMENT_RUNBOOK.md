@@ -55,9 +55,20 @@ DB_DSN=...
 JWT_SECRET=...
 ```
 
-Nilai lain seperti Fabric, Redis, MinIO, recovery, dan snapshot mengikuti
-kebutuhan server development. Jangan menaruh secret di repository atau mencetak
-isi secret ke log.
+Nilai lain seperti Fabric, Redis, MinIO, recovery, snapshot, dan Agent
+mengikuti kebutuhan server development. Untuk pilot direct client-DB, gunakan:
+
+```dotenv
+RECOVERY_ENABLED=true
+RECOVERY_MODE=agent_direct
+RECOVERY_CDC_TIMEOUT_SECONDS=120
+```
+
+Pastikan setiap tenant pilot mempunyai `agent_url`, `verify_token`, dan
+`recovery_token` yang berbeda sesuai scope-nya. `recovery_token` tidak boleh
+dimasukkan ke repository atau dicetak ke log. Agent harus sudah menyediakan
+`POST /recover/:table/:record_id` sebelum mode direct diaktifkan.
+Jangan menaruh secret lain di repository atau mencetak isi secret ke log.
 
 ## Menjalankan deployment
 
@@ -100,6 +111,14 @@ curl -fsS http://127.0.0.1:8080/healthz
 curl -fsS http://127.0.0.1:8080/readyz
 ```
 
+Untuk smoke test direct setelah health/readiness lulus, lakukan preflight pada
+satu incident staging, pastikan response memuat `fabric_root`,
+`desired_state_hash`, dan `source_status`, lalu jalankan recovery hanya pada
+resource pilot. Verifikasi bahwa request berhenti di `APPLIED_AWAITING_CDC`
+sebelum event Debezium diterima dan baru menjadi `SUCCEEDED` setelah event
+recovery ter-hash serta ter-anchor. Jangan menguji write recovery pada data
+produksi.
+
 File environment sementara pada `/tmp` dihapus oleh cleanup step. File canonical
 yang dipakai Compose berada di `shared/backend.env` dengan mode `0600` dan
 `.env` pada checkout menjadi symlink ke file tersebut.
@@ -114,4 +133,3 @@ yang dipakai Compose berada di `shared/backend.env` dengan mode `0600` dan
 - Repository kotor: simpan perubahan tracked lokal di server sebelum mencoba lagi.
 - Health/readiness gagal: lihat log `api-gateway`; script akan mencoba rollback
   image dan env sebelumnya jika baseline container tersedia.
-
