@@ -108,6 +108,7 @@ jobs:
       PROJECT_DIR: ${{ secrets.BACKEND_PROJECT_DIR }}
       BACKEND_ENV_REMOTE_FILE: /tmp/auditchain-backend-env-${{ github.run_id }}
       EXPECTED_SHA: ${{ github.sha }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
 
     steps:
       - name: Prepare application environment file
@@ -169,19 +170,21 @@ jobs:
           PROJECT_DIR: ${{ env.PROJECT_DIR }}
           BACKEND_ENV_FILE: ${{ env.BACKEND_ENV_REMOTE_FILE }}
           EXPECTED_SHA: ${{ env.EXPECTED_SHA }}
+          REPOSITORY_URL: ${{ env.REPOSITORY_URL }}
         with:
           host: ${{ secrets.PRODUCTION_SSH_HOST }}
           username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
           key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
           fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
-          envs: PROJECT_DIR,BACKEND_ENV_FILE,EXPECTED_SHA
+          envs: PROJECT_DIR,BACKEND_ENV_FILE,EXPECTED_SHA,REPOSITORY_URL
           command_timeout: 25m
           script: |
             set -eu
             : "${PROJECT_DIR:?BACKEND_PROJECT_DIR is required}"
             : "${BACKEND_ENV_FILE:?remote environment file path is required}"
             : "${EXPECTED_SHA:?expected SHA is required}"
+            : "${REPOSITORY_URL:?deployment repository URL is required}"
             if [ ! -d "$PROJECT_DIR/.git" ]; then
               echo "Deployment checkout not found at: $PROJECT_DIR" >&2
               exit 1
@@ -193,6 +196,8 @@ jobs:
               exit 1
             fi
             chmod 600 "$BACKEND_ENV_FILE"
+            git -C "$PROJECT_DIR" remote set-url origin "$REPOSITORY_URL"
+            echo "Deployment origin synchronized with $REPOSITORY_URL"
             cd "$PROJECT_DIR"
             DEPLOY_MODE=development \
             DEPLOY_BRANCH=main \
