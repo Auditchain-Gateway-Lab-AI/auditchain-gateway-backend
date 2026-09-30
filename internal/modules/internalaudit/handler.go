@@ -493,6 +493,18 @@ func parseVerifyRangeBounds(c *gin.Context) (time.Time, time.Time, bool) {
 	return from, to, true
 }
 
+// @Summary Estimate verification range
+// @Description Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi sinkron dijalankan.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param from query string true "Waktu mulai (RFC3339)"
+// @Param to query string true "Waktu selesai (RFC3339)"
+// @Success 200 {object} VerifyRangeEstimateResponse "Estimasi ukuran range"
+// @Failure 400 {object} ErrorResponse "Parameter rentang tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal menghitung estimasi range"
+// @Router /dashboard/verify-range/estimate [get]
 func (h *Handler) EstimateLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -517,6 +529,19 @@ func (h *Handler) EstimateLogRange(c *gin.Context) {
 	})
 }
 
+// @Summary Verify all logs in a time range
+// @Description Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param from query string true "Waktu mulai (RFC3339)"
+// @Param to query string true "Waktu selesai (RFC3339)"
+// @Success 200 {object} RangeVerificationResult "Ringkasan dan hasil tiap log"
+// @Failure 400 {object} ErrorResponse "Parameter rentang tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 422 {object} ErrorResponse "Range terlalu besar untuk verifikasi sinkron"
+// @Failure 500 {object} ErrorResponse "Gagal memverifikasi range log"
+// @Router /dashboard/verify-range/internal [get]
 func (h *Handler) VerifyInternalLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {
@@ -547,6 +572,35 @@ func (h *Handler) VerifyInternalLogRange(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Verify all logs in a time range (legacy route)
+// @Description Compatibility alias for the gateway dashboard. New clients should use /dashboard/verify-range/internal.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param from query string true "Waktu mulai (RFC3339)"
+// @Param to query string true "Waktu selesai (RFC3339)"
+// @Success 200 {object} RangeVerificationResult "Ringkasan dan hasil tiap log"
+// @Failure 400 {object} ErrorResponse "Parameter rentang tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 422 {object} ErrorResponse "Range terlalu besar untuk verifikasi sinkron"
+// @Failure 500 {object} ErrorResponse "Gagal memverifikasi range log"
+// @Router /dashboard/verify-range [get]
+func (h *Handler) VerifyLegacyLogRange(c *gin.Context) {
+	h.VerifyInternalLogRange(c)
+}
+
+// @Summary Verify latest client resource state in a time range
+// @Description Memilih resource yang muncul dalam rentang waktu lalu memverifikasi log client terbaru untuk setiap resource tersebut.
+// @Tags Audit
+// @Produce json
+// @Security BearerAuth
+// @Param from query string true "Waktu mulai (RFC3339)"
+// @Param to query string true "Waktu selesai (RFC3339)"
+// @Success 200 {object} RangeVerificationResult "Summary verifikasi resource client"
+// @Failure 400 {object} ErrorResponse "Parameter rentang tidak valid"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal memverifikasi client range log"
+// @Router /dashboard/verify-range/client [get]
 func (h *Handler) VerifyClientLogRange(c *gin.Context) {
 	clientID, ok := h.getClientID(c)
 	if !ok {

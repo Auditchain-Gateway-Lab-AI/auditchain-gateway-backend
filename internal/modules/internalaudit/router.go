@@ -21,5 +21,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashAPI.GET("/verify-range/estimate", h.EstimateLogRange)
 		dashAPI.GET("/verify-range/internal", h.VerifyInternalLogRange)
 		dashAPI.GET("/verify-range/client", h.VerifyClientLogRange)
+		// Compatibility route for older gateway-dashboard bundles. New clients
+		// should call /verify-range/internal explicitly.
+		dashAPI.GET("/verify-range", h.VerifyLegacyLogRange)
 	}
 }
