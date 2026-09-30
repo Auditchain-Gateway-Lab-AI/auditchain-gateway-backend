@@ -506,7 +506,7 @@ const docTemplate = `{
         },
         "/dashboard/stats": {
             "get": {
-                "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari cache client_dashboard_stats.",
+                "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.",
                 "produces": [
                     "application/json"
                 ],
