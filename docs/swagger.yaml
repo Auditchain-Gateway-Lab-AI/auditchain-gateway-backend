@@ -227,6 +227,9 @@ definitions:
       total_rows_verified:
         example: 80
         type: integer
+      total_tables_audited:
+        example: 8
+        type: integer
       total_tampered:
         example: 2
         type: integer
@@ -314,18 +317,6 @@ definitions:
           total_rows:
             type: integer
         type: object
-    type: object
-  internalaudit.ResourceInventoryItem:
-    properties:
-      latest_log_id:
-        example: log-abc
-        type: string
-      resource:
-        example: orders
-        type: string
-      total_logs:
-        example: 500
-        type: integer
     type: object
   internalaudit.VerifyLogData:
     properties:
@@ -473,6 +464,28 @@ definitions:
       topic_prefix:
         type: string
       updated_at:
+        type: string
+    type: object
+  models.ClientTable:
+    properties:
+      client_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      last_action:
+        type: string
+      last_actor:
+        type: string
+      last_updated_at:
+        type: string
+      resource:
+        description: Field alias untuk kompatibilitas frontend
+        type: string
+      row_count:
+        type: integer
+      table_name:
         type: string
     type: object
   models.RecoveryRequest:
@@ -907,7 +920,7 @@ paths:
           description: Daftar resource inventory
           schema:
             items:
-              $ref: '#/definitions/internalaudit.ResourceInventoryItem'
+              $ref: '#/definitions/models.ClientTable'
             type: array
         "401":
           description: Identitas client tidak valid

@@ -101,6 +101,7 @@ type DashboardStatsDataResponse struct {
 	ClientID           string                 `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
 	TotalLogs          int64                  `json:"total_logs" example:"100"`
 	LogsToday          int64                  `json:"logs_today" example:"12"`
+	TotalTablesAudited int                    `json:"total_tables_audited" example:"8"`
 	TotalInserts       int64                  `json:"total_inserts" example:"40"`
 	TotalUpdates       int64                  `json:"total_updates" example:"50"`
 	TotalDeletes       int64                  `json:"total_deletes" example:"10"`
@@ -1315,6 +1316,7 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"client_id":            stats.ClientID,
 		"total_logs":           liveCounts.TotalLogs,
 		"logs_today":           stats.LogsToday,
+		"total_tables_audited": stats.TotalTablesAudited,
 		"total_inserts":        stats.TotalInserts,
 		"total_updates":        stats.TotalUpdates,
 		"total_deletes":        stats.TotalDeletes,

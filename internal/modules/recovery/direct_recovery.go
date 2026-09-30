@@ -25,7 +25,7 @@ const recoveryModeAgentDirect = "agent_direct"
 func recoveryModeFromEnv() string {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("RECOVERY_MODE")))
 	if mode == "" {
-		return "snapshot_legacy"
+		return recoveryModeAgentDirect
 	}
 	return mode
 }
@@ -35,7 +35,7 @@ func recoveryModeFromEnv() string {
 func (s *Service) SetRecoveryMode(mode string) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
-		mode = "snapshot_legacy"
+		mode = recoveryModeAgentDirect
 	}
 	s.mode = mode
 }

@@ -23,7 +23,8 @@ Pastikan user deployment mempunyai:
 - akses Docker/Compose tanpa login root;
 - akses ke external network `fabric_test`;
 - path organisasi Fabric yang dipasang read-only pada `docker-compose.yml`;
-- container `auditchain-postgres` dan `auditchain-minio` yang sudah berjalan;
+- container `auditchain-postgres` yang sudah berjalan; MinIO tidak diperlukan
+  untuk deployment canonical `RECOVERY_MODE=agent_direct`;
 - utilitas `bash`, `curl`, `awk`, `grep`, `flock`, `install`, `git`, dan Docker
   Compose.
 
@@ -85,8 +86,9 @@ konfigurasi yang berulang, pilih satu nilai canonical sebelum menyalinnya ke
 1. Pastikan Pull Request feature sudah di-merge ke `main`.
 2. Pastikan `main` tidak sedang menerima merge lain.
 3. Pastikan tidak ada perubahan tracked lokal di checkout server.
-4. Pastikan PostgreSQL, MinIO, external Fabric network, volume, dan material
-   Fabric tersedia.
+4. Pastikan PostgreSQL, external Fabric network, volume, dan material Fabric
+   tersedia. Siapkan MinIO hanya jika deployment memang memakai override
+   `docker-compose.snapshot.yml` untuk mode `snapshot_legacy`.
 5. Bila ini cutover besar, ambil backup database dan catat image/container lama.
 
 ## 3. Menjalankan deployment
@@ -124,7 +126,8 @@ Di log workflow, pastikan terlihat:
 - expected SHA sama dengan SHA yang di-checkout server;
 - `docker compose config --quiet` berhasil;
 - build `api-gateway` berhasil;
-- PostgreSQL dan MinIO tidak direcreate;
+- PostgreSQL tidak direcreate; MinIO hanya diverifikasi jika legacy snapshot
+  override dipakai;
 - health check dan readiness lulus;
 - temporary env pada `/tmp` sudah dihapus.
 
@@ -195,4 +198,5 @@ dicatat untuk menjalankan kembali hanya service `api-gateway`. Setelah itu
 jalankan `/healthz` dan `/readyz` dan simpan bukti hasilnya.
 
 Jangan melakukan `git reset --hard`, menghapus volume, atau merecreate
-PostgreSQL/MinIO sebagai langkah rollback standar.
+PostgreSQL sebagai langkah rollback standar. MinIO legacy juga tidak perlu
+disentuh oleh deployment direct.
