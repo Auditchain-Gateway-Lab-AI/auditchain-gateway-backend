@@ -1250,7 +1250,7 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 }
 
 // @Summary Get client dashboard statistics
-// @Description Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari cache client_dashboard_stats.
+// @Description Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.
 // @Tags Dashboard
 // @Produce json
 // @Security BearerAuth
@@ -1299,6 +1299,25 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 	if stats.ClientID == "" {
 		stats.ClientID = clientID
 	}
+	monitoredTables := stats.TotalTablesAudited
+	var tableCount int64
+	if err := h.DB.Model(&models.ClientTable{}).Where("client_id = ?", clientID).Count(&tableCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung tabel client"})
+		return
+	}
+	if tableCount == 0 && liveCounts.TotalLogs > 0 {
+		if err := h.DB.Raw(`
+			SELECT COUNT(DISTINCT NULLIF(SPLIT_PART(resource, ':', 1), ''))
+			FROM audit_logs
+			WHERE client_id = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'
+		`, clientID).Scan(&tableCount).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung tabel audit"})
+			return
+		}
+	}
+	if tableCount > 0 {
+		monitoredTables = int(tableCount)
+	}
 
 	anchorPercentage := float64(0)
 	if liveCounts.TotalLogs > 0 {
@@ -1316,7 +1335,7 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"client_id":            stats.ClientID,
 		"total_logs":           liveCounts.TotalLogs,
 		"logs_today":           stats.LogsToday,
-		"total_tables_audited": stats.TotalTablesAudited,
+		"total_tables_audited": monitoredTables,
 		"total_inserts":        stats.TotalInserts,
 		"total_updates":        stats.TotalUpdates,
 		"total_deletes":        stats.TotalDeletes,
