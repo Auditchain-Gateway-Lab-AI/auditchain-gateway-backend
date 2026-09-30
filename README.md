@@ -230,7 +230,9 @@ Detail secret, prasyarat server, verifikasi, dan troubleshooting tersedia pada
 | `GET` | `/api/dashboard/logs/by-resource/:resource` | 🔐 JWT | Riwayat log per resource |
 | `GET` | `/api/dashboard/verify/:log_id` | 🔐 JWT | Verifikasi 4-Layer untuk satu log (on-demand) |
 | `GET` | `/api/dashboard/verify-resource/:resource` | 🔐 JWT | Verifikasi seluruh riwayat satu resource |
-| `GET` | `/api/dashboard/verify-range?from=&to=` | 🔐 JWT | Verifikasi batch log dalam rentang waktu |
+| `GET` | `/api/dashboard/verify-range/internal?from=&to=` | 🔐 JWT | Verifikasi seluruh log dalam rentang waktu untuk gateway dashboard (sinkron, maksimal 100 log) |
+| `GET` | `/api/dashboard/verify-range?from=&to=` | 🔐 JWT | Alias kompatibilitas untuk route internal; client baru sebaiknya memakai `/internal` |
+| `GET` | `/api/dashboard/verify-range/client?from=&to=` | 🔐 JWT | Verifikasi resource terbaru untuk client portal dan memperbarui statistik client |
 | `GET` | `/api/dashboard/fabric/:anchor_id` | 🔐 JWT | Ambil data raw dari Fabric World State |
 | `POST` | `/api/dashboard/verify-data` | 🔐 JWT | Verifikasi integritas data aktual vs audit trail |
 | `GET` | `/api/dashboard/inventory` | 🔐 JWT | Daftar resource unik yang termonitor |

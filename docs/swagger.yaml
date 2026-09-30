@@ -1,4 +1,13 @@
 definitions:
+  agentverifier.Discrepancy:
+    properties:
+      field:
+        type: string
+      in_agent:
+        type: string
+      in_log:
+        type: string
+    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -298,6 +307,52 @@ definitions:
         example: Pesan kesalahan atau validasi
         type: string
     type: object
+  internalaudit.RangeInfo:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    type: object
+  internalaudit.RangeItemResult:
+    properties:
+      agent_discrepancies:
+        items:
+          $ref: '#/definitions/agentverifier.Discrepancy'
+        type: array
+      agent_status:
+        type: string
+      log:
+        $ref: '#/definitions/models.AuditLog'
+      log_id:
+        type: string
+      message:
+        type: string
+      verify_status:
+        type: string
+    type: object
+  internalaudit.RangeSummary:
+    properties:
+      invalid:
+        type: integer
+      pending:
+        type: integer
+      total:
+        type: integer
+      valid:
+        type: integer
+    type: object
+  internalaudit.RangeVerificationResult:
+    properties:
+      range:
+        $ref: '#/definitions/internalaudit.RangeInfo'
+      results:
+        items:
+          $ref: '#/definitions/internalaudit.RangeItemResult'
+        type: array
+      summary:
+        $ref: '#/definitions/internalaudit.RangeSummary'
+    type: object
   internalaudit.RecentLogsResponse:
     properties:
       data:
@@ -353,6 +408,15 @@ definitions:
         example: success
         type: string
     type: object
+  internalaudit.VerifyRangeEstimateResponse:
+    properties:
+      can_verify_sync:
+        type: boolean
+      estimated_items:
+        type: integer
+      sync_limit:
+        type: integer
+    type: object
   models.AgentConfig:
     properties:
       agent_url:
@@ -400,6 +464,79 @@ definitions:
         type: string
       user_table_name:
         description: Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)
+        type: string
+    type: object
+  models.AuditLog:
+    properties:
+      action:
+        type: string
+      actor:
+        type: string
+      authorization_context:
+        type: string
+      blockchain_timestamp:
+        type: string
+      blockchain_tx_id:
+        type: string
+      client_id:
+        type: string
+      db_timestamp:
+        type: string
+      hash_value:
+        description: Elemen Kriptografi & Blockchain
+        type: string
+      integrity_checked_at:
+        type: string
+      integrity_error:
+        type: string
+      integrity_status:
+        description: |-
+          Integrity verification is an operational cache and is never part of the
+          canonical hash formula.
+        type: string
+      is_latest:
+        type: boolean
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      metadata:
+        type: string
+      previous_hash:
+        type: string
+      resource:
+        type: string
+      snapshot_checksum:
+        type: string
+      snapshot_last_error:
+        type: string
+      snapshot_object_key:
+        type: string
+      snapshot_plaintext_hash:
+        type: string
+      snapshot_status:
+        description: |-
+          Recovery snapshot reference. The payload itself lives in MinIO; these
+          fields are only the operational index used to read an exact object version.
+        type: string
+      snapshot_stored_at:
+        type: string
+      snapshot_verified_at:
+        type: string
+      snapshot_version_id:
+        type: string
+      source_record_id:
+        description: |-
+          BARU: ID baris di audit_trail DB klien.
+          Diisi dari field "audit_trail_id" pada payload Agent.
+          Kosong jika log dikirim langsung (bukan via Agent).
+          Digunakan Lapis 3 untuk meminta Agent memverifikasi baris ini.
+        type: string
+      source_system:
+        type: string
+      status:
+        type: string
+      timestamp:
         type: string
     type: object
   models.Client:
@@ -1020,6 +1157,169 @@ paths:
       summary: Get client dashboard statistics
       tags:
       - Dashboard
+  /dashboard/verify-range:
+    get:
+      description: Compatibility alias for the gateway dashboard. New clients should
+        use /dashboard/verify-range/internal.
+      parameters:
+      - description: Waktu mulai (RFC3339)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Waktu selesai (RFC3339)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Ringkasan dan hasil tiap log
+          schema:
+            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+        "400":
+          description: Parameter rentang tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "422":
+          description: Range terlalu besar untuk verifikasi sinkron
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "500":
+          description: Gagal memverifikasi range log
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify all logs in a time range (legacy route)
+      tags:
+      - Audit
+  /dashboard/verify-range/client:
+    get:
+      description: Memilih resource yang muncul dalam rentang waktu lalu memverifikasi
+        log client terbaru untuk setiap resource tersebut.
+      parameters:
+      - description: Waktu mulai (RFC3339)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Waktu selesai (RFC3339)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Summary verifikasi resource client
+          schema:
+            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+        "400":
+          description: Parameter rentang tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "500":
+          description: Gagal memverifikasi client range log
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify latest client resource state in a time range
+      tags:
+      - Audit
+  /dashboard/verify-range/estimate:
+    get:
+      description: Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi
+        sinkron dijalankan.
+      parameters:
+      - description: Waktu mulai (RFC3339)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Waktu selesai (RFC3339)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Estimasi ukuran range
+          schema:
+            $ref: '#/definitions/internalaudit.VerifyRangeEstimateResponse'
+        "400":
+          description: Parameter rentang tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "500":
+          description: Gagal menghitung estimasi range
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Estimate verification range
+      tags:
+      - Audit
+  /dashboard/verify-range/internal:
+    get:
+      description: Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.
+      parameters:
+      - description: Waktu mulai (RFC3339)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Waktu selesai (RFC3339)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Ringkasan dan hasil tiap log
+          schema:
+            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+        "400":
+          description: Parameter rentang tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "422":
+          description: Range terlalu besar untuk verifikasi sinkron
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+        "500":
+          description: Gagal memverifikasi range log
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify all logs in a time range
+      tags:
+      - Audit
   /dashboard/verify/{log_id}:
     get:
       description: Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).

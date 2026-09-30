@@ -79,11 +79,6 @@ const docTemplate = `{
         },
         "/auth/me": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
                 "consumes": [
                     "application/json"
@@ -114,14 +109,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                }
-            },
-            "put": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "put": {
                 "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
                 "consumes": [
                     "application/json"
@@ -175,7 +170,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/auth/register": {
@@ -238,11 +238,6 @@ const docTemplate = `{
         },
         "/client": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
                 "produces": [
                     "application/json"
@@ -267,14 +262,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
                 "consumes": [
                     "application/json"
@@ -316,16 +311,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/client/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/client/{id}": {
+            "get": {
                 "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
                 "produces": [
                     "application/json"
@@ -368,16 +363,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/inventory": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/inventory": {
+            "get": {
                 "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
                 "produces": [
                     "application/json"
@@ -408,16 +403,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/logs": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/logs": {
+            "get": {
                 "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
                 "produces": [
                     "application/json"
@@ -501,16 +496,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/stats": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/stats": {
+            "get": {
                 "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, sedangkan statistik verifikasi berasal dari cache client_dashboard_stats.",
                 "produces": [
                     "application/json"
@@ -538,16 +533,264 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify/{log_id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/dashboard/verify-range": {
+            "get": {
+                "description": "Compatibility alias for the gateway dashboard. New clients should use /dashboard/verify-range/internal.",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Verify all logs in a time range (legacy route)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Waktu mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Ringkasan dan hasil tiap log",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Range terlalu besar untuk verifikasi sinkron",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memverifikasi range log",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/dashboard/verify-range/client": {
+            "get": {
+                "description": "Memilih resource yang muncul dalam rentang waktu lalu memverifikasi log client terbaru untuk setiap resource tersebut.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Verify latest client resource state in a time range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Waktu mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Summary verifikasi resource client",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memverifikasi client range log",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/dashboard/verify-range/estimate": {
+            "get": {
+                "description": "Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi sinkron dijalankan.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Estimate verification range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Waktu mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Estimasi ukuran range",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.VerifyRangeEstimateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal menghitung estimasi range",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/dashboard/verify-range/internal": {
+            "get": {
+                "description": "Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Audit"
+                ],
+                "summary": "Verify all logs in a time range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Waktu mulai (RFC3339)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Waktu selesai (RFC3339)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Ringkasan dan hasil tiap log",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Parameter rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Range terlalu besar untuk verifikasi sinkron",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal memverifikasi range log",
+                        "schema": {
+                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/dashboard/verify/{log_id}": {
+            "get": {
                 "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
                 "produces": [
                     "application/json"
@@ -602,16 +845,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internalaudit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/ingestion": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/ingestion": {
+            "post": {
                 "description": "Menerima array of log dinamis dari sistem klien (Agent atau Kafka) untuk diproses dan diverifikasi ke blockchain.",
                 "consumes": [
                     "application/json"
@@ -657,16 +900,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/ingestion.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/incidents/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/incidents/{id}": {
+            "get": {
                 "description": "Mengambil detail sebuah insiden tamper berdasarkan ID.",
                 "produces": [
                     "application/json"
@@ -709,16 +952,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/incidents/{id}/candidates": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/incidents/{id}/candidates": {
+            "get": {
                 "description": "Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.",
                 "produces": [
                     "application/json"
@@ -762,16 +1005,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/incidents/{id}/preflight": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/incidents/{id}/preflight": {
+            "post": {
                 "description": "Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.",
                 "produces": [
                     "application/json"
@@ -815,16 +1058,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/requests": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/requests": {
+            "get": {
                 "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
                 "produces": [
                     "application/json"
@@ -860,14 +1103,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.",
                 "consumes": [
                     "application/json"
@@ -921,16 +1164,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/requests/{id}/execute": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/requests/{id}/execute": {
+            "post": {
                 "description": "Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.",
                 "produces": [
                     "application/json"
@@ -979,16 +1222,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/recovery/resources/{resource}/versions": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/recovery/resources/{resource}/versions": {
+            "get": {
                 "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
                 "produces": [
                     "application/json"
@@ -1026,16 +1269,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/report/generate": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/report/generate": {
+            "post": {
                 "description": "Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.",
                 "consumes": [
                     "application/json"
@@ -1084,11 +1327,30 @@ const docTemplate = `{
                             "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         }
     },
     "definitions": {
+        "agentverifier.Discrepancy": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "in_agent": {
+                    "type": "string"
+                },
+                "in_log": {
+                    "type": "string"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -1520,6 +1782,77 @@ const docTemplate = `{
                 }
             }
         },
+        "internalaudit.RangeInfo": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "internalaudit.RangeItemResult": {
+            "type": "object",
+            "properties": {
+                "agent_discrepancies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentverifier.Discrepancy"
+                    }
+                },
+                "agent_status": {
+                    "type": "string"
+                },
+                "log": {
+                    "$ref": "#/definitions/models.AuditLog"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "verify_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internalaudit.RangeSummary": {
+            "type": "object",
+            "properties": {
+                "invalid": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "valid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internalaudit.RangeVerificationResult": {
+            "type": "object",
+            "properties": {
+                "range": {
+                    "$ref": "#/definitions/internalaudit.RangeInfo"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internalaudit.RangeItemResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/internalaudit.RangeSummary"
+                }
+            }
+        },
         "internalaudit.RecentLogsResponse": {
             "type": "object",
             "properties": {
@@ -1602,6 +1935,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internalaudit.VerifyRangeEstimateResponse": {
+            "type": "object",
+            "properties": {
+                "can_verify_sync": {
+                    "type": "boolean"
+                },
+                "estimated_items": {
+                    "type": "integer"
+                },
+                "sync_limit": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.AgentConfig": {
             "type": "object",
             "properties": {
@@ -1664,6 +2011,102 @@ const docTemplate = `{
                 },
                 "user_table_name": {
                     "description": "Deteksi Tabel User via CDC (Auto-filled dari install.sh telemetry)",
+                    "type": "string"
+                }
+            }
+        },
+        "models.AuditLog": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor": {
+                    "type": "string"
+                },
+                "authorization_context": {
+                    "type": "string"
+                },
+                "blockchain_timestamp": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "db_timestamp": {
+                    "type": "string"
+                },
+                "hash_value": {
+                    "description": "Elemen Kriptografi \u0026 Blockchain",
+                    "type": "string"
+                },
+                "integrity_checked_at": {
+                    "type": "string"
+                },
+                "integrity_error": {
+                    "type": "string"
+                },
+                "integrity_status": {
+                    "description": "Integrity verification is an operational cache and is never part of the\ncanonical hash formula.",
+                    "type": "string"
+                },
+                "is_latest": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "string"
+                },
+                "previous_hash": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "snapshot_checksum": {
+                    "type": "string"
+                },
+                "snapshot_last_error": {
+                    "type": "string"
+                },
+                "snapshot_object_key": {
+                    "type": "string"
+                },
+                "snapshot_plaintext_hash": {
+                    "type": "string"
+                },
+                "snapshot_status": {
+                    "description": "Recovery snapshot reference. The payload itself lives in MinIO; these\nfields are only the operational index used to read an exact object version.",
+                    "type": "string"
+                },
+                "snapshot_stored_at": {
+                    "type": "string"
+                },
+                "snapshot_verified_at": {
+                    "type": "string"
+                },
+                "snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_record_id": {
+                    "description": "BARU: ID baris di audit_trail DB klien.\nDiisi dari field \"audit_trail_id\" pada payload Agent.\nKosong jika log dikirim langsung (bukan via Agent).\nDigunakan Lapis 3 untuk meminta Agent memverifikasi baris ini.",
+                    "type": "string"
+                },
+                "source_system": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
                     "type": "string"
                 }
             }
