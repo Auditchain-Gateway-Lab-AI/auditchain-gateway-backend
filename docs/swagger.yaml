@@ -301,6 +301,13 @@ definitions:
         example: 98
         type: integer
     type: object
+  internalaudit.ClientRangeVerificationResponse:
+    properties:
+      range:
+        $ref: '#/definitions/internalaudit.RangeInfo'
+      summary:
+        $ref: '#/definitions/internalaudit.RangeSummary'
+    type: object
   internalaudit.ErrorResponse:
     properties:
       error:
@@ -333,6 +340,8 @@ definitions:
     type: object
   internalaudit.RangeSummary:
     properties:
+      already_verified:
+        type: integer
       invalid:
         type: integer
       pending:
@@ -340,6 +349,8 @@ definitions:
       total:
         type: integer
       valid:
+        type: integer
+      verified_now:
         type: integer
     type: object
   internalaudit.RangeVerificationResult:
@@ -1202,8 +1213,9 @@ paths:
       - Audit
   /dashboard/verify-range/client:
     get:
-      description: Memilih resource yang muncul dalam rentang waktu lalu memverifikasi
-        log client terbaru untuk setiap resource tersebut.
+      description: Memverifikasi seluruh audit log dalam rentang waktu dengan kontrak
+        yang sama seperti gateway dashboard. Client Portal hanya menerima summary
+        tanpa daftar row log.
       parameters:
       - description: Waktu mulai (RFC3339)
         in: query
@@ -1219,9 +1231,9 @@ paths:
       - application/json
       responses:
         "200":
-          description: Summary verifikasi resource client
+          description: Summary verifikasi log client
           schema:
-            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+            $ref: '#/definitions/internalaudit.ClientRangeVerificationResponse'
         "400":
           description: Parameter rentang tidak valid
           schema:
@@ -1230,13 +1242,17 @@ paths:
           description: Identitas client tidak valid
           schema:
             $ref: '#/definitions/internalaudit.ErrorResponse'
+        "422":
+          description: Range terlalu besar untuk verifikasi sinkron
+          schema:
+            $ref: '#/definitions/internalaudit.ErrorResponse'
         "500":
           description: Gagal memverifikasi client range log
           schema:
             $ref: '#/definitions/internalaudit.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Verify latest client resource state in a time range
+      summary: Verify client logs in a time range
       tags:
       - Audit
   /dashboard/verify-range/estimate:
