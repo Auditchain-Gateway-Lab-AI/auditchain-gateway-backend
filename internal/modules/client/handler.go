@@ -600,7 +600,7 @@ func (h *Handler) PingAgentConfig(c *gin.Context) {
 	}
 
 	client := &http.Client{Timeout: 3e9}
-	resp, err := client.Get(cfg.AgentURL + "/connectors")
+	statusCode, reachable, err := pingAgentHealth(client, cfg.AgentURL)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"reachable": false,
@@ -609,13 +609,33 @@ func (h *Handler) PingAgentConfig(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+
+	if !reachable {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"reachable":   false,
+			"agent_url":   cfg.AgentURL,
+			"http_status": statusCode,
+			"error":       "Agent health endpoint returned a non-2xx status",
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"reachable":   true,
+		"reachable":   reachable,
 		"agent_url":   cfg.AgentURL,
-		"http_status": resp.StatusCode,
+		"http_status": statusCode,
 	})
+}
+
+func pingAgentHealth(client *http.Client, agentURL string) (statusCode int, reachable bool, err error) {
+	resp, err := client.Get(strings.TrimRight(agentURL, "/") + "/health")
+	if err != nil {
+		return 0, false, err
+	}
+	defer resp.Body.Close()
+
+	reachable = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
+	return resp.StatusCode, reachable, nil
 }
 
 type UpdateClientRequest struct {
