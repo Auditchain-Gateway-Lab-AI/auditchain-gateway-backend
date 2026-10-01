@@ -183,6 +183,87 @@ func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, e
 	}, nil
 }
 
+func loadVerificationSchedulerConfig() (internalaudit.VerificationSchedulerConfig, error) {
+	parsePositiveInt := func(name string, fallback int) (int, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			return 0, fmt.Errorf("%s harus berupa bilangan bulat positif", name)
+		}
+		return value, nil
+	}
+	parseNonNegativeInt := func(name string, fallback int) (int, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 {
+			return 0, fmt.Errorf("%s harus berupa bilangan bulat nol atau positif", name)
+		}
+		return value, nil
+	}
+	parseBool := func(name string, fallback bool) (bool, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return false, fmt.Errorf("%s harus berupa true atau false", name)
+		}
+		return value, nil
+	}
+
+	enabled, err := parseBool("VERIFICATION_SCHEDULER_ENABLED", false)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+	intervalSeconds, err := parsePositiveInt("VERIFICATION_SCHEDULER_INTERVAL_SECONDS", 86400)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+	lookbackHours, err := parsePositiveInt("VERIFICATION_SCHEDULER_LOOKBACK_HOURS", 24)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+	overlapSeconds, err := parseNonNegativeInt("VERIFICATION_SCHEDULER_OVERLAP_SECONDS", 300)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+	batchSize, err := parsePositiveInt("VERIFICATION_SCHEDULER_BATCH_SIZE", 100)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+	runOnStart, err := parseBool("VERIFICATION_SCHEDULER_RUN_ON_START", false)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, err
+	}
+
+	timezone := strings.TrimSpace(os.Getenv("VERIFICATION_SCHEDULER_TIMEZONE"))
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return internalaudit.VerificationSchedulerConfig{}, fmt.Errorf("VERIFICATION_SCHEDULER_TIMEZONE tidak valid: %w", err)
+	}
+
+	return internalaudit.VerificationSchedulerConfig{
+		Enabled:    enabled,
+		ClientID:   strings.TrimSpace(os.Getenv("VERIFICATION_SCHEDULER_CLIENT_ID")),
+		Interval:   time.Duration(intervalSeconds) * time.Second,
+		Lookback:   time.Duration(lookbackHours) * time.Hour,
+		Overlap:    time.Duration(overlapSeconds) * time.Second,
+		BatchSize:  batchSize,
+		Location:   location,
+		RunOnStart: runOnStart,
+	}, nil
+}
+
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time, recoveryService *recovery.Service, snapshotRequired bool) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff, SnapshotRequired: &snapshotRequired}
@@ -324,6 +405,12 @@ func main() {
 	auditService := internalaudit.NewService(auditRepo, fabricSvc, db)
 	verificationJobs := internalaudit.NewVerificationJobService(db, auditService)
 	go verificationJobs.Run(ctx)
+	verificationSchedulerConfig, schedulerConfigErr := loadVerificationSchedulerConfig()
+	if schedulerConfigErr != nil {
+		log.Fatalf("âŒ Konfigurasi verification scheduler tidak valid: %v", schedulerConfigErr)
+	}
+	verificationScheduler := internalaudit.NewVerificationScheduler(db, verificationJobs, verificationSchedulerConfig)
+	go verificationScheduler.Run(ctx)
 	auditHandler := internalaudit.NewHandlerWithVerificationJobs(auditService, verificationJobs)
 	if tamperScannerEnabled() {
 		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)

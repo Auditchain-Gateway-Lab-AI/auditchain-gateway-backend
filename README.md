@@ -126,6 +126,14 @@ FABRIC_CHAINCODE=audit-contract
 
 APP_ENV=local
 VERIFICATION_JOB_BATCH_SIZE=100
+VERIFICATION_SCHEDULER_ENABLED=false
+VERIFICATION_SCHEDULER_CLIENT_ID=
+VERIFICATION_SCHEDULER_INTERVAL_SECONDS=86400
+VERIFICATION_SCHEDULER_LOOKBACK_HOURS=24
+VERIFICATION_SCHEDULER_OVERLAP_SECONDS=300
+VERIFICATION_SCHEDULER_BATCH_SIZE=100
+VERIFICATION_SCHEDULER_TIMEZONE=Asia/Jakarta
+VERIFICATION_SCHEDULER_RUN_ON_START=false
 RECOVERY_ENABLED=false
 RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
@@ -172,6 +180,15 @@ worker memproses range dalam batch dengan ukuran default `100` dari
 `VERIFICATION_JOB_BATCH_SIZE`. Nilai tersebut adalah ukuran batch, bukan batas
 jumlah log dalam satu range. Client Portal hanya membaca progress dan hasil
 terakhir melalui `GET /api/dashboard/verification-runs/latest`.
+
+Scheduler backend bersifat opt-in melalui `VERIFICATION_SCHEDULER_ENABLED`.
+Ketika aktif, scheduler mengambil client berstatus `active`, melanjutkan dari
+range completed terakhir dengan overlap kecil, lalu membuat satu
+`verification_run` durable per client. Scheduler tetap berjalan tanpa browser
+dashboard terbuka. `VERIFICATION_SCHEDULER_RUN_ON_START` hanya dipakai untuk
+memulai satu siklus saat Gateway boot; default-nya `false`.
+Untuk smoke test satu tenant, isi `VERIFICATION_SCHEDULER_CLIENT_ID` dengan
+UUID client tersebut. Jika kosong, semua client berstatus `active` akan diproses.
 
 ### Menjalankan via Docker
 
