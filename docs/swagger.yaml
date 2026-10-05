@@ -8,6 +8,203 @@ definitions:
       in_log:
         type: string
     type: object
+  audit.ClientRangeVerificationResponse:
+    properties:
+      range:
+        $ref: '#/definitions/audit.RangeInfo'
+      summary:
+        $ref: '#/definitions/audit.RangeSummary'
+    type: object
+  audit.CreateVerificationRunRequest:
+    properties:
+      batch_size:
+        example: 100
+        type: integer
+      from:
+        example: "2026-09-29T00:00:00Z"
+        type: string
+      to:
+        example: "2026-09-30T23:59:59Z"
+        type: string
+    required:
+    - from
+    - to
+    type: object
+  audit.ErrorResponse:
+    properties:
+      error:
+        example: Pesan kesalahan atau validasi
+        type: string
+    type: object
+  audit.LatestVerificationRunResponse:
+    properties:
+      data:
+        $ref: '#/definitions/audit.VerificationRunResponse'
+    type: object
+  audit.RangeInfo:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    type: object
+  audit.RangeItemResult:
+    properties:
+      agent_discrepancies:
+        items:
+          $ref: '#/definitions/agentverifier.Discrepancy'
+        type: array
+      agent_status:
+        type: string
+      log:
+        $ref: '#/definitions/models.AuditLog'
+      log_id:
+        type: string
+      message:
+        type: string
+      verify_status:
+        type: string
+    type: object
+  audit.RangeSummary:
+    properties:
+      already_verified:
+        type: integer
+      invalid:
+        type: integer
+      pending:
+        type: integer
+      total:
+        type: integer
+      valid:
+        type: integer
+      verified_now:
+        type: integer
+    type: object
+  audit.RangeVerificationResult:
+    properties:
+      range:
+        $ref: '#/definitions/audit.RangeInfo'
+      results:
+        items:
+          $ref: '#/definitions/audit.RangeItemResult'
+        type: array
+      summary:
+        $ref: '#/definitions/audit.RangeSummary'
+    type: object
+  audit.RecentLogsResponse:
+    properties:
+      data:
+        description: Array of logs
+        items: {}
+        type: array
+      note:
+        type: string
+      pagination:
+        properties:
+          page:
+            type: integer
+          page_size:
+            type: integer
+          total_pages:
+            type: integer
+          total_rows:
+            type: integer
+        type: object
+    type: object
+  audit.VerificationRunResponse:
+    properties:
+      already_verified:
+        type: integer
+      batch_size:
+        type: integer
+      client_id:
+        type: string
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      error_message:
+        type: string
+      from:
+        type: string
+      id:
+        type: string
+      processed_items:
+        type: integer
+      progress_percent:
+        type: number
+      requested_by:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      to:
+        type: string
+      total_invalid:
+        type: integer
+      total_items:
+        type: integer
+      total_pending:
+        type: integer
+      total_valid:
+        type: integer
+      updated_at:
+        type: string
+      verified_now:
+        type: integer
+    type: object
+  audit.VerificationRunResponseEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/audit.VerificationRunResponse'
+      message:
+        type: string
+    type: object
+  audit.VerifyLogData:
+    properties:
+      actual_hash:
+        type: string
+      agent_discrepancies: {}
+      agent_status:
+        type: string
+      blockchain_tx_id:
+        type: string
+      expected_hash:
+        type: string
+      is_valid:
+        type: boolean
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      message:
+        type: string
+    type: object
+  audit.VerifyLogResponse:
+    properties:
+      data:
+        $ref: '#/definitions/audit.VerifyLogData'
+      layer:
+        example: 4_blockchain
+        type: string
+      log_id:
+        type: string
+      message:
+        type: string
+      status:
+        example: success
+        type: string
+    type: object
+  audit.VerifyRangeEstimateResponse:
+    properties:
+      can_verify_sync:
+        type: boolean
+      estimated_items:
+        type: integer
+      sync_limit:
+        type: integer
+    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -254,6 +451,8 @@ definitions:
       total_verify_pending:
         example: 0
         type: integer
+      trend:
+        $ref: '#/definitions/client.DashboardTrendResponse'
       updated_at:
         type: string
     type: object
@@ -274,229 +473,51 @@ definitions:
         example: 100
         type: integer
     type: object
+  client.DashboardTrendPointResponse:
+    properties:
+      bucket_start:
+        type: string
+      delete:
+        type: integer
+      insert:
+        type: integer
+      not_checked:
+        type: integer
+      pending:
+        type: integer
+      tampered:
+        type: integer
+      total_logs:
+        type: integer
+      unavailable:
+        type: integer
+      update:
+        type: integer
+      valid:
+        type: integer
+    type: object
+  client.DashboardTrendResponse:
+    properties:
+      bucket_seconds:
+        example: 3600
+        type: integer
+      from:
+        type: string
+      points:
+        items:
+          $ref: '#/definitions/client.DashboardTrendPointResponse'
+        type: array
+      range:
+        example: 8H
+        type: string
+      to:
+        type: string
+    type: object
   client.ErrorResponse:
     properties:
       error:
         example: Pesan kesalahan atau validasi
         type: string
-    type: object
-  ingestion.ErrorResponse:
-    properties:
-      error:
-        example: Format JSON tidak valid, harus berupa Array Objek
-        type: string
-    type: object
-  ingestion.IngestionResponse:
-    properties:
-      message:
-        example: Proses bulk ingestion selesai
-        type: string
-      total_failed:
-        example: 2
-        type: integer
-      total_received:
-        example: 100
-        type: integer
-      total_success:
-        example: 98
-        type: integer
-    type: object
-  internalaudit.ClientRangeVerificationResponse:
-    properties:
-      range:
-        $ref: '#/definitions/internalaudit.RangeInfo'
-      summary:
-        $ref: '#/definitions/internalaudit.RangeSummary'
-    type: object
-  internalaudit.CreateVerificationRunRequest:
-    properties:
-      batch_size:
-        example: 100
-        type: integer
-      from:
-        example: "2026-09-29T00:00:00Z"
-        type: string
-      to:
-        example: "2026-09-30T23:59:59Z"
-        type: string
-    required:
-    - from
-    - to
-    type: object
-  internalaudit.ErrorResponse:
-    properties:
-      error:
-        example: Pesan kesalahan atau validasi
-        type: string
-    type: object
-  internalaudit.LatestVerificationRunResponse:
-    properties:
-      data:
-        $ref: '#/definitions/internalaudit.VerificationRunResponse'
-    type: object
-  internalaudit.RangeInfo:
-    properties:
-      from:
-        type: string
-      to:
-        type: string
-    type: object
-  internalaudit.RangeItemResult:
-    properties:
-      agent_discrepancies:
-        items:
-          $ref: '#/definitions/agentverifier.Discrepancy'
-        type: array
-      agent_status:
-        type: string
-      log:
-        $ref: '#/definitions/models.AuditLog'
-      log_id:
-        type: string
-      message:
-        type: string
-      verify_status:
-        type: string
-    type: object
-  internalaudit.RangeSummary:
-    properties:
-      already_verified:
-        type: integer
-      invalid:
-        type: integer
-      pending:
-        type: integer
-      total:
-        type: integer
-      valid:
-        type: integer
-      verified_now:
-        type: integer
-    type: object
-  internalaudit.RangeVerificationResult:
-    properties:
-      range:
-        $ref: '#/definitions/internalaudit.RangeInfo'
-      results:
-        items:
-          $ref: '#/definitions/internalaudit.RangeItemResult'
-        type: array
-      summary:
-        $ref: '#/definitions/internalaudit.RangeSummary'
-    type: object
-  internalaudit.RecentLogsResponse:
-    properties:
-      data:
-        description: Array of logs
-        items: {}
-        type: array
-      note:
-        type: string
-      pagination:
-        properties:
-          page:
-            type: integer
-          page_size:
-            type: integer
-          total_pages:
-            type: integer
-          total_rows:
-            type: integer
-        type: object
-    type: object
-  internalaudit.VerificationRunResponse:
-    properties:
-      already_verified:
-        type: integer
-      batch_size:
-        type: integer
-      client_id:
-        type: string
-      completed_at:
-        type: string
-      created_at:
-        type: string
-      error_message:
-        type: string
-      from:
-        type: string
-      id:
-        type: string
-      processed_items:
-        type: integer
-      progress_percent:
-        type: number
-      requested_by:
-        type: string
-      started_at:
-        type: string
-      status:
-        type: string
-      to:
-        type: string
-      total_invalid:
-        type: integer
-      total_items:
-        type: integer
-      total_pending:
-        type: integer
-      total_valid:
-        type: integer
-      updated_at:
-        type: string
-      verified_now:
-        type: integer
-    type: object
-  internalaudit.VerificationRunResponseEnvelope:
-    properties:
-      data:
-        $ref: '#/definitions/internalaudit.VerificationRunResponse'
-      message:
-        type: string
-    type: object
-  internalaudit.VerifyLogData:
-    properties:
-      actual_hash:
-        type: string
-      agent_discrepancies: {}
-      agent_status:
-        type: string
-      blockchain_tx_id:
-        type: string
-      expected_hash:
-        type: string
-      is_valid:
-        type: boolean
-      log_id:
-        type: string
-      merkle_root:
-        type: string
-      message:
-        type: string
-    type: object
-  internalaudit.VerifyLogResponse:
-    properties:
-      data:
-        $ref: '#/definitions/internalaudit.VerifyLogData'
-      layer:
-        example: 4_blockchain
-        type: string
-      log_id:
-        type: string
-      message:
-        type: string
-      status:
-        example: success
-        type: string
-    type: object
-  internalaudit.VerifyRangeEstimateResponse:
-    properties:
-      can_verify_sync:
-        type: boolean
-      estimated_items:
-        type: integer
-      sync_limit:
-        type: integer
     type: object
   models.AgentConfig:
     properties:
@@ -1143,11 +1164,11 @@ paths:
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal memuat daftar data
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get resource inventory
@@ -1195,19 +1216,19 @@ paths:
         "200":
           description: Daftar log beserta data paginasi
           schema:
-            $ref: '#/definitions/internalaudit.RecentLogsResponse'
+            $ref: '#/definitions/audit.RecentLogsResponse'
         "400":
           description: Parameter tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal mengambil log terbaru
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get recent audit logs
@@ -1215,9 +1236,19 @@ paths:
       - Audit
   /dashboard/stats:
     get:
-      description: Mengambil statistik tenant client yang sedang login. Counter audit
-        utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource
-        audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.
+      description: Mengambil statistik agregat tenant client yang sedang login. Parameter
+        trend_range opsional menambahkan bucket agregat dari audit_logs tanpa mengirim
+        row log.
+      parameters:
+      - description: Rentang trend agregat
+        enum:
+        - 8H
+        - 24H
+        - 7D
+        - 30D
+        in: query
+        name: trend_range
+        type: string
       produces:
       - application/json
       responses:
@@ -1225,6 +1256,10 @@ paths:
           description: Statistik dashboard client
           schema:
             $ref: '#/definitions/client.DashboardStatsResponse'
+        "400":
+          description: Rentang trend tidak didukung
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
         "401":
           description: Client ID tidak ditemukan atau tidak valid pada token
           schema:
@@ -1250,7 +1285,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internalaudit.CreateVerificationRunRequest'
+          $ref: '#/definitions/audit.CreateVerificationRunRequest'
       - description: Client ID; hanya admin yang boleh memilih tenant
         in: query
         name: client_id
@@ -1261,19 +1296,19 @@ paths:
         "202":
           description: Job berhasil diantrikan
           schema:
-            $ref: '#/definitions/internalaudit.VerificationRunResponseEnvelope'
+            $ref: '#/definitions/audit.VerificationRunResponseEnvelope'
         "400":
           description: Rentang tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "503":
           description: Background verifier belum tersedia
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Queue a background verification run
@@ -1299,15 +1334,15 @@ paths:
         "200":
           description: Progress verification run
           schema:
-            $ref: '#/definitions/internalaudit.VerificationRunResponseEnvelope'
+            $ref: '#/definitions/audit.VerificationRunResponseEnvelope'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "404":
           description: Verification run tidak ditemukan
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get a background verification run
@@ -1328,11 +1363,11 @@ paths:
         "200":
           description: Verification run terakhir
           schema:
-            $ref: '#/definitions/internalaudit.LatestVerificationRunResponse'
+            $ref: '#/definitions/audit.LatestVerificationRunResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get the latest background verification run
@@ -1359,23 +1394,23 @@ paths:
         "200":
           description: Ringkasan dan hasil tiap log
           schema:
-            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+            $ref: '#/definitions/audit.RangeVerificationResult'
         "400":
           description: Parameter rentang tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "422":
           description: Range terlalu besar untuk verifikasi sinkron
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal memverifikasi range log
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify all logs in a time range (legacy route)
@@ -1403,23 +1438,23 @@ paths:
         "200":
           description: Summary verifikasi log client
           schema:
-            $ref: '#/definitions/internalaudit.ClientRangeVerificationResponse'
+            $ref: '#/definitions/audit.ClientRangeVerificationResponse'
         "400":
           description: Parameter rentang tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "422":
           description: Range terlalu besar untuk verifikasi sinkron
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal memverifikasi client range log
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify client logs in a time range
@@ -1446,19 +1481,19 @@ paths:
         "200":
           description: Estimasi ukuran range
           schema:
-            $ref: '#/definitions/internalaudit.VerifyRangeEstimateResponse'
+            $ref: '#/definitions/audit.VerifyRangeEstimateResponse'
         "400":
           description: Parameter rentang tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal menghitung estimasi range
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Estimate verification range
@@ -1484,23 +1519,23 @@ paths:
         "200":
           description: Ringkasan dan hasil tiap log
           schema:
-            $ref: '#/definitions/internalaudit.RangeVerificationResult'
+            $ref: '#/definitions/audit.RangeVerificationResult'
         "400":
           description: Parameter rentang tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "422":
           description: Range terlalu besar untuk verifikasi sinkron
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "500":
           description: Gagal memverifikasi range log
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify all logs in a time range
@@ -1521,68 +1556,32 @@ paths:
         "200":
           description: Verifikasi sukses dan log valid
           schema:
-            $ref: '#/definitions/internalaudit.VerifyLogResponse'
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "202":
           description: Verifikasi pending/dalam proses
           schema:
-            $ref: '#/definitions/internalaudit.VerifyLogResponse'
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "401":
           description: Identitas client tidak valid
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "404":
           description: Log tidak ditemukan
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
         "409":
           description: Verifikasi gagal/tampered pada suatu layer
           schema:
-            $ref: '#/definitions/internalaudit.VerifyLogResponse'
+            $ref: '#/definitions/audit.VerifyLogResponse'
         "500":
           description: Kesalahan sistem saat verifikasi
           schema:
-            $ref: '#/definitions/internalaudit.ErrorResponse'
+            $ref: '#/definitions/audit.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Verify a specific log
       tags:
       - Audit
-  /ingestion:
-    post:
-      consumes:
-      - application/json
-      description: Menerima array of log dinamis dari sistem klien (Agent atau Kafka)
-        untuk diproses dan diverifikasi ke blockchain.
-      parameters:
-      - description: Array of Log Data
-        in: body
-        name: request
-        required: true
-        schema:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-      produces:
-      - application/json
-      responses:
-        "202":
-          description: Log diterima dan sedang diproses
-          schema:
-            $ref: '#/definitions/ingestion.IngestionResponse'
-        "400":
-          description: Format JSON tidak valid atau array kosong
-          schema:
-            $ref: '#/definitions/ingestion.ErrorResponse'
-        "500":
-          description: Identitas klien tidak ditemukan atau gagal memproses konfigurasi
-          schema:
-            $ref: '#/definitions/ingestion.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Receive batch logs
-      tags:
-      - Ingestion
   /recovery/incidents/{id}:
     get:
       description: Mengambil detail sebuah insiden tamper berdasarkan ID.
