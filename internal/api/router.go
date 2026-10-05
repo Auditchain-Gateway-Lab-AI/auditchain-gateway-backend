@@ -3,10 +3,9 @@ package api
 import (
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/middleware"
+	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
-	"go-blockchain-api/internal/modules/clientaudit"
-	"go-blockchain-api/internal/modules/internalaudit"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"os"
@@ -23,13 +22,12 @@ import (
 )
 
 func SetupRouter(
-	auditHandler *internalaudit.Handler,
+	auditHandler *audit.Handler,
 	authHandler *auth.Handler,
 	clientHandler *client.Handler,
 	agentHandler *agentverifier.Handler,
 	reportHandler *report.Handler,
 	recoveryHandler *recovery.Handler,
-	clientVerifyHandler *clientaudit.Handler,
 	db *gorm.DB,
 ) *gin.Engine {
 	router := gin.Default()
@@ -60,11 +58,9 @@ func SetupRouter(
 
 	auth.RegisterRoutes(apiGroup, authHandler)
 	client.RegisterRoutes(apiGroup, clientHandler)
-	internalaudit.RegisterRoutes(apiGroup, auditHandler)
+	audit.RegisterRoutes(apiGroup, auditHandler)
 	report.RegisterRoutes(apiGroup, reportHandler)
 	recovery.RegisterRoutes(apiGroup, recoveryHandler)
-	clientaudit.RegisterRoutes(apiGroup, clientVerifyHandler, db)
-
 	agentverifier.RegisterRoutes(apiGroup.Group("/dashboard"), agentHandler)
 
 	return router
