@@ -273,7 +273,7 @@ func (h *Handler) VerifyData(c *gin.Context) {
 }
 
 // GetRecentLogs sekarang mendukung pagination sesungguhnya via query params
-// ?page=&page_size= (default: page=1, page_size=10, maksimum 200), serta
+// ?page=&page_size= (default: page=1, page_size=10, maksimum 100), serta
 // filter opsional ?integrity_status=valid|tampered|unreachable.
 //
 // Response contract baru: {"data": [...], "pagination": {...}, "note"?: "..."}
@@ -286,7 +286,7 @@ func (h *Handler) VerifyData(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param page query int false "Nomor Halaman (default: 1)"
-// @Param page_size query int false "Ukuran Halaman (default: 10)"
+// @Param page_size query int false "Ukuran Halaman (default: 10, maksimum: 100)"
 // @Param integrity_status query string false "Filter Status Integritas (valid, tampered, unreachable)"
 // @Param sort_order query string false "Urutan (asc, desc)"
 // @Param source_table query string false "Filter Tabel Sumber"

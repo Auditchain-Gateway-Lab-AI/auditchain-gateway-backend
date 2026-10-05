@@ -435,7 +435,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Ukuran Halaman (default: 10)",
+                        "description": "Ukuran Halaman (default: 10, maksimum: 100)",
                         "name": "page_size",
                         "in": "query"
                     },
