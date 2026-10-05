@@ -441,7 +441,6 @@ func main() {
 	reportHandler := report.NewHandler(reportService)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	
 	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, db)
 	api.RegisterHealthRoutes(router, db)
 
