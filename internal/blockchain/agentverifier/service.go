@@ -260,7 +260,7 @@ func (s *Service) fetchResourceFromAgent(cfg *models.AgentConfig, tableName, res
 func (s *Service) fetchResourceFromAgentContext(ctx context.Context, cfg *models.AgentConfig, tableName, resourceID string) (*ResourceRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 15 * time.Second
 	}
 
 	url := agentVerifyURL(cfg.AgentURL, tableName, resourceID)
@@ -359,7 +359,7 @@ func (s *Service) loadAgentConfig(clientID string) (*models.AgentConfig, error) 
 func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecordID string) (*AuditTrailRecord, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 15 * time.Second
 	}
 
 	url := agentVerifyURL(cfg.AgentURL, tableName, sourceRecordID)
@@ -400,7 +400,11 @@ func (s *Service) fetchFromAgent(cfg *models.AgentConfig, tableName, sourceRecor
 }
 
 func agentVerifyURL(agentURL, tableName, resourceID string) string {
-	return fmt.Sprintf("%s/verify/%s/%s", strings.TrimRight(agentURL, "/"), tableName, resourceID)
+	baseURL := strings.TrimRight(agentURL, "/")
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
+	return fmt.Sprintf("%s/verify/%s/%s", baseURL, tableName, resourceID)
 }
 
 // compareFields membandingkan field-field penting antara AuditLog di middleware

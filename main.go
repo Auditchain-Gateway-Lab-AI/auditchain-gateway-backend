@@ -36,10 +36,9 @@ import (
 	"go-blockchain-api/internal/engine/kafkaconsumer"
 	"go-blockchain-api/internal/engine/snapshotworker"
 	"go-blockchain-api/internal/engine/tamperscanner"
+	"go-blockchain-api/internal/modules/audit"
 	"go-blockchain-api/internal/modules/auth"
 	"go-blockchain-api/internal/modules/client"
-	"go-blockchain-api/internal/modules/clientaudit"
-	"go-blockchain-api/internal/modules/internalaudit"
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"go-blockchain-api/internal/storage/snapshotstore"
@@ -183,7 +182,7 @@ func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, e
 	}, nil
 }
 
-func loadVerificationSchedulerConfig() (internalaudit.VerificationSchedulerConfig, error) {
+func loadVerificationSchedulerConfig() (audit.VerificationSchedulerConfig, error) {
 	parsePositiveInt := func(name string, fallback int) (int, error) {
 		raw := strings.TrimSpace(os.Getenv(name))
 		if raw == "" {
@@ -220,27 +219,27 @@ func loadVerificationSchedulerConfig() (internalaudit.VerificationSchedulerConfi
 
 	enabled, err := parseBool("VERIFICATION_SCHEDULER_ENABLED", false)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 	intervalSeconds, err := parsePositiveInt("VERIFICATION_SCHEDULER_INTERVAL_SECONDS", 86400)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 	lookbackHours, err := parsePositiveInt("VERIFICATION_SCHEDULER_LOOKBACK_HOURS", 24)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 	overlapSeconds, err := parseNonNegativeInt("VERIFICATION_SCHEDULER_OVERLAP_SECONDS", 300)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 	batchSize, err := parsePositiveInt("VERIFICATION_SCHEDULER_BATCH_SIZE", 100)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 	runOnStart, err := parseBool("VERIFICATION_SCHEDULER_RUN_ON_START", false)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, err
+		return audit.VerificationSchedulerConfig{}, err
 	}
 
 	timezone := strings.TrimSpace(os.Getenv("VERIFICATION_SCHEDULER_TIMEZONE"))
@@ -249,10 +248,10 @@ func loadVerificationSchedulerConfig() (internalaudit.VerificationSchedulerConfi
 	}
 	location, err := time.LoadLocation(timezone)
 	if err != nil {
-		return internalaudit.VerificationSchedulerConfig{}, fmt.Errorf("VERIFICATION_SCHEDULER_TIMEZONE tidak valid: %w", err)
+		return audit.VerificationSchedulerConfig{}, fmt.Errorf("VERIFICATION_SCHEDULER_TIMEZONE tidak valid: %w", err)
 	}
 
-	return internalaudit.VerificationSchedulerConfig{
+	return audit.VerificationSchedulerConfig{
 		Enabled:    enabled,
 		ClientID:   strings.TrimSpace(os.Getenv("VERIFICATION_SCHEDULER_CLIENT_ID")),
 		Interval:   time.Duration(intervalSeconds) * time.Second,
@@ -401,17 +400,17 @@ func main() {
 
 	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService, effectiveSnapshotRequired)
 
-	auditRepo := internalaudit.NewAuditRepository(db)
-	auditService := internalaudit.NewService(auditRepo, fabricSvc, db)
-	verificationJobs := internalaudit.NewVerificationJobService(db, auditService)
+	auditRepo := audit.NewAuditRepository(db)
+	auditService := audit.NewService(auditRepo, fabricSvc, db)
+	verificationJobs := audit.NewVerificationJobService(db, auditService)
 	go verificationJobs.Run(ctx)
 	verificationSchedulerConfig, schedulerConfigErr := loadVerificationSchedulerConfig()
 	if schedulerConfigErr != nil {
 		log.Fatalf("âŒ Konfigurasi verification scheduler tidak valid: %v", schedulerConfigErr)
 	}
-	verificationScheduler := internalaudit.NewVerificationScheduler(db, verificationJobs, verificationSchedulerConfig)
+	verificationScheduler := audit.NewVerificationScheduler(db, verificationJobs, verificationSchedulerConfig)
 	go verificationScheduler.Run(ctx)
-	auditHandler := internalaudit.NewHandlerWithVerificationJobs(auditService, verificationJobs)
+	auditHandler := audit.NewHandlerWithVerificationJobs(auditService, verificationJobs)
 	if tamperScannerEnabled() {
 		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)
 		if configErr != nil {
@@ -442,10 +441,8 @@ func main() {
 	reportHandler := report.NewHandler(reportService)
 	recoveryHandler := recovery.NewHandler(recoveryService)
 
-	clientVerifyService := clientaudit.NewService(db, agentService, fabricSvc)
-	clientVerifyHandler := clientaudit.NewHandler(clientVerifyService)
-
-	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, clientVerifyHandler, db)
+	
+	router := api.SetupRouter(auditHandler, authHandler, clientHandler, agentHandler, reportHandler, recoveryHandler, db)
 	api.RegisterHealthRoutes(router, db)
 
 	port := os.Getenv("PORT")

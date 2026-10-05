@@ -1,4 +1,4 @@
-package internalaudit
+package audit
 
 import (
 	"testing"
