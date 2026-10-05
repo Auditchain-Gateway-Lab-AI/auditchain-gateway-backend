@@ -1161,7 +1161,7 @@ paths:
         in: query
         name: page
         type: integer
-      - description: 'Ukuran Halaman (default: 10)'
+      - description: 'Ukuran Halaman (default: 10, maksimum: 100)'
         in: query
         name: page_size
         type: integer
