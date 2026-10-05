@@ -399,13 +399,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memuat daftar data",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -480,25 +480,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Daftar log beserta data paginasi",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.RecentLogsResponse"
+                            "$ref": "#/definitions/audit.RecentLogsResponse"
                         }
                     },
                     "400": {
                         "description": "Parameter tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal mengambil log terbaru",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -511,7 +511,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.",
+                "description": "Mengambil statistik agregat tenant client yang sedang login. Parameter trend_range opsional menambahkan bucket agregat dari audit_logs tanpa mengirim row log.",
                 "produces": [
                     "application/json"
                 ],
@@ -519,11 +519,31 @@ const docTemplate = `{
                     "Dashboard"
                 ],
                 "summary": "Get client dashboard statistics",
+                "parameters": [
+                    {
+                        "enum": [
+                            "8H",
+                            "24H",
+                            "7D",
+                            "30D"
+                        ],
+                        "type": "string",
+                        "description": "Rentang trend agregat",
+                        "name": "trend_range",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Statistik dashboard client",
                         "schema": {
                             "$ref": "#/definitions/client.DashboardStatsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Rentang trend tidak didukung",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
                         }
                     },
                     "401": {
@@ -566,7 +586,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.CreateVerificationRunRequest"
+                            "$ref": "#/definitions/audit.CreateVerificationRunRequest"
                         }
                     },
                     {
@@ -580,25 +600,25 @@ const docTemplate = `{
                     "202": {
                         "description": "Job berhasil diantrikan",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerificationRunResponseEnvelope"
+                            "$ref": "#/definitions/audit.VerificationRunResponseEnvelope"
                         }
                     },
                     "400": {
                         "description": "Rentang tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "503": {
                         "description": "Background verifier belum tersedia",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -631,13 +651,13 @@ const docTemplate = `{
                     "200": {
                         "description": "Verification run terakhir",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.LatestVerificationRunResponse"
+                            "$ref": "#/definitions/audit.LatestVerificationRunResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -677,19 +697,19 @@ const docTemplate = `{
                     "200": {
                         "description": "Progress verification run",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerificationRunResponseEnvelope"
+                            "$ref": "#/definitions/audit.VerificationRunResponseEnvelope"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Verification run tidak ditemukan",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -730,31 +750,31 @@ const docTemplate = `{
                     "200": {
                         "description": "Ringkasan dan hasil tiap log",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                            "$ref": "#/definitions/audit.RangeVerificationResult"
                         }
                     },
                     "400": {
                         "description": "Parameter rentang tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "422": {
                         "description": "Range terlalu besar untuk verifikasi sinkron",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memverifikasi range log",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -795,31 +815,31 @@ const docTemplate = `{
                     "200": {
                         "description": "Summary verifikasi log client",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ClientRangeVerificationResponse"
+                            "$ref": "#/definitions/audit.ClientRangeVerificationResponse"
                         }
                     },
                     "400": {
                         "description": "Parameter rentang tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "422": {
                         "description": "Range terlalu besar untuk verifikasi sinkron",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memverifikasi client range log",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -860,25 +880,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Estimasi ukuran range",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerifyRangeEstimateResponse"
+                            "$ref": "#/definitions/audit.VerifyRangeEstimateResponse"
                         }
                     },
                     "400": {
                         "description": "Parameter rentang tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal menghitung estimasi range",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -919,31 +939,31 @@ const docTemplate = `{
                     "200": {
                         "description": "Ringkasan dan hasil tiap log",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.RangeVerificationResult"
+                            "$ref": "#/definitions/audit.RangeVerificationResult"
                         }
                     },
                     "400": {
                         "description": "Parameter rentang tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "422": {
                         "description": "Range terlalu besar untuk verifikasi sinkron",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Gagal memverifikasi range log",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -977,92 +997,37 @@ const docTemplate = `{
                     "200": {
                         "description": "Verifikasi sukses dan log valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "202": {
                         "description": "Verifikasi pending/dalam proses",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "401": {
                         "description": "Identitas client tidak valid",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Log tidak ditemukan",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Verifikasi gagal/tampered pada suatu layer",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.VerifyLogResponse"
+                            "$ref": "#/definitions/audit.VerifyLogResponse"
                         }
                     },
                     "500": {
                         "description": "Kesalahan sistem saat verifikasi",
                         "schema": {
-                            "$ref": "#/definitions/internalaudit.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/ingestion": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Menerima array of log dinamis dari sistem klien (Agent atau Kafka) untuk diproses dan diverifikasi ke blockchain.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Ingestion"
-                ],
-                "summary": "Receive batch logs",
-                "parameters": [
-                    {
-                        "description": "Array of Log Data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "202": {
-                        "description": "Log diterima dan sedang diproses",
-                        "schema": {
-                            "$ref": "#/definitions/ingestion.IngestionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Format JSON tidak valid atau array kosong",
-                        "schema": {
-                            "$ref": "#/definitions/ingestion.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Identitas klien tidak ditemukan atau gagal memproses konfigurasi",
-                        "schema": {
-                            "$ref": "#/definitions/ingestion.ErrorResponse"
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
                 }
@@ -1511,6 +1476,304 @@ const docTemplate = `{
                 }
             }
         },
+        "audit.ClientRangeVerificationResponse": {
+            "type": "object",
+            "properties": {
+                "range": {
+                    "$ref": "#/definitions/audit.RangeInfo"
+                },
+                "summary": {
+                    "$ref": "#/definitions/audit.RangeSummary"
+                }
+            }
+        },
+        "audit.CreateVerificationRunRequest": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "batch_size": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "from": {
+                    "type": "string",
+                    "example": "2026-09-29T00:00:00Z"
+                },
+                "to": {
+                    "type": "string",
+                    "example": "2026-09-30T23:59:59Z"
+                }
+            }
+        },
+        "audit.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Pesan kesalahan atau validasi"
+                }
+            }
+        },
+        "audit.LatestVerificationRunResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/audit.VerificationRunResponse"
+                }
+            }
+        },
+        "audit.RangeInfo": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.RangeItemResult": {
+            "type": "object",
+            "properties": {
+                "agent_discrepancies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentverifier.Discrepancy"
+                    }
+                },
+                "agent_status": {
+                    "type": "string"
+                },
+                "log": {
+                    "$ref": "#/definitions/models.AuditLog"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "verify_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.RangeSummary": {
+            "type": "object",
+            "properties": {
+                "already_verified": {
+                    "type": "integer"
+                },
+                "invalid": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "valid": {
+                    "type": "integer"
+                },
+                "verified_now": {
+                    "type": "integer"
+                }
+            }
+        },
+        "audit.RangeVerificationResult": {
+            "type": "object",
+            "properties": {
+                "range": {
+                    "$ref": "#/definitions/audit.RangeInfo"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/audit.RangeItemResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/audit.RangeSummary"
+                }
+            }
+        },
+        "audit.RecentLogsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Array of logs",
+                    "type": "array",
+                    "items": {}
+                },
+                "note": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "type": "object",
+                    "properties": {
+                        "page": {
+                            "type": "integer"
+                        },
+                        "page_size": {
+                            "type": "integer"
+                        },
+                        "total_pages": {
+                            "type": "integer"
+                        },
+                        "total_rows": {
+                            "type": "integer"
+                        }
+                    }
+                }
+            }
+        },
+        "audit.VerificationRunResponse": {
+            "type": "object",
+            "properties": {
+                "already_verified": {
+                    "type": "integer"
+                },
+                "batch_size": {
+                    "type": "integer"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "processed_items": {
+                    "type": "integer"
+                },
+                "progress_percent": {
+                    "type": "number"
+                },
+                "requested_by": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "total_invalid": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pending": {
+                    "type": "integer"
+                },
+                "total_valid": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verified_now": {
+                    "type": "integer"
+                }
+            }
+        },
+        "audit.VerificationRunResponseEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/audit.VerificationRunResponse"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.VerifyLogData": {
+            "type": "object",
+            "properties": {
+                "actual_hash": {
+                    "type": "string"
+                },
+                "agent_discrepancies": {},
+                "agent_status": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "is_valid": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "audit.VerifyLogResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/audit.VerifyLogData"
+                },
+                "layer": {
+                    "type": "string",
+                    "example": "4_blockchain"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                }
+            }
+        },
+        "audit.VerifyRangeEstimateResponse": {
+            "type": "object",
+            "properties": {
+                "can_verify_sync": {
+                    "type": "boolean"
+                },
+                "estimated_items": {
+                    "type": "integer"
+                },
+                "sync_limit": {
+                    "type": "integer"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -1865,6 +2128,9 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 0
                 },
+                "trend": {
+                    "$ref": "#/definitions/client.DashboardTrendResponse"
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -1894,340 +2160,72 @@ const docTemplate = `{
                 }
             }
         },
+        "client.DashboardTrendPointResponse": {
+            "type": "object",
+            "properties": {
+                "bucket_start": {
+                    "type": "string"
+                },
+                "delete": {
+                    "type": "integer"
+                },
+                "insert": {
+                    "type": "integer"
+                },
+                "not_checked": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "tampered": {
+                    "type": "integer"
+                },
+                "total_logs": {
+                    "type": "integer"
+                },
+                "unavailable": {
+                    "type": "integer"
+                },
+                "update": {
+                    "type": "integer"
+                },
+                "valid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "client.DashboardTrendResponse": {
+            "type": "object",
+            "properties": {
+                "bucket_seconds": {
+                    "type": "integer",
+                    "example": 3600
+                },
+                "from": {
+                    "type": "string"
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/client.DashboardTrendPointResponse"
+                    }
+                },
+                "range": {
+                    "type": "string",
+                    "example": "8H"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
         "client.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string",
                     "example": "Pesan kesalahan atau validasi"
-                }
-            }
-        },
-        "ingestion.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Format JSON tidak valid, harus berupa Array Objek"
-                }
-            }
-        },
-        "ingestion.IngestionResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "example": "Proses bulk ingestion selesai"
-                },
-                "total_failed": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "total_received": {
-                    "type": "integer",
-                    "example": 100
-                },
-                "total_success": {
-                    "type": "integer",
-                    "example": 98
-                }
-            }
-        },
-        "internalaudit.ClientRangeVerificationResponse": {
-            "type": "object",
-            "properties": {
-                "range": {
-                    "$ref": "#/definitions/internalaudit.RangeInfo"
-                },
-                "summary": {
-                    "$ref": "#/definitions/internalaudit.RangeSummary"
-                }
-            }
-        },
-        "internalaudit.CreateVerificationRunRequest": {
-            "type": "object",
-            "required": [
-                "from",
-                "to"
-            ],
-            "properties": {
-                "batch_size": {
-                    "type": "integer",
-                    "example": 100
-                },
-                "from": {
-                    "type": "string",
-                    "example": "2026-09-29T00:00:00Z"
-                },
-                "to": {
-                    "type": "string",
-                    "example": "2026-09-30T23:59:59Z"
-                }
-            }
-        },
-        "internalaudit.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string",
-                    "example": "Pesan kesalahan atau validasi"
-                }
-            }
-        },
-        "internalaudit.LatestVerificationRunResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/internalaudit.VerificationRunResponse"
-                }
-            }
-        },
-        "internalaudit.RangeInfo": {
-            "type": "object",
-            "properties": {
-                "from": {
-                    "type": "string"
-                },
-                "to": {
-                    "type": "string"
-                }
-            }
-        },
-        "internalaudit.RangeItemResult": {
-            "type": "object",
-            "properties": {
-                "agent_discrepancies": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/agentverifier.Discrepancy"
-                    }
-                },
-                "agent_status": {
-                    "type": "string"
-                },
-                "log": {
-                    "$ref": "#/definitions/models.AuditLog"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "verify_status": {
-                    "type": "string"
-                }
-            }
-        },
-        "internalaudit.RangeSummary": {
-            "type": "object",
-            "properties": {
-                "already_verified": {
-                    "type": "integer"
-                },
-                "invalid": {
-                    "type": "integer"
-                },
-                "pending": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "valid": {
-                    "type": "integer"
-                },
-                "verified_now": {
-                    "type": "integer"
-                }
-            }
-        },
-        "internalaudit.RangeVerificationResult": {
-            "type": "object",
-            "properties": {
-                "range": {
-                    "$ref": "#/definitions/internalaudit.RangeInfo"
-                },
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/internalaudit.RangeItemResult"
-                    }
-                },
-                "summary": {
-                    "$ref": "#/definitions/internalaudit.RangeSummary"
-                }
-            }
-        },
-        "internalaudit.RecentLogsResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "description": "Array of logs",
-                    "type": "array",
-                    "items": {}
-                },
-                "note": {
-                    "type": "string"
-                },
-                "pagination": {
-                    "type": "object",
-                    "properties": {
-                        "page": {
-                            "type": "integer"
-                        },
-                        "page_size": {
-                            "type": "integer"
-                        },
-                        "total_pages": {
-                            "type": "integer"
-                        },
-                        "total_rows": {
-                            "type": "integer"
-                        }
-                    }
-                }
-            }
-        },
-        "internalaudit.VerificationRunResponse": {
-            "type": "object",
-            "properties": {
-                "already_verified": {
-                    "type": "integer"
-                },
-                "batch_size": {
-                    "type": "integer"
-                },
-                "client_id": {
-                    "type": "string"
-                },
-                "completed_at": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "from": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "processed_items": {
-                    "type": "integer"
-                },
-                "progress_percent": {
-                    "type": "number"
-                },
-                "requested_by": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "to": {
-                    "type": "string"
-                },
-                "total_invalid": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pending": {
-                    "type": "integer"
-                },
-                "total_valid": {
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "verified_now": {
-                    "type": "integer"
-                }
-            }
-        },
-        "internalaudit.VerificationRunResponseEnvelope": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/internalaudit.VerificationRunResponse"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "internalaudit.VerifyLogData": {
-            "type": "object",
-            "properties": {
-                "actual_hash": {
-                    "type": "string"
-                },
-                "agent_discrepancies": {},
-                "agent_status": {
-                    "type": "string"
-                },
-                "blockchain_tx_id": {
-                    "type": "string"
-                },
-                "expected_hash": {
-                    "type": "string"
-                },
-                "is_valid": {
-                    "type": "boolean"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "merkle_root": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "internalaudit.VerifyLogResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/internalaudit.VerifyLogData"
-                },
-                "layer": {
-                    "type": "string",
-                    "example": "4_blockchain"
-                },
-                "log_id": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "success"
-                }
-            }
-        },
-        "internalaudit.VerifyRangeEstimateResponse": {
-            "type": "object",
-            "properties": {
-                "can_verify_sync": {
-                    "type": "boolean"
-                },
-                "estimated_items": {
-                    "type": "integer"
-                },
-                "sync_limit": {
-                    "type": "integer"
                 }
             }
         },

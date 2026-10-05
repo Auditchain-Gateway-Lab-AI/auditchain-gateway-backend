@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"go-blockchain-api/internal/models"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -97,33 +97,34 @@ type DashboardStatsResponse struct {
 }
 
 type DashboardStatsDataResponse struct {
-	ID                 uint                   `json:"id" example:"1"`
-	ClientID           string                 `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
-	TotalLogs          int64                  `json:"total_logs" example:"100"`
-	LogsToday          int64                  `json:"logs_today" example:"12"`
-	TotalTablesAudited int                    `json:"total_tables_audited" example:"8"`
-	TotalInserts       int64                  `json:"total_inserts" example:"40"`
-	TotalUpdates       int64                  `json:"total_updates" example:"50"`
-	TotalDeletes       int64                  `json:"total_deletes" example:"10"`
-	LastLogAt          *time.Time             `json:"last_log_at,omitempty"`
-	TotalAnchored      int64                  `json:"total_anchored" example:"95"`
-	AnchoredLogs       int64                  `json:"anchored_logs" example:"95"`
-	TotalPending       int64                  `json:"total_pending" example:"5"`
-	PendingLogs        int64                  `json:"pending_logs" example:"5"`
-	AnchorPercentage   float64                `json:"anchor_percentage" example:"95.00"`
-	TotalVerifications int64                  `json:"total_verifications" example:"80"`
-	TotalRowsVerified  int64                  `json:"total_rows_verified" example:"80"`
-	TotalValid         int64                  `json:"total_valid" example:"78"`
-	TotalTampered      int64                  `json:"total_tampered" example:"2"`
-	TotalVerifyPending int64                  `json:"total_verify_pending" example:"0"`
-	TotalAgentError    int64                  `json:"total_agent_error" example:"0"`
-	TotalFabricError   int64                  `json:"total_fabric_error" example:"0"`
-	IntegrityScore     float64                `json:"integrity_score" example:"97.50"`
-	LastVerifiedAt     *time.Time             `json:"last_verified_at,omitempty"`
-	LastVerifiedTable  string                 `json:"last_verified_table" example:"users"`
-	TableVerifyResults map[string]interface{} `json:"table_verify_results" swaggertype:"object"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
+	ID                 uint                    `json:"id" example:"1"`
+	ClientID           string                  `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	TotalLogs          int64                   `json:"total_logs" example:"100"`
+	LogsToday          int64                   `json:"logs_today" example:"12"`
+	TotalTablesAudited int                     `json:"total_tables_audited" example:"8"`
+	TotalInserts       int64                   `json:"total_inserts" example:"40"`
+	TotalUpdates       int64                   `json:"total_updates" example:"50"`
+	TotalDeletes       int64                   `json:"total_deletes" example:"10"`
+	LastLogAt          *time.Time              `json:"last_log_at,omitempty"`
+	TotalAnchored      int64                   `json:"total_anchored" example:"95"`
+	AnchoredLogs       int64                   `json:"anchored_logs" example:"95"`
+	TotalPending       int64                   `json:"total_pending" example:"5"`
+	PendingLogs        int64                   `json:"pending_logs" example:"5"`
+	AnchorPercentage   float64                 `json:"anchor_percentage" example:"95.00"`
+	TotalVerifications int64                   `json:"total_verifications" example:"80"`
+	TotalRowsVerified  int64                   `json:"total_rows_verified" example:"80"`
+	TotalValid         int64                   `json:"total_valid" example:"78"`
+	TotalTampered      int64                   `json:"total_tampered" example:"2"`
+	TotalVerifyPending int64                   `json:"total_verify_pending" example:"0"`
+	TotalAgentError    int64                   `json:"total_agent_error" example:"0"`
+	TotalFabricError   int64                   `json:"total_fabric_error" example:"0"`
+	IntegrityScore     float64                 `json:"integrity_score" example:"97.50"`
+	LastVerifiedAt     *time.Time              `json:"last_verified_at,omitempty"`
+	LastVerifiedTable  string                  `json:"last_verified_table" example:"users"`
+	TableVerifyResults map[string]interface{}  `json:"table_verify_results" swaggertype:"object"`
+	Trend              *DashboardTrendResponse `json:"trend,omitempty"`
+	CreatedAt          time.Time               `json:"created_at"`
+	UpdatedAt          time.Time               `json:"updated_at"`
 }
 
 func (h *Handler) CreateKafkaConfig(c *gin.Context) {
@@ -1270,12 +1271,14 @@ func (h *Handler) UpdateUserTableConfig(c *gin.Context) {
 }
 
 // @Summary Get client dashboard statistics
-// @Description Mengambil statistik tenant client yang sedang login. Counter audit utama dihitung dari audit_logs, jumlah tabel memakai client_tables/resource audit, dan statistik verifikasi berasal dari cache client_dashboard_stats.
+// @Description Mengambil statistik agregat tenant client yang sedang login. Parameter trend_range opsional menambahkan bucket agregat dari audit_logs tanpa mengirim row log.
 // @Tags Dashboard
 // @Produce json
 // @Security BearerAuth
+// @Param trend_range query string false "Rentang trend agregat" Enums(8H,24H,7D,30D)
 // @Success 200 {object} DashboardStatsResponse "Statistik dashboard client"
 // @Failure 401 {object} ErrorResponse "Client ID tidak ditemukan atau tidak valid pada token"
+// @Failure 400 {object} ErrorResponse "Rentang trend tidak didukung"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil statistik dashboard"
 // @Router /dashboard/stats [get]
 func (h *Handler) GetClientStats(c *gin.Context) {
@@ -1288,6 +1291,16 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 	if !ok || strings.TrimSpace(clientID) == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID pada token tidak valid"})
 		return
+	}
+	trendRange := strings.TrimSpace(c.Query("trend_range"))
+	var trendWindow dashboardTrendWindow
+	if trendRange != "" {
+		var supported bool
+		trendWindow, supported = parseDashboardTrendRange(trendRange)
+		if !supported {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trend_range harus 8H, 24H, 7D, atau 30D"})
+			return
+		}
 	}
 
 	// The audit-log table is the source of truth for the three headline
@@ -1378,6 +1391,14 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"table_verify_results": tableResults,
 		"created_at":           stats.CreatedAt,
 		"updated_at":           stats.UpdatedAt,
+	}
+	if trendRange != "" {
+		trend, err := loadDashboardTrend(h.DB, clientID, trendWindow, time.Now().UTC())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung trend dashboard"})
+			return
+		}
+		data["trend"] = trend
 	}
 
 	// Keep the legacy top-level shape consumed by the dashboard while retaining

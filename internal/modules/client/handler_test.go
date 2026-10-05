@@ -1,9 +1,12 @@
 package client
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestPingAgentConfigUsesHealthEndpoint(t *testing.T) {
@@ -41,5 +44,26 @@ func TestPingAgentConfigTreatsNon2xxAsUnhealthy(t *testing.T) {
 	}
 	if statusCode != http.StatusNotFound || reachable {
 		t.Fatalf("health result = status %d, reachable %t; want 404/false", statusCode, reachable)
+	}
+}
+
+func TestGetClientStatsRejectsUnsupportedTrendRange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/dashboard/stats?trend_range=90D", nil)
+	ctx.Set("client_id", "tenant-1")
+
+	(&Handler{}).GetClientStats(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "trend_range harus 8H, 24H, 7D, atau 30D" {
+		t.Fatalf("error = %q, want unsupported trend range message", body["error"])
 	}
 }
