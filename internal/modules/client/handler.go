@@ -121,10 +121,18 @@ type DashboardStatsDataResponse struct {
 	IntegrityScore     float64                 `json:"integrity_score" example:"97.50"`
 	LastVerifiedAt     *time.Time              `json:"last_verified_at,omitempty"`
 	LastVerifiedTable  string                  `json:"last_verified_table" example:"users"`
+	IntegrityCheck     IntegrityCheckResponse  `json:"integrity_check"`
 	TableVerifyResults map[string]interface{}  `json:"table_verify_results" swaggertype:"object"`
 	Trend              *DashboardTrendResponse `json:"trend,omitempty"`
 	CreatedAt          time.Time               `json:"created_at"`
 	UpdatedAt          time.Time               `json:"updated_at"`
+}
+
+type IntegrityCheckResponse struct {
+	Source      string     `json:"source" example:"TAMPER_SCANNER"`
+	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	RunID       string     `json:"run_id,omitempty"`
+	CheckedLogs int64      `json:"checked_logs" example:"100"`
 }
 
 func (h *Handler) CreateKafkaConfig(c *gin.Context) {
@@ -1388,6 +1396,12 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"integrity_score":      stats.IntegrityScore,
 		"last_verified_at":     stats.LastVerifiedAt,
 		"last_verified_table":  stats.LastVerifiedTable,
+		"integrity_check": IntegrityCheckResponse{
+			Source:      stats.LastCheckSource,
+			CheckedAt:   stats.LastCheckAt,
+			RunID:       stats.LastCheckRunID,
+			CheckedLogs: stats.LastCheckLogs,
+		},
 		"table_verify_results": tableResults,
 		"created_at":           stats.CreatedAt,
 		"updated_at":           stats.UpdatedAt,

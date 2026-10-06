@@ -82,6 +82,13 @@ func configuredVerificationBatchSize() int {
 	return size
 }
 
+func integritySourceForVerificationRun(requestedBy string) string {
+	if strings.EqualFold(strings.TrimSpace(requestedBy), "system:scheduler") {
+		return models.IntegritySourceScheduledRun
+	}
+	return models.IntegritySourceBackgroundRun
+}
+
 // Run starts a single process worker. PostgreSQL row locking prevents two
 // gateway instances from claiming the same queued run.
 func (s *VerificationJobService) Run(ctx context.Context) {
@@ -285,11 +292,14 @@ func (s *VerificationJobService) processRun(ctx context.Context, run *models.Ver
 		}
 
 		requestID := "verification-run-" + run.ID
+		integritySource := integritySourceForVerificationRun(run.RequestedBy)
 		summary, loaded, err := s.audit.VerifyRangeBatch(
 			run.FromTime,
 			run.ToTime,
 			run.ClientID,
 			requestID,
+			run.ID,
+			integritySource,
 			run.BatchSize,
 			offset,
 		)

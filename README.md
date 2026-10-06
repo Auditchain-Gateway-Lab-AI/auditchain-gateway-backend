@@ -190,6 +190,15 @@ memulai satu siklus saat Gateway boot; default-nya `false`.
 Untuk smoke test satu tenant, isi `VERIFICATION_SCHEDULER_CLIENT_ID` dengan
 UUID client tersebut. Jika kosong, semua client berstatus `active` akan diproses.
 
+Tamper Scanner adalah jalur otomatis terpisah dari scheduler dan Verify Range.
+Scanner hanya dimulai saat `TAMPER_SCANNER_ENABLED=true`; interval default-nya
+300 detik dan batch default-nya 100 log. Scanner memeriksa hash lokal, Merkle
+proof, dan anchor Fabric, lalu menyimpan hasil ke `audit_logs` tanpa tombol
+dashboard. Status scheduler dan scanner di server tetap harus dikonfirmasi dari
+environment serta log startup runtime.
+Ringkasan pemeriksaan terakhir tersedia di `data.integrity_check` pada
+`GET /api/dashboard/stats`; data row per log tetap berada di endpoint Gateway.
+
 ### Menjalankan via Docker
 
 ```bash
@@ -283,6 +292,10 @@ memiliki tiga dimensi status yang independen:
 
 - `integrity_status` / `chain_status`: validasi PostgreSQL Gateway, Merkle
   proof, dan anchor Fabric (`valid`, `tampered`, `pending`, `unreachable`).
+- `integrity_source` dan `integrity_run_id`: sumber pemeriksaan terakhir per
+  log (`TAMPER_SCANNER`, `MANUAL_VERIFY_RANGE`, background/scheduled run,
+  single-log check, atau recovery). Data lama sebelum provenance tersedia
+  memiliki source kosong dan tidak di-backfill dengan tebakan.
 - `agent_status`: pemeriksaan live ke Agent client untuk log terbaru
   (`matched`, `mismatch`, `unreachable`, `not_configured`); status ini tidak
   menurunkan status Gateway/Fabric.

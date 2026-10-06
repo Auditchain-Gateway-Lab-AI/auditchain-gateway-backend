@@ -93,7 +93,7 @@ type Service interface {
 	EstimateLogRange(from, to time.Time, clientID string) (int64, error)
 	VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
-	VerifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error)
+	VerifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error)
 }
 
 type auditService struct {
@@ -273,8 +273,8 @@ func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, reques
 	return s.verifyLogRange(from, to, clientID, requestID)
 }
 
-func (s *auditService) VerifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error) {
-	return s.verifyRangeBatch(from, to, clientID, requestID, limit, offset)
+func (s *auditService) VerifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error) {
+	return s.verifyRangeBatch(from, to, clientID, requestID, runID, integritySource, limit, offset)
 }
 
 func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
@@ -304,7 +304,7 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 		return nil, err
 	}
 
-	summary, results := s.verifyRangeItems(logs, clientID, requestID)
+	summary, results := s.verifyRangeItems(logs, clientID, requestID, models.IntegritySourceManualRange, "")
 	return &RangeVerificationResult{
 		Range: RangeInfo{
 			From: formatPgTimestamp(from),
@@ -319,7 +319,7 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 // the per-log cache and stats update path with the synchronous endpoint, but
 // reads only one bounded page at a time so a large range never becomes one
 // oversized HTTP request or one unbounded in-memory slice.
-func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID string, limit, offset int) (RangeSummary, int, error) {
+func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error) {
 	s.rangeVerificationMu.Lock()
 	defer s.rangeVerificationMu.Unlock()
 
@@ -330,18 +330,18 @@ func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID 
 		return RangeSummary{}, 0, err
 	}
 
-	summary, _ := s.verifyRangeItems(logs, clientID, requestID)
+	summary, _ := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID)
 	return summary, len(logs), nil
 }
 
-func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID string) (RangeSummary, []RangeItemResult) {
+func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID, integritySource, runID string) (RangeSummary, []RangeItemResult) {
 	result := &RangeVerificationResult{
 		Results: make([]RangeItemResult, 0, len(logs)),
 	}
 	newlyVerified := make([]RangeItemResult, 0, len(logs))
 
 	for _, auditLog := range logs {
-		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID)
+		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID, integritySource, runID)
 		if verifiedNow {
 			result.Summary.VerifiedNow++
 			newlyVerified = append(newlyVerified, item)
@@ -357,11 +357,14 @@ func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, reques
 	// Replaying the same date range therefore returns the same summary without
 	// inflating total_verifications, total_valid, or total_tampered.
 	s.updateRangeDashboardStats(clientID, newlyVerified)
+	if len(newlyVerified) > 0 {
+		s.recordLatestIntegrityCheck(clientID, integritySource, runID, int64(len(newlyVerified)))
+	}
 
 	return result.Summary, result.Results
 }
 
-func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID string) (RangeItemResult, bool) {
+func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID, integritySource, runID string) (RangeItemResult, bool) {
 	item := RangeItemResult{
 		LogID: auditLog.LogID,
 		Log:   auditLog,
@@ -384,17 +387,19 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 		} else {
 			item.Message = "hasil verifikasi kosong"
 		}
-		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, err)
+		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, err)
 	} else {
 		item.VerifyStatus = verifyResult.Status
 		item.Message = verifyResult.Message
 		item.AgentStatus = verifyResult.AgentStatus
 		item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
 		persistedStatus = integrityStatusFromVerificationResult(verifyResult)
-		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, nil)
+		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, nil)
 	}
 
 	item.Log.IntegrityStatus = persistedStatus
+	item.Log.IntegritySource = integritySource
+	item.Log.IntegrityRunID = runID
 	now := time.Now().UTC()
 	item.Log.IntegrityCheckedAt = &now
 	return item, true
@@ -627,7 +632,8 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}
 	}
 	if result != nil {
-		s.persistIntegrityStatus(result.LogID, clientID, status, err)
+		s.persistIntegrityStatus(result.LogID, clientID, status, models.IntegritySourceManualSingleLog, "", err)
+		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceManualSingleLog, "", 1)
 	}
 	return result, err
 }
@@ -649,6 +655,7 @@ func (s *auditService) VerifyGatewayIntegrity(logID, clientID string) (string, e
 // per log when a batch contains many siblings from one anchored tree.
 func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[string]tamperscanner.BatchVerificationResult {
 	results := make(map[string]tamperscanner.BatchVerificationResult, len(logs))
+	checkedPerClient := make(map[string]int64)
 	type anchorResult struct {
 		root string
 		err  error
@@ -657,11 +664,12 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 
 	for _, input := range logs {
 		auditLog := input
+		checkedPerClient[auditLog.ClientID]++
 		result := tamperscanner.BatchVerificationResult{Status: models.IntegrityStatusUnreachable}
 		if isHashStillPending(&auditLog) {
 			result.Status = models.IntegrityStatusPending
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
 			continue
 		}
 
@@ -671,20 +679,20 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			result.Status = models.IntegrityStatusTampered
 			s.recordTamperIncident(auditLog, "METADATA_HASH_MISMATCH", recalculated)
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
 			continue
 		}
 
 		if auditLog.Status != "ANCHORED" || auditLog.BlockchainTxID == nil || strings.TrimSpace(*auditLog.BlockchainTxID) == "" {
 			result.Status = models.IntegrityStatusPending
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
 			continue
 		}
 		if s.fabric == nil {
 			result.Err = errors.New("fabric_unavailable")
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
 			continue
 		}
 
@@ -713,7 +721,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		if anchor.err != nil {
 			result.Err = anchor.err
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
 			continue
 		}
 
@@ -721,7 +729,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			result.Status = models.IntegrityStatusTampered
 			s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
 			continue
 		}
 
@@ -729,7 +737,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		if err != nil {
 			result.Err = fmt.Errorf("merkle_proof_read_failed: %w", err)
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, result.Err)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
 			continue
 		}
 		for _, proof := range proofs {
@@ -741,7 +749,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		}
 		if result.Status == models.IntegrityStatusTampered {
 			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
 			continue
 		}
 
@@ -756,7 +764,10 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			result.Status = models.IntegrityStatusValid
 		}
 		results[auditLog.LogID] = result
-		s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, nil)
+		s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+	}
+	for clientID, count := range checkedPerClient {
+		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceTamperScanner, "", count)
 	}
 	return results
 }
@@ -776,7 +787,7 @@ func integrityStatusModelValue(status string) string {
 	}
 }
 
-func (s *auditService) persistIntegrityStatus(logID, clientID, status string, verificationErr error) {
+func (s *auditService) persistIntegrityStatus(logID, clientID, status, integritySource, runID string, verificationErr error) {
 	if s.db == nil || logID == "" || clientID == "" {
 		return
 	}
@@ -791,7 +802,28 @@ func (s *auditService) persistIntegrityStatus(logID, clientID, status string, ve
 			"integrity_status":     status,
 			"integrity_checked_at": now,
 			"integrity_error":      message,
+			"integrity_source":     integritySource,
+			"integrity_run_id":     runID,
 		}).Error
+}
+
+func (s *auditService) recordLatestIntegrityCheck(clientID, source, runID string, checkedLogs int64) {
+	if s.db == nil || clientID == "" || source == "" || checkedLogs <= 0 {
+		return
+	}
+
+	checkedAt := time.Now().UTC()
+	err := s.db.Model(&models.ClientDashboardStats{}).
+		Where("client_id = ? AND (last_integrity_check_at IS NULL OR last_integrity_check_at <= ?)", clientID, checkedAt).
+		Updates(map[string]interface{}{
+			"last_integrity_check_at":     checkedAt,
+			"last_integrity_check_source": source,
+			"last_integrity_check_run_id": runID,
+			"last_integrity_check_logs":   checkedLogs,
+		}).Error
+	if err != nil {
+		log.Printf("[IntegrityProvenance] gagal menyimpan ringkasan client=%s source=%s: %v", clientID, source, err)
+	}
 }
 
 func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, skipAgent bool) (*VerificationResult, error) {

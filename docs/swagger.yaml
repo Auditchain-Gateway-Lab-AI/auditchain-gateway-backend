@@ -391,6 +391,8 @@ definitions:
       id:
         example: 1
         type: integer
+      integrity_check:
+        $ref: '#/definitions/client.IntegrityCheckResponse'
       integrity_score:
         example: 97.5
         type: number
@@ -519,6 +521,19 @@ definitions:
         example: Pesan kesalahan atau validasi
         type: string
     type: object
+  client.IntegrityCheckResponse:
+    properties:
+      checked_at:
+        type: string
+      checked_logs:
+        example: 100
+        type: integer
+      run_id:
+        type: string
+      source:
+        example: TAMPER_SCANNER
+        type: string
+    type: object
   models.AgentConfig:
     properties:
       agent_url:
@@ -590,6 +605,10 @@ definitions:
       integrity_checked_at:
         type: string
       integrity_error:
+        type: string
+      integrity_run_id:
+        type: string
+      integrity_source:
         type: string
       integrity_status:
         description: |-
