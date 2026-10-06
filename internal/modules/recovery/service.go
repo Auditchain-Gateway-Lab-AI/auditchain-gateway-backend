@@ -790,6 +790,8 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 			"integrity_status":        models.IntegrityStatusValid,
 			"integrity_checked_at":    now,
 			"integrity_error":         "",
+			"integrity_source":        models.IntegritySourceRecovery,
+			"integrity_run_id":        "",
 			"status":                  "ANCHORED",
 		}
 		if err := tx.Model(&target).Updates(updates).Error; err != nil {
@@ -801,6 +803,14 @@ func (s *Service) executeSnapshot(ctx context.Context, request *models.RecoveryR
 		}
 		if actualHash := hasher.GenerateLogHash(&restored); actualHash != snapshot.HashValue {
 			return errors.New("post_recovery_hash_mismatch")
+		}
+		if err := tx.Model(&models.ClientDashboardStats{}).Where("client_id = ?", request.ClientID).Updates(map[string]interface{}{
+			"last_integrity_check_at":     now,
+			"last_integrity_check_source": models.IntegritySourceRecovery,
+			"last_integrity_check_run_id": "",
+			"last_integrity_check_logs":   1,
+		}).Error; err != nil {
+			return fmt.Errorf("ringkasan provenance recovery gagal diperbarui: %w", err)
 		}
 		if err := tx.Model(&models.TamperIncident{}).Where("id = ?", request.IncidentID).Updates(map[string]interface{}{
 			"tampered_payload": tamperedEvidence,

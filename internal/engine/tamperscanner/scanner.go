@@ -201,5 +201,7 @@ func (w *Worker) mark(row models.AuditLog, status, message string) error {
 			"integrity_status":     status,
 			"integrity_checked_at": now,
 			"integrity_error":      message,
+			"integrity_source":     models.IntegritySourceTamperScanner,
+			"integrity_run_id":     "",
 		}).Error
 }

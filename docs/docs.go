@@ -2047,6 +2047,9 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 1
                 },
+                "integrity_check": {
+                    "$ref": "#/definitions/client.IntegrityCheckResponse"
+                },
                 "integrity_score": {
                     "type": "number",
                     "example": 97.5
@@ -2229,6 +2232,25 @@ const docTemplate = `{
                 }
             }
         },
+        "client.IntegrityCheckResponse": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "checked_logs": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string",
+                    "example": "TAMPER_SCANNER"
+                }
+            }
+        },
         "models.AgentConfig": {
             "type": "object",
             "properties": {
@@ -2327,6 +2349,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "integrity_error": {
+                    "type": "string"
+                },
+                "integrity_run_id": {
+                    "type": "string"
+                },
+                "integrity_source": {
                     "type": "string"
                 },
                 "integrity_status": {

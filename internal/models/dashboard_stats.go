@@ -28,6 +28,10 @@ type ClientDashboardStats struct {
 	// Update setiap verify-table selesai
 	LastVerifiedAt     *time.Time `gorm:"type:timestamptz" json:"last_verified_at"`
 	LastVerifiedTable  string     `gorm:"type:varchar(255)" json:"last_verified_table"`
+	LastCheckAt        *time.Time `gorm:"column:last_integrity_check_at;type:timestamptz" json:"last_integrity_check_at"`
+	LastCheckSource    string     `gorm:"column:last_integrity_check_source;type:varchar(40);not null;default:''" json:"last_integrity_check_source"`
+	LastCheckRunID     string     `gorm:"column:last_integrity_check_run_id;type:varchar(36);default:''" json:"last_integrity_check_run_id"`
+	LastCheckLogs      int64      `gorm:"column:last_integrity_check_logs;type:bigint;not null;default:0" json:"last_integrity_check_logs"`
 	TotalVerifications int64      `gorm:"type:bigint;not null;default:0" json:"total_verifications"`
 	TotalRowsVerified  int64      `gorm:"type:bigint;not null;default:0" json:"total_rows_verified"`
 	TotalValid         int64      `gorm:"type:bigint;not null;default:0" json:"total_valid"`

@@ -8,6 +8,13 @@ const (
 	IntegrityStatusTampered    = "TAMPERED"
 	IntegrityStatusPending     = "PENDING"
 	IntegrityStatusUnreachable = "UNREACHABLE"
+
+	IntegritySourceTamperScanner   = "TAMPER_SCANNER"
+	IntegritySourceManualRange     = "MANUAL_VERIFY_RANGE"
+	IntegritySourceBackgroundRun   = "BACKGROUND_VERIFY_RUN"
+	IntegritySourceScheduledRun    = "SCHEDULED_VERIFY_RUN"
+	IntegritySourceManualSingleLog = "MANUAL_SINGLE_LOG"
+	IntegritySourceRecovery        = "RECOVERY"
 )
 
 // AuditLog merepresentasikan struktur metadata log transaksi
@@ -51,10 +58,12 @@ type AuditLog struct {
 	SnapshotLastError     string     `gorm:"type:text" json:"snapshot_last_error,omitempty"`
 
 	// Integrity verification is an operational cache and is never part of the
-	// canonical hash formula.
+	// canonical hash formula. Empty provenance means the result predates tracking.
 	IntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"integrity_status"`
 	IntegrityCheckedAt *time.Time `gorm:"index" json:"integrity_checked_at,omitempty"`
 	IntegrityError     string     `gorm:"type:text" json:"integrity_error,omitempty"`
+	IntegritySource    string     `gorm:"type:varchar(40);default:''" json:"integrity_source,omitempty"`
+	IntegrityRunID     string     `gorm:"type:varchar(36);default:''" json:"integrity_run_id,omitempty"`
 }
 
 type MerkleMetadata struct {
