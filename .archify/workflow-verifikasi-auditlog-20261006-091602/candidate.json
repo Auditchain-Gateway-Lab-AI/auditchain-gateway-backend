@@ -1,0 +1,133 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Alur Verifikasi AuditChain",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-verifikasi-auditlog-20261006-091602/alur-verifikasi.html",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "58577402d9a188a9814eba6bb36bf97e5b0705ff"
+    }
+  },
+  "lanes": [
+    { "id": "caller", "label": "Pemanggil" },
+    { "id": "gateway", "label": "AuditChain Gateway" },
+    { "id": "fabric", "label": "Hyperledger Fabric" }
+  ],
+  "phases": [
+    { "id": "database", "label": "1. Cek data di Gateway", "fromCol": 0, "toCol": 2 },
+    { "id": "blockchain", "label": "2. Cek bukti Fabric", "fromCol": 3, "toCol": 3, "variant": "emphasis" },
+    { "id": "source", "label": "3. Cek Agent bila perlu", "fromCol": 4, "toCol": 4 }
+  ],
+  "mainPath": [
+    "request",
+    "lookup",
+    "hash_check",
+    "fabric_read",
+    "proof_check",
+    "agent_check"
+  ],
+  "nodes": [
+    {
+      "id": "request",
+      "lane": "caller",
+      "col": 0,
+      "type": "external",
+      "label": "Minta cek satu log",
+      "sublabel": "Pilih log yang ingin dicek",
+      "width": 184,
+      "sources": [
+        { "path": "internal/modules/audit/router.go", "line": 9, "end_line": 18, "label": "Endpoint verifikasi" },
+        { "path": "internal/modules/audit/handler.go", "line": 49, "end_line": 72, "label": "Ambil client dari token" }
+      ]
+    },
+    {
+      "id": "lookup",
+      "lane": "gateway",
+      "col": 1,
+      "type": "database",
+      "label": "Cari log di PostgreSQL",
+      "sublabel": "Log harus milik client dari token",
+      "width": 184,
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 797, "end_line": 812, "label": "Cari log yang dicek" },
+        { "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 83, "label": "Cari log per client" }
+      ]
+    },
+    {
+      "id": "hash_check",
+      "lane": "gateway",
+      "col": 2,
+      "type": "backend",
+      "label": "Hitung ulang sidik jari",
+      "sublabel": "Hash beda = isi log berubah",
+      "width": 184,
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 814, "end_line": 825, "label": "Hitung dan bandingkan hash" },
+        { "path": "internal/engine/hasher/hasher.go", "line": 41, "end_line": 60, "label": "Rumus hash log" }
+      ]
+    },
+    {
+      "id": "fabric_read",
+      "lane": "fabric",
+      "col": 3,
+      "type": "external",
+      "label": "Ambil sidik jari dari Fabric",
+      "sublabel": "Pakai anchor ID; log harus anchored",
+      "width": 190,
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 828, "end_line": 852, "label": "Pastikan log sudah anchored; baca root" },
+        { "path": "internal/blockchain/fabric.go", "line": 214, "end_line": 223, "label": "Baca anchor Fabric" }
+      ]
+    },
+    {
+      "id": "proof_check",
+      "lane": "gateway",
+      "col": 3,
+      "type": "security",
+      "label": "Rangkai ulang bukti Merkle",
+      "sublabel": "Root harus sama dengan Fabric",
+      "width": 190,
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 847, "end_line": 894, "label": "Periksa root dan bukti" },
+        { "path": "internal/modules/audit/repository.go", "line": 86, "end_line": 89, "label": "Ambil bukti Merkle" }
+      ]
+    },
+    {
+      "id": "agent_check",
+      "lane": "gateway",
+      "col": 4,
+      "type": "backend",
+      "label": "Cek data client terbaru",
+      "sublabel": "Hanya log terbaru; RECOVERY dilewati",
+      "width": 210,
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 901, "end_line": 938, "label": "Syarat cek Agent" },
+        { "path": "internal/modules/audit/repository.go", "line": 128, "end_line": 138, "label": "Pilih event client terbaru" },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 179, "end_line": 252, "label": "Bandingkan data Agent" }
+      ]
+    }
+  ],
+  "edges": [
+    { "id": "request-lookup", "from": "request", "to": "lookup", "label": "ID log + client", "variant": "emphasis", "role": "main" },
+    { "id": "lookup-hash", "from": "lookup", "to": "hash_check", "label": "log ditemukan", "role": "main" },
+    { "id": "hash-fabric", "from": "hash_check", "to": "fabric_read", "label": "hash cocok", "variant": "emphasis", "role": "main" },
+    { "id": "fabric-proof", "from": "fabric_read", "to": "proof_check", "label": "root Fabric", "role": "main" },
+    { "id": "proof-agent", "from": "proof_check", "to": "agent_check", "label": "hash + root cocok", "variant": "emphasis", "role": "main" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Inti yang perlu diingat",
+      "items": [
+        "Tidak ada log = tidak ditemukan. Hash berbeda = isi log di Gateway berubah. Root tidak cocok = bukti DB tidak sesuai dengan Fabric.",
+        "Hash atau anchor yang belum siap berarti pending. Jika hash dan bukti Merkle cocok dengan Fabric, pemeriksaan utama lolos.",
+        "Agent hanya mengecek data client untuk event terbaru yang bukan RECOVERY. Agent unreachable atau data berbeda dilaporkan terpisah; hasil hash/Fabric tetap dinilai sendiri."
+      ]
+    }
+  ]
+}

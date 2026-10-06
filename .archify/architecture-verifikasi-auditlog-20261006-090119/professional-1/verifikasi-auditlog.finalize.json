@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "startedAt": "2026-10-06T02:52:55.001Z",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+    "sha256": "8fc324554a0d79e7dc334844ce52e5a2bccd3db38c731d0005d3b29b3a0eb184",
+    "bytes": 9612
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+    "sha256": "d5410332401fa99d8ebf967d5c8605e04d5fefb7708118a3ec92caaad6a344ab",
+    "bytes": 775709
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\Alleviate\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "9f111946-6ac5-41ca-881d-df46b751903b",
+        "stage": "render",
+        "type": "architecture",
+        "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+        "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+        "error": "Architecture layout validation failed:\n- Label \"Permintaan verifikasi\" has only 65px between \"caller\" and \"verify_api\"; it needs at least 127px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.\n- Label \"Permintaan API\" has only 70px between \"verify_api\" and \"verify_service\"; it needs at least 94px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+        "diagnostics": [
+          {
+            "code": "composition/label-gap",
+            "severity": "error",
+            "message": "Label \"Permintaan verifikasi\" has only 65px between \"caller\" and \"verify_api\"; it needs at least 127px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "id": "caller-request",
+              "from": "caller",
+              "to": "verify_api"
+            },
+            "evidence": {
+              "clearGapPx": 65,
+              "minimumGapPx": 127,
+              "labelWidthPx": 110.8,
+              "obstacles": [
+                "caller",
+                "verify_api"
+              ]
+            },
+            "supportedFixes": [
+              "increase the clear gap between the connected nodes to at least 127px",
+              "reposition the connected nodes together while preserving the full relationship label"
+            ]
+          },
+          {
+            "code": "composition/label-gap",
+            "severity": "error",
+            "message": "Label \"Permintaan API\" has only 70px between \"verify_api\" and \"verify_service\"; it needs at least 94px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "id": "api-to-service",
+              "from": "verify_api",
+              "to": "verify_service"
+            },
+            "evidence": {
+              "clearGapPx": 70,
+              "minimumGapPx": 94,
+              "labelWidthPx": 77.2,
+              "obstacles": [
+                "verify_api",
+                "verify_service"
+              ]
+            },
+            "supportedFixes": [
+              "increase the clear gap between the connected nodes to at least 94px",
+              "reposition the connected nodes together while preserving the full relationship label"
+            ]
+          }
+        ],
+        "provenance": "failed",
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "composition/label-gap",
+      "severity": "error",
+      "message": "Label \"Permintaan verifikasi\" has only 65px between \"caller\" and \"verify_api\"; it needs at least 127px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "id": "caller-request",
+        "from": "caller",
+        "to": "verify_api"
+      },
+      "evidence": {
+        "clearGapPx": 65,
+        "minimumGapPx": 127,
+        "labelWidthPx": 110.8,
+        "obstacles": [
+          "caller",
+          "verify_api"
+        ]
+      },
+      "supportedFixes": [
+        "increase the clear gap between the connected nodes to at least 127px",
+        "reposition the connected nodes together while preserving the full relationship label"
+      ]
+    },
+    {
+      "code": "composition/label-gap",
+      "severity": "error",
+      "message": "Label \"Permintaan API\" has only 70px between \"verify_api\" and \"verify_service\"; it needs at least 94px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "id": "api-to-service",
+        "from": "verify_api",
+        "to": "verify_service"
+      },
+      "evidence": {
+        "clearGapPx": 70,
+        "minimumGapPx": 94,
+        "labelWidthPx": 77.2,
+        "obstacles": [
+          "verify_api",
+          "verify_service"
+        ]
+      },
+      "supportedFixes": [
+        "increase the clear gap between the connected nodes to at least 94px",
+        "reposition the connected nodes together while preserving the full relationship label"
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-1\\verifikasi-auditlog.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-1\\verifikasi-auditlog.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-06T02:52:56.005Z",
+  "durationMs": 1004,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  }
+}

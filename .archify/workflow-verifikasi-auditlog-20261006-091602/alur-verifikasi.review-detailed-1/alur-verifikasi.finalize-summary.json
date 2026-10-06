@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\candidate.json",
+    "sha256": "d67efd6d623d83122d203f92b5a6e703576a46d618b8f3c6fcba40b1de48e592",
+    "bytes": 5469
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\alur-verifikasi.html",
+    "sha256": "c641b6c8ec23c6d363d874971b46d46f66177c13578500d4597c3dd66b5e49cd",
+    "bytes": 755657
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "layout/constraint",
+      "severity": "error",
+      "message": "Sublabel \"GET /api/dashboard/verify/{log_id}; client dari token login\" needs ~213px at the 6px legible minimum, but node \"request\" provides 176px — shorten the sublabel or increase node.width.",
+      "subject": {
+        "diagramType": "workflow"
+      }
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 1,
+    "shown": 1,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\alur-verifikasi.review-detailed-1\\alur-verifikasi.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\alur-verifikasi.review-detailed-1\\alur-verifikasi.finalize-summary.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 866,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\candidate.json",
+    "constraint": "Preserve unaffected semantics and geometry; do not replace the whole candidate.",
+    "then": "finalize-once"
+  }
+}

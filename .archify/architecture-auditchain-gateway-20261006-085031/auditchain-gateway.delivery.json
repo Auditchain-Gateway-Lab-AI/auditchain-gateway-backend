@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "f6c2d6fb-f6d2-4dd6-8a8b-9460e60f5c16",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-auditchain-gateway-20261006-085031\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-auditchain-gateway-20261006-085031\\auditchain-gateway.html",
+  "specification": {
+    "sha256": "8f4cb99cd213d28bacbe8c65af197358ad97e2a2ad6ec2c7726f973b1991e5d3",
+    "bytes": 7728
+  },
+  "artifact": {
+    "sha256": "a9754f9f71e6298841227ee470bad61d4c73ff288ac8f1fb73c5e45429b8f6bf",
+    "bytes": 770087
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Arsitektur AuditChain Gateway",
+    "subtitle": "Jalur CDC, verifikasi PostgreSQL–Fabric, dan pemulihan data klien melalui Agent; dependency di luar repository ditandai.",
+    "output": ".archify/architecture-auditchain-gateway-20261006-085031/auditchain-gateway.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "58577402d9a188a9814eba6bb36bf97e5b0705ff"
+    },
+    "views": [
+      {
+        "id": "ingest-anchor",
+        "label": "CDC → Fabric",
+        "focus": ["kafka_broker", "kafka_consumer", "postgres", "pipeline", "fabric"],
+        "note": "Consumer menyimpan event ke PostgreSQL sebelum hashing, agregasi Merkle, dan anchoring."
+      },
+      {
+        "id": "verify-recovery",
+        "label": "Verifikasi & recovery",
+        "focus": ["api_clients", "gateway_api", "postgres", "fabric", "agent", "client_data"],
+        "note": "Recovery memanggil Agent; event CDC hasilnya kembali melalui jalur Kafka normal."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "kafka_broker",
+      "type": "messagebus",
+      "label": "Kafka broker",
+      "sublabel": "Per-client brokers dan topics",
+      "pos": [40, 120],
+      "size": [165, 82],
+      "sources": [
+        { "path": "internal/engine/kafkaconsumer/consumer.go", "line": 95, "end_line": 143, "label": "Client config" },
+        { "path": "internal/engine/kafkaconsumer/consumer.go", "line": 166, "end_line": 224, "label": "Broker/topics" }
+      ]
+    },
+    {
+      "id": "kafka_consumer",
+      "type": "backend",
+      "label": "Kafka consumer",
+      "sublabel": "Consume CDC; persist audit log dan offset",
+      "pos": [285, 120],
+      "size": [175, 90],
+      "sources": [
+        { "path": "internal/engine/kafkaconsumer/consumer.go", "line": 303, "end_line": 350, "label": "Parse CDC" },
+        { "path": "internal/engine/kafkaconsumer/consumer.go", "line": 521, "end_line": 639, "label": "Persist log/offset" }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "Audit logs • Merkle proofs • recovery state",
+      "pos": [540, 120],
+      "size": [185, 118],
+      "sources": [
+        { "path": "internal/config/database.go", "line": 12, "end_line": 38, "label": "Postgres + models" }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Pipeline workers",
+      "sublabel": "SHA3 hash • Merkle • recovery CDC reconcile",
+      "pos": [820, 120],
+      "size": [190, 100],
+      "sources": [
+        { "path": "main.go", "line": 266, "end_line": 330, "label": "Worker loops" },
+        { "path": "internal/engine/hasher/hasher.go", "line": 41, "end_line": 90, "label": "Hashing" },
+        { "path": "internal/engine/aggregator/aggregator.go", "line": 33, "end_line": 193, "label": "Merkle batches" }
+      ]
+    },
+    {
+      "id": "fabric",
+      "type": "external",
+      "label": "Hyperledger Fabric",
+      "sublabel": "Chaincode • Merkle root anchors",
+      "pos": [1110, 120],
+      "size": [165, 100],
+      "sources": [
+        { "path": "internal/blockchain/fabric.go", "line": 118, "end_line": 222, "label": "Store/query root" }
+      ]
+    },
+    {
+      "id": "api_clients",
+      "type": "external",
+      "label": "HTTP API callers",
+      "sublabel": "Clients of the Gateway API",
+      "pos": [285, 390],
+      "size": [165, 76],
+      "sources": [
+        { "path": "internal/api/router.go", "line": 57, "end_line": 65, "label": "API routes" }
+      ]
+    },
+    {
+      "id": "gateway_api",
+      "type": "backend",
+      "label": "AuditChain Gateway",
+      "sublabel": "Gin API • audit verify • direct client recovery",
+      "pos": [540, 370],
+      "size": [185, 112],
+      "sources": [
+        { "path": "internal/api/router.go", "line": 24, "end_line": 65, "label": "Route wiring" },
+        { "path": "internal/modules/audit/service.go", "line": 797, "end_line": 937, "label": "Verify path" },
+        { "path": "internal/modules/recovery/direct_recovery.go", "line": 338, "end_line": 475, "label": "Direct recovery" }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Configured client Agent",
+      "sublabel": "Gateway read and recovery calls",
+      "pos": [820, 390],
+      "size": [190, 92],
+      "sources": [
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 78, "end_line": 126, "label": "Verify call" },
+        { "path": "internal/blockchain/agentverifier/recovery.go", "line": 79, "end_line": 175, "label": "Read/recover API" }
+      ]
+    },
+    {
+      "id": "client_data",
+      "type": "external",
+      "label": "Client operational data",
+      "sublabel": "Client row behind the Agent",
+      "pos": [1110, 390],
+      "size": [165, 90],
+      "sources": [
+        { "path": "internal/modules/recovery/direct_recovery.go", "line": 167, "end_line": 189, "label": "Read client row" },
+        { "path": "internal/blockchain/agentverifier/recovery.go", "line": 99, "end_line": 123, "label": "Agent command" }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "broker-consumer", "from": "kafka_broker", "to": "kafka_consumer", "label": "CDC" },
+    { "id": "consumer-postgres", "from": "kafka_consumer", "to": "postgres", "label": "persist" },
+    { "id": "postgres-pipeline-input", "from": "postgres", "to": "pipeline", "label": "pending work" },
+    { "id": "pipeline-postgres-output", "from": "pipeline", "to": "postgres", "label": "hash / proofs" },
+    { "id": "pipeline-fabric", "from": "pipeline", "to": "fabric", "label": "anchor root" },
+    {
+      "id": "postgres-consumer-config",
+      "from": "postgres",
+      "to": "kafka_consumer",
+      "label": "client config",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [[632.5, 278], [372.5, 278]]
+    },
+    { "id": "caller-gateway", "from": "api_clients", "to": "gateway_api", "label": "HTTP /api" },
+    { "id": "gateway-postgres", "from": "gateway_api", "to": "postgres", "label": "read / write", "fromSide": "top", "toSide": "bottom" },
+    {
+      "id": "gateway-fabric-query",
+      "from": "gateway_api",
+      "to": "fabric",
+      "label": "QueryMerkleRoot",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    { "id": "gateway-agent", "from": "gateway_api", "to": "agent", "label": "Agent API" },
+    { "id": "agent-client-data", "from": "agent", "to": "client_data", "label": "row access" },
+    {
+      "id": "client-data-cdc-return",
+      "from": "client_data",
+      "to": "kafka_broker",
+      "label": "recovery CDC",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [[1192.5, 560], [20, 560], [20, 161]]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Bukti on-chain",
+      "items": [
+        "Fabric menyimpan Merkle root dan metadata anchor; payload audit dan proof tetap dibaca dari PostgreSQL.",
+        "Verifikasi Gateway menghitung ulang hash lokal, merekonstruksi root dari proof, lalu membandingkannya dengan root hasil query Fabric."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Batas recovery langsung",
+      "items": [
+        "Gateway tidak mengirim SQL ke database klien; pembacaan dan perintah pemulihan melewati Agent yang dikonfigurasi.",
+        "Hasil Agent belum menutup recovery: Gateway menunggu CDC yang cocok, meng-anchor RecoveryEvent, lalu memverifikasi event tersebut."
+      ]
+    }
+  ]
+}

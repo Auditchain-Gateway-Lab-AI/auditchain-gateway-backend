@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "e2985b75-0cab-4a44-aecf-14382eaceb0b",
+  "status": "failed",
+  "command": "deliver",
+  "stage": "check",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-auditlog-20261006-091602\\alur-verifikasi.html",
+  "artifact": {
+    "sha256": "c641b6c8ec23c6d363d874971b46d46f66177c13578500d4597c3dd66b5e49cd",
+    "bytes": 755657
+  },
+  "error": "Final artifact check failed; the previous artifact was preserved."
+}

@@ -1,0 +1,345 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "startedAt": "2026-10-06T02:53:21.948Z",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+    "sha256": "0a6b9d9cad3fe901eaa87bc94660f661dcede3d55014521c4595963e5e2367e3",
+    "bytes": 9582
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+    "sha256": "d5410332401fa99d8ebf967d5c8605e04d5fefb7708118a3ec92caaad6a344ab",
+    "bytes": 775709
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\Alleviate\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "bdf0af7d-ce21-478c-b545-75d1a74f7b25",
+        "stage": "check",
+        "type": "architecture",
+        "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+        "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+        "error": "Final artifact check failed; the previous artifact was preserved.",
+        "diagnostics": [
+          {
+            "code": "composition/desktop-readability",
+            "severity": "error",
+            "message": "Final artifact failed composition/desktop-readability.",
+            "subject": {
+              "check": "composition",
+              "nodeId": "client_agent"
+            },
+            "evidence": {
+              "owner": {
+                "kind": "node",
+                "id": "client_agent"
+              },
+              "viewportWidth": 1440,
+              "viewportHeight": 900,
+              "availableDiagramWidth": 930,
+              "budgetBasis": "legacy-930",
+              "readerContract": "declared-wide-v1",
+              "requestedTargetPx": 7.5,
+              "requestedTargetMet": false,
+              "budgetLimit": "legacy",
+              "viewBoxWidth": 1420,
+              "scale": 0.6549295774647887,
+              "text": "Baca record via GET /verify/{table}/{id}",
+              "detail": "context",
+              "sourceFontPx": 8,
+              "projectedFontPx": 5.23943661971831,
+              "minimumProjectedFontPx": 6
+            },
+            "supportedFixes": [
+              "Preserve the semantic text and any supplied coordinates, routes, sides, channels, and labels. Compactly reflow automatic spacing and empty corridors so the complete viewBox width is at most 1240px (current 1420px; 8px source text at 930px desktop budget). If supplied geometry fixes that width, use a renderer-supported semantic text-size setting or renderer-level fix instead. Position-only label controls cannot repair its projection."
+            ]
+          }
+        ],
+        "provenance": "failed",
+        "checker": {
+          "ok": false,
+          "file": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+          "artifact": {
+            "sha256": "98476bb1647556ad4e5ee19c432d1eac51f6a9c3291ee8ccd1579b2c2cbec117",
+            "bytes": 777921
+          },
+          "checks": [
+            {
+              "name": "single_svg",
+              "ok": true,
+              "details": [
+                "found 1 <svg> block(s)"
+              ]
+            },
+            {
+              "name": "finite_svg",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "orthogonal_arrows",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "label_route_clearance",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "relationship_crossings",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "relationship_corridors",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "container_border_runs",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "route_rhythm",
+              "ok": true,
+              "details": []
+            },
+            {
+              "name": "legend_clearance",
+              "ok": true,
+              "details": []
+            }
+          ],
+          "composition": {
+            "schemaVersion": 1,
+            "profile": "showcase",
+            "status": "fail",
+            "summary": {
+              "errors": 1,
+              "warnings": 0
+            },
+            "metrics": {
+              "properCrossings": 0,
+              "resolvedCrossovers": 1,
+              "ambiguousCorridors": 0,
+              "arrowheadCollisions": 0,
+              "containerBorderRuns": 0,
+              "labelRouteClearanceIssues": 0,
+              "labelCanvasOverflowIssues": 0,
+              "minLabelRouteClearance": 5,
+              "desktopReadabilityIssues": 1,
+              "viewportHeightIssues": 0,
+              "minProjectedNodeTextPx": 5.23943661971831,
+              "maxBends": 4,
+              "routesOverSuggestedBends": 1,
+              "maxStretch": 1.257,
+              "routesOverSuggestedStretch": 0,
+              "minSegmentPx": 24,
+              "minInteriorSegmentPx": 43,
+              "shortSegmentCount": 0,
+              "shortEndpointSegmentCount": 0,
+              "shortInteriorSegmentCount": 0,
+              "microSegmentCount": 0
+            },
+            "suggestedLimits": {
+              "bendsPerRelationship": 2,
+              "stretch": 1.35,
+              "segmentPx": 16,
+              "microSegmentPx": 8
+            },
+            "routeReview": {
+              "crossings": [
+                {
+                  "left": {
+                    "id": "hash-to-proof",
+                    "from": "leaf_hash",
+                    "to": "proof_check",
+                    "label": "Hash log",
+                    "collectionIndex": 4,
+                    "artifactIndex": 5
+                  },
+                  "right": {
+                    "id": "service-to-agent-gate",
+                    "from": "verify_service",
+                    "to": "latest_gate",
+                    "label": "Cari event terbaru",
+                    "collectionIndex": 9,
+                    "artifactIndex": 10
+                  },
+                  "point": [
+                    524.95,
+                    637.5
+                  ]
+                }
+              ],
+              "detours": [
+                {
+                  "relationship": {
+                    "id": "service-to-agent-gate",
+                    "from": "verify_service",
+                    "to": "latest_gate",
+                    "label": "Cari event terbaru",
+                    "collectionIndex": 9,
+                    "artifactIndex": 10
+                  },
+                  "bends": 4,
+                  "stretch": 1.257
+                }
+              ]
+            },
+            "leadingSpace": {
+              "measured": true,
+              "emptyTopPx": 95,
+              "emptyTopRatio": 0.094,
+              "occupiedTop": 95,
+              "viewBoxTop": 0,
+              "canvasHeight": 1008,
+              "typicalNodeHeight": 120,
+              "reviewSuggested": false
+            },
+            "desktopReadability": {
+              "budgetBasis": "legacy-930",
+              "readerContract": "declared-wide-v1",
+              "availableDiagramWidth": 930,
+              "actualBudgetPx": 930,
+              "limit": "legacy",
+              "requestedTargetPx": 7.5,
+              "requestedTargetMet": false,
+              "hardFloorPx": 6,
+              "hardFloorMet": false,
+              "minimumOwner": {
+                "kind": "node",
+                "id": "client_agent"
+              },
+              "minimumSourceTextPx": 8,
+              "minimumProjectedTextPx": 5.23943661971831,
+              "semanticTextCount": 33
+            },
+            "issues": [
+              {
+                "severity": "error",
+                "code": "composition/desktop-readability",
+                "nodeId": "client_agent",
+                "owner": {
+                  "kind": "node",
+                  "id": "client_agent"
+                },
+                "viewportWidth": 1440,
+                "viewportHeight": 900,
+                "availableDiagramWidth": 930,
+                "budgetBasis": "legacy-930",
+                "readerContract": "declared-wide-v1",
+                "requestedTargetPx": 7.5,
+                "requestedTargetMet": false,
+                "budgetLimit": "legacy",
+                "viewBoxWidth": 1420,
+                "scale": 0.6549295774647887,
+                "text": "Baca record via GET /verify/{table}/{id}",
+                "detail": "context",
+                "sourceFontPx": 8,
+                "projectedFontPx": 5.23943661971831,
+                "minimumProjectedFontPx": 6
+              }
+            ]
+          }
+        },
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "composition/desktop-readability",
+      "severity": "error",
+      "message": "Final artifact failed composition/desktop-readability.",
+      "subject": {
+        "check": "composition",
+        "nodeId": "client_agent"
+      },
+      "evidence": {
+        "owner": {
+          "kind": "node",
+          "id": "client_agent"
+        },
+        "viewportWidth": 1440,
+        "viewportHeight": 900,
+        "availableDiagramWidth": 930,
+        "budgetBasis": "legacy-930",
+        "readerContract": "declared-wide-v1",
+        "requestedTargetPx": 7.5,
+        "requestedTargetMet": false,
+        "budgetLimit": "legacy",
+        "viewBoxWidth": 1420,
+        "scale": 0.6549295774647887,
+        "text": "Baca record via GET /verify/{table}/{id}",
+        "detail": "context",
+        "sourceFontPx": 8,
+        "projectedFontPx": 5.23943661971831,
+        "minimumProjectedFontPx": 6
+      },
+      "supportedFixes": [
+        "Preserve the semantic text and any supplied coordinates, routes, sides, channels, and labels. Compactly reflow automatic spacing and empty corridors so the complete viewBox width is at most 1240px (current 1420px; 8px source text at 930px desktop budget). If supplied geometry fixes that width, use a renderer-supported semantic text-size setting or renderer-level fix instead. Position-only label controls cannot repair its projection."
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-2\\verifikasi-auditlog.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-2\\verifikasi-auditlog.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-06T02:53:23.084Z",
+  "durationMs": 1136,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  }
+}

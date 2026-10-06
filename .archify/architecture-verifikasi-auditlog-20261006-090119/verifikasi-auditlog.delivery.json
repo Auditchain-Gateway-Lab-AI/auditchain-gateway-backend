@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "6766458d-b8fe-4466-aaf3-863db34e66d5",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+  "specification": {
+    "sha256": "5336821959c66c52b594cddaff4524e93fccf838bec6a9d12301636d76ac6751",
+    "bytes": 9596
+  },
+  "artifact": {
+    "sha256": "048371e6dd24d0a5f1665d415b271f58304aaa800b5727c45da2d603790bb1d6",
+    "bytes": 785635
+  }
+}

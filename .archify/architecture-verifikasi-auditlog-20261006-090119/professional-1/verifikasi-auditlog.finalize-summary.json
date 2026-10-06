@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+    "sha256": "8fc324554a0d79e7dc334844ce52e5a2bccd3db38c731d0005d3b29b3a0eb184",
+    "bytes": 9612
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\verifikasi-auditlog.html",
+    "sha256": "d5410332401fa99d8ebf967d5c8605e04d5fefb7708118a3ec92caaad6a344ab",
+    "bytes": 775709
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "composition/label-gap",
+      "severity": "error",
+      "message": "Label \"Permintaan verifikasi\" has only 65px between \"caller\" and \"verify_api\"; it needs at least 127px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "id": "caller-request",
+        "from": "caller",
+        "to": "verify_api"
+      },
+      "evidence": {
+        "clearGapPx": 65,
+        "minimumGapPx": 127,
+        "labelWidthPx": 110.8,
+        "obstacles": [
+          "caller",
+          "verify_api"
+        ]
+      },
+      "supportedFixes": [
+        "increase the clear gap between the connected nodes to at least 127px",
+        "reposition the connected nodes together while preserving the full relationship label"
+      ]
+    },
+    {
+      "code": "composition/label-gap",
+      "severity": "error",
+      "message": "Label \"Permintaan API\" has only 70px between \"verify_api\" and \"verify_service\"; it needs at least 94px to stay beside its route — increase that clear gap or place the connected nodes on another readable row, preserving the label.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "id": "api-to-service",
+        "from": "verify_api",
+        "to": "verify_service"
+      },
+      "evidence": {
+        "clearGapPx": 70,
+        "minimumGapPx": 94,
+        "labelWidthPx": 77.2,
+        "obstacles": [
+          "verify_api",
+          "verify_service"
+        ]
+      },
+      "supportedFixes": [
+        "increase the clear gap between the connected nodes to at least 94px",
+        "reposition the connected nodes together while preserving the full relationship label"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 2,
+    "shown": 2,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-1\\verifikasi-auditlog.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\professional-1\\verifikasi-auditlog.finalize-summary.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1004,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\architecture-verifikasi-auditlog-20261006-090119\\candidate.json",
+    "constraint": "Preserve all semantics and user-fixed geometry. Use references/architecture-layout-repair.md to choose a local repair or connected-scene reflow; edit the existing candidate.",
+    "then": "finalize-once"
+  }
+}

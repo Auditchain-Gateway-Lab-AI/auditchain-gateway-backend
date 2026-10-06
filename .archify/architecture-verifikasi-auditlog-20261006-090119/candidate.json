@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Arsitektur Verifikasi AuditChain",
+    "subtitle": "Gateway mencocokkan hash log dan bukti Fabric; Agent memeriksa data sumber bila memenuhi syarat.",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "output": ".archify/architecture-verifikasi-auditlog-20261006-090119/verifikasi-auditlog.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "58577402d9a188a9814eba6bb36bf97e5b0705ff"
+    },
+    "views": [
+      {
+        "id": "base-integrity",
+        "label": "Hash + Fabric",
+        "focus": ["verify_api", "verify_service", "postgres", "leaf_hash", "fabric_ledger", "proof_check"],
+        "note": "Pemeriksaan inti: hitung ulang hash dan cocokkan bukti Merkle PostgreSQL dengan root anchor Fabric."
+      },
+      {
+        "id": "source-check",
+        "label": "Data client (tambahan)",
+        "focus": ["verify_service", "postgres", "latest_gate", "agent_client", "client_agent"],
+        "note": "Agent hanya dicek untuk event client terbaru, bukan RECOVERY. Statusnya terpisah dari hasil hash dan Fabric."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "Portal AuditChain",
+      "sublabel": "Memulai verifikasi",
+      "icon": "frontend",
+      "tag": "Dashboard",
+      "pos": [15, 360],
+      "size": [150, 90],
+      "sources": [
+        { "path": "internal/modules/audit/router.go", "line": 9, "end_line": 18, "label": "Verify route" }
+      ]
+    },
+    {
+      "id": "verify_api",
+      "type": "security",
+      "label": "API Verifikasi",
+      "sublabel": "JWT membatasi akses client",
+      "icon": "security",
+      "tag": "GET /dashboard/verify/:log_id",
+      "pos": [230, 360],
+      "size": [180, 115],
+      "sources": [
+        { "path": "internal/modules/audit/router.go", "line": 9, "end_line": 18, "label": "Rute verifikasi" },
+        { "path": "internal/modules/audit/handler.go", "line": 49, "end_line": 72, "label": "Ambil identitas client" },
+        { "path": "internal/modules/audit/handler.go", "line": 149, "end_line": 224, "label": "Kirim hasil cek" }
+      ]
+    },
+    {
+      "id": "verify_service",
+      "type": "backend",
+      "label": "Layanan Verifikasi Go",
+      "sublabel": "Mengatur urutan pemeriksaan",
+      "icon": "backend",
+      "brand": "go",
+      "tag": "Audit module",
+      "pos": [480, 360],
+      "size": [205, 120],
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 616, "end_line": 632, "label": "Mulai pemeriksaan" },
+        { "path": "internal/modules/audit/service.go", "line": 797, "end_line": 952, "label": "Urutan pemeriksaan" }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "Off-chain · log + bukti Merkle",
+      "icon": "database",
+      "brand": "postgresql",
+      "tag": "Data referensi",
+      "pos": [480, 95],
+      "size": [205, 120],
+      "sources": [
+        { "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 89, "label": "Ambil log dan proof" },
+        { "path": "internal/modules/audit/repository.go", "line": 128, "end_line": 138, "label": "Cari log client terbaru" },
+        { "path": "internal/modules/audit/service.go", "line": 779, "end_line": 795, "label": "Simpan hasil cek" }
+      ]
+    },
+    {
+      "id": "leaf_hash",
+      "type": "backend",
+      "label": "Hash Engine",
+      "sublabel": "Hitung ulang sidik jari log",
+      "icon": "security",
+      "tag": "SHA3-256",
+      "pos": [280, 580],
+      "size": [190, 115],
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 814, "end_line": 825, "label": "Hitung dan bandingkan hash" },
+        { "path": "internal/engine/hasher/hasher.go", "line": 41, "end_line": 60, "label": "Isi yang dipakai untuk hash" }
+      ]
+    },
+    {
+      "id": "fabric_ledger",
+      "type": "external",
+      "label": "Hyperledger Fabric",
+      "sublabel": "On-chain · root anchor",
+      "icon": "external",
+      "tag": "Acuan root",
+      "pos": [1000, 360],
+      "size": [190, 110],
+      "sources": [
+        { "path": "internal/blockchain/fabric.go", "line": 214, "end_line": 223, "label": "Baca root anchor" }
+      ]
+    },
+    {
+      "id": "proof_check",
+      "type": "backend",
+      "label": "Verifikasi Bukti Merkle",
+      "sublabel": "Susun ulang root dari hash + proof",
+      "icon": "security",
+      "tag": "Root comparison",
+      "pos": [650, 580],
+      "size": [210, 125],
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 847, "end_line": 894, "label": "Cocokkan root dan proof" },
+        { "path": "internal/modules/audit/repository.go", "line": 86, "end_line": 89, "label": "Ambil potongan proof" }
+      ]
+    },
+    {
+      "id": "latest_gate",
+      "type": "backend",
+      "label": "Syarat Cek Agent",
+      "sublabel": "Event client terbaru; RECOVERY dilewati",
+      "icon": "security",
+      "tag": "Opsional",
+      "pos": [365, 800],
+      "size": [220, 120],
+      "sources": [
+        { "path": "internal/modules/audit/service.go", "line": 901, "end_line": 938, "label": "Syarat cek Agent" },
+        { "path": "internal/modules/audit/service.go", "line": 1741, "end_line": 1760, "label": "Lewati log RECOVERY" },
+        { "path": "internal/modules/audit/repository.go", "line": 128, "end_line": 138, "label": "Cari event client terbaru" }
+      ]
+    },
+    {
+      "id": "agent_client",
+      "type": "backend",
+      "label": "Agent Verifier Gateway",
+      "sublabel": "Bandingkan data Agent dengan log",
+      "icon": "backend",
+      "tag": "Layer 3",
+      "pos": [720, 800],
+      "size": [220, 120],
+      "sources": [
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 88, "end_line": 123, "label": "Konfigurasi cara cek" },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 179, "end_line": 252, "label": "Bandingkan data resource" },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 416, "end_line": 474, "label": "Bandingkan audit trail" }
+      ]
+    },
+    {
+      "id": "client_agent",
+      "type": "external",
+      "label": "Agent di jaringan client",
+      "sublabel": "Baca record via GET /verify/{table}/{id}",
+      "icon": "external",
+      "tag": "Data sumber",
+      "pos": [1000, 800],
+      "size": [200, 115],
+      "sources": [
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 255, "end_line": 300, "label": "Baca data dari Agent" },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 402, "end_line": 408, "label": "Alamat endpoint" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "AuditChain Gateway · proses Go",
+      "wraps": ["verify_api", "verify_service", "leaf_hash", "proof_check", "latest_gate", "agent_client"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    { "id": "caller-request", "from": "caller", "to": "verify_api", "label": "GET", "variant": "emphasis" },
+    { "id": "api-to-service", "from": "verify_api", "to": "verify_service", "label": "ID" },
+    { "id": "service-to-postgres", "from": "verify_service", "to": "postgres", "label": "Baca log + proof", "fromSide": "top", "toSide": "bottom" },
+    { "id": "service-to-hash", "from": "verify_service", "to": "leaf_hash", "label": "Kanonisasi isi log" },
+    { "id": "hash-to-proof", "from": "leaf_hash", "to": "proof_check", "label": "Hash log", "variant": "emphasis" },
+    { "id": "service-to-fabric", "from": "verify_service", "to": "fabric_ledger", "label": "Query anchor ID", "variant": "security" },
+    { "id": "fabric-to-proof", "from": "fabric_ledger", "to": "proof_check", "label": "Root on-chain" },
+    { "id": "service-to-proof", "from": "verify_service", "to": "proof_check", "label": "Proof dari DB" },
+    { "id": "proof-to-agent-gate", "from": "proof_check", "to": "latest_gate", "label": "Hash + root cocok" },
+    { "id": "service-to-agent-gate", "from": "verify_service", "to": "latest_gate", "label": "Cari event terbaru", "variant": "dashed" },
+    { "id": "gate-to-agent-verifier", "from": "latest_gate", "to": "agent_client", "label": "Event client terbaru", "variant": "security" },
+    { "id": "agent-verifier-to-client-agent", "from": "agent_client", "to": "client_agent", "label": "GET", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Pemeriksaan inti · hash + Fabric",
+      "items": [
+        "API memakai identitas client dari JWT untuk mengambil log dan bukti Merkle di PostgreSQL.",
+        "Hash Engine menghitung ulang SHA3-256 dari isi log. Hash berbeda berarti isi log lokal berubah.",
+        "Backend membaca root anchor dari Fabric dan menyusun ulang bukti Merkle. Root hasilnya harus sama dengan root on-chain."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Pemeriksaan sumber · Agent client",
+      "items": [
+        "Pemeriksaan Agent berjalan setelah hash dan bukti Fabric lolos; hanya event client terbaru yang dibandingkan. RECOVERY dilewati.",
+        "Gateway meminta Agent membaca record aktual dengan GET /verify/{table}/{id}, lalu membandingkannya dengan log.",
+        "Status cocok, berbeda, atau tidak terhubung dilaporkan terpisah. Agent terputus tidak otomatis berarti bukti hash/Fabric rusak."
+      ]
+    }
+  ]
+}
