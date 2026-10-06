@@ -101,7 +101,7 @@ func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
 	}}
 
 	service := &auditService{repo: repo}
-	summary, loaded, err := service.VerifyRangeBatch(time.Time{}, time.Time{}, "client-1", "batch-test", 1, 1)
+	summary, loaded, err := service.VerifyRangeBatch(time.Time{}, time.Time{}, "client-1", "batch-test", "run-1", models.IntegritySourceScheduledRun, 1, 1)
 	if err != nil {
 		t.Fatalf("batch verification returned error: %v", err)
 	}
@@ -110,5 +110,23 @@ func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
 	}
 	if summary.Total != 1 || summary.Pending != 1 || summary.AlreadyVerified != 1 || summary.VerifiedNow != 0 {
 		t.Fatalf("unexpected batch summary: %+v", summary)
+	}
+}
+
+func TestIntegritySourceForVerificationRun(t *testing.T) {
+	tests := []struct {
+		requestedBy string
+		want        string
+	}{
+		{requestedBy: "system:scheduler", want: models.IntegritySourceScheduledRun},
+		{requestedBy: " SYSTEM:SCHEDULER ", want: models.IntegritySourceScheduledRun},
+		{requestedBy: "user-123", want: models.IntegritySourceBackgroundRun},
+		{requestedBy: "", want: models.IntegritySourceBackgroundRun},
+	}
+
+	for _, test := range tests {
+		if got := integritySourceForVerificationRun(test.requestedBy); got != test.want {
+			t.Errorf("integritySourceForVerificationRun(%q) = %q, want %q", test.requestedBy, got, test.want)
+		}
 	}
 }
