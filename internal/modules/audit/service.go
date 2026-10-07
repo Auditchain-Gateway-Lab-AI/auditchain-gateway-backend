@@ -1356,16 +1356,17 @@ func (s *auditService) ensureTamperIncident(auditLog models.AuditLog, incidentTy
 		return nil, fmt.Errorf("%w: lookup active incident: %v", errIncidentPersistence, err)
 	}
 	incident := &models.TamperIncident{
-		ID:            uuid.NewString(),
-		ClientID:      auditLog.ClientID,
-		LogID:         auditLog.LogID,
-		Resource:      auditLog.Resource,
-		IncidentType:  incidentType,
-		ExpectedHash:  auditLog.HashValue,
-		DetectedHash:  detectedHash,
-		Status:        models.IncidentStatusOpen,
-		IncidentScope: models.RecoveryScopeGatewayIntegrity,
-		DetectedAt:    time.Now().UTC(),
+		ID:                 uuid.NewString(),
+		ClientID:           auditLog.ClientID,
+		LogID:              auditLog.LogID,
+		Resource:           auditLog.Resource,
+		IncidentType:       incidentType,
+		ExpectedHash:       auditLog.HashValue,
+		DetectedHash:       detectedHash,
+		DiscrepancySummary: "[]",
+		Status:             models.IncidentStatusOpen,
+		IncidentScope:      models.RecoveryScopeGatewayIntegrity,
+		DetectedAt:         time.Now().UTC(),
 	}
 	if err := s.db.Create(incident).Error; err != nil {
 		// The partial unique index makes concurrent verification idempotent. If
