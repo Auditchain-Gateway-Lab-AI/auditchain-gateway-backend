@@ -259,24 +259,18 @@ func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (in
 	}
 
 	// AuditLog.Metadata is stored as a JSON string, but accepting an object as
-	// well keeps this reader compatible with older evidence formats.
+	// well keeps this reader compatible with older evidence formats. Both paths
+	// must pass through the same redaction policy before evidence reaches a UI.
+	metadataJSON := payload.Metadata
 	var encodedMetadata string
 	if err := json.Unmarshal(payload.Metadata, &encodedMetadata); err == nil {
-		if encodedMetadata == "" {
+		if strings.TrimSpace(encodedMetadata) == "" {
 			return nil, nil
 		}
-		var metadata interface{}
-		if err := json.Unmarshal([]byte(encodedMetadata), &metadata); err != nil {
-			return encodedMetadata, nil
-		}
-		return metadata, nil
+		metadataJSON = []byte(encodedMetadata)
 	}
 
-	var metadata interface{}
-	if err := json.Unmarshal(payload.Metadata, &metadata); err != nil {
-		return nil, err
-	}
-	redacted, err := redaction.JSON(mustMarshalJSON(metadata))
+	redacted, err := redaction.JSON(metadataJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -285,14 +279,6 @@ func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (in
 		return nil, err
 	}
 	return safe, nil
-}
-
-func mustMarshalJSON(value interface{}) []byte {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return []byte("null")
-	}
-	return encoded
 }
 
 func (s *Service) ListRequests(ctx context.Context, clientID, status string) ([]models.RecoveryRequest, error) {
