@@ -478,12 +478,25 @@ func fetchAuditTrailCandidatesFromAgent(ctx context.Context, cfg *models.AgentCo
 		return nil, fmt.Errorf("agent_audit_trail_lookup_unreachable: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent_audit_trail_lookup_http_%d", resp.StatusCode)
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return nil, fmt.Errorf("agent_audit_trail_lookup_read_failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		var agentError struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(body, &agentError)
+		switch strings.ToLower(strings.TrimSpace(agentError.Code)) {
+		case "database_unreachable":
+			return nil, fmt.Errorf("agent_audit_trail_lookup_database_unavailable")
+		case "audit_trail_lookup_failed":
+			return nil, fmt.Errorf("agent_audit_trail_lookup_failed")
+		case "audit_trail_table_not_found":
+			return nil, fmt.Errorf("agent_audit_trail_table_not_found")
+		default:
+			return nil, fmt.Errorf("agent_audit_trail_lookup_http_%d", resp.StatusCode)
+		}
 	}
 	var result AuditTrailLookupResult
 	decoder := json.NewDecoder(strings.NewReader(string(body)))

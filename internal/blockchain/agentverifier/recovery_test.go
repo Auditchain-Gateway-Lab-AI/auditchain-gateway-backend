@@ -113,6 +113,44 @@ func TestFetchAuditTrailCandidatesUsesBoundedLookupContract(t *testing.T) {
 	}
 }
 
+func TestFetchAuditTrailCandidatesMapsAgentLookupErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		wantReason string
+	}{
+		{
+			name: "database unavailable", status: http.StatusServiceUnavailable,
+			body: `{"code":"database_unreachable"}`, wantReason: "agent_audit_trail_lookup_database_unavailable",
+		},
+		{
+			name: "lookup query failed", status: http.StatusInternalServerError,
+			body: `{"code":"audit_trail_lookup_failed"}`, wantReason: "agent_audit_trail_lookup_failed",
+		},
+		{
+			name: "history table missing", status: http.StatusNotFound,
+			body: `{"code":"audit_trail_table_not_found"}`, wantReason: "agent_audit_trail_table_not_found",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			_, err := fetchAuditTrailCandidatesFromAgent(context.Background(), &models.AgentConfig{
+				AgentURL: server.URL, TimeoutSeconds: 2,
+			}, "RUANGAN", "DELETE", "ID", "613", time.Now())
+			if err == nil || !strings.HasPrefix(err.Error(), test.wantReason) {
+				t.Fatalf("error = %v, want prefix %q", err, test.wantReason)
+			}
+		})
+	}
+}
+
 func TestExecuteRecoveryRequestClassifiesAgentError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
