@@ -830,11 +830,11 @@ func extractMetadata(payload map[string]interface{}) map[string]interface{} {
 
 		// Redact sensitive fields
 		if strings.Contains(lowerK, "password") || strings.Contains(lowerK, "token") || strings.Contains(lowerK, "secret") || lowerK == "pin" || lowerK == "pass" {
-			meta[lowerK] = "[REDACTED]"
+			meta[k] = "[REDACTED]"
 			continue
 		}
 
-		meta[lowerK] = normalizeFieldValue(lowerK, v)
+		meta[k] = normalizeFieldValue(k, v)
 	}
 	return meta
 }
