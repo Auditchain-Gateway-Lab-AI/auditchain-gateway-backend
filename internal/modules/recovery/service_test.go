@@ -116,24 +116,16 @@ func TestServiceRecoveryCutoffKeepsLegacyOutOfScope(t *testing.T) {
 	}
 }
 
-func TestGatewaySnapshotRecoveryIsOptInAndScopeLimited(t *testing.T) {
+func TestRecoveryModesSeparateDirectAndLegacySnapshotPaths(t *testing.T) {
 	service := NewService(nil, nil, nil, nil)
 	service.SetRecoveryMode("agent_direct")
-	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
-		t.Fatal("Gateway snapshot recovery must be disabled by default")
-	}
-
-	service.SetGatewaySnapshotRecoveryEnabled(true)
-	if !service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
-		t.Fatal("enabled Gateway snapshot recovery was not selected for Gateway incidents")
-	}
-	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeClientSource) {
-		t.Fatal("Gateway snapshot recovery must not route client-source incidents")
+	if !service.directRecoveryEnabled() {
+		t.Fatal("agent_direct mode was not selected")
 	}
 
 	service.SetRecoveryMode("snapshot_legacy")
-	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
-		t.Fatal("legacy mode should use its normal snapshot path, not the direct-mode hybrid path")
+	if service.directRecoveryEnabled() {
+		t.Fatal("snapshot_legacy mode unexpectedly selected the direct recovery path")
 	}
 }
 

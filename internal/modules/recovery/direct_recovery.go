@@ -40,21 +40,6 @@ func (s *Service) SetRecoveryMode(mode string) {
 	s.mode = mode
 }
 
-// SetGatewaySnapshotRecoveryEnabled opts agent_direct deployments into the
-// isolated, snapshot-backed restore path for GATEWAY_INTEGRITY incidents.
-// CLIENT_SOURCE incidents continue to use the Agent direct-write flow.
-func (s *Service) SetGatewaySnapshotRecoveryEnabled(enabled bool) {
-	s.gatewaySnapshotRecovery = enabled
-}
-
-func (s *Service) snapshotRuntimeReady() bool {
-	return s.store != nil && s.cipher != nil && s.snapshotBuilder != nil && s.fabric != nil
-}
-
-func (s *Service) usesGatewaySnapshotRecovery(scope string) bool {
-	return s.directRecoveryEnabled() && s.gatewaySnapshotRecovery && strings.EqualFold(strings.TrimSpace(scope), models.RecoveryScopeGatewayIntegrity)
-}
-
 func (s *Service) SetAgentVerifier(agent *agentverifier.Service) {
 	s.agent = agent
 }
@@ -334,10 +319,12 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	}
 	return &PreflightResult{
 		Status: status, Recoverable: recoverable, LogID: data.Log.LogID,
-		CurrentHash: localHash, CurrentIntegrity: currentIntegrity,
+		RecoverySource: "CLIENT_AUDIT_CHAIN",
+		CurrentHash:    localHash, CurrentIntegrity: currentIntegrity,
 		SnapshotHash: data.Reference.LeafHash, MerkleRoot: data.Reference.MerkleRoot,
 		AnchorID: data.Reference.AnchorID, ObjectVersionID: "",
 		Operation: data.Operation, ReferenceLogHash: data.Reference.LeafHash,
+		ReferenceMerkleRoot: data.Reference.MerkleRoot, ReferenceAnchorID: data.Reference.AnchorID,
 		FabricRoot: data.Reference.FabricRoot, ClientStateHash: data.ClientHash,
 		DesiredStateHash: data.DesiredHash, SourceStatus: data.SourceStatus,
 		AgentStatus: data.AgentStatus, SourceFound: data.Client != nil && data.Client.Found,

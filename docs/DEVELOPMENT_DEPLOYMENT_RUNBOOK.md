@@ -65,11 +65,11 @@ RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
 ```
 
-Untuk memulihkan metadata Gateway dari snapshot, tambahkan
-`GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true` hanya jika snapshot MinIO untuk log
-tersebut tersedia. Opsi ini juga memerlukan `SNAPSHOT_WRITER_ENABLED=true`,
-`RECOVERY_CUTOFF_AT`, MinIO, encryption key, dan Fabric. Insiden tanpa snapshot
-valid tetap tidak dapat direstore.
+Untuk memulihkan metadata audit log Gateway, pastikan Agent tenant dapat
+membaca tabel `AUDIT_TRAIL` dan log memiliki `source_record_id`. Gateway
+membangun metadata dari event tersebut lalu memvalidasi hash leaf, Merkle proof,
+dan anchor Fabric. Jalur aktif ini tidak memakai MinIO. Log tanpa source event
+atau bukti anchor tetap read-only.
 
 Mode `snapshot_legacy` tetap dapat dijalankan untuk rollback/kompatibilitas
 dengan `docker-compose.snapshot.yml`; mode tersebut membutuhkan konfigurasi

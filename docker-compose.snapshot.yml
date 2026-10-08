@@ -1,5 +1,4 @@
-# Optional MinIO stack for RECOVERY_MODE=snapshot_legacy or the opt-in
-# GATEWAY_SNAPSHOT_RECOVERY_ENABLED path in agent_direct mode.
+# Optional MinIO stack for RECOVERY_MODE=snapshot_legacy compatibility only.
 # The default docker-compose.yml intentionally does not start MinIO.
 services:
   minio:

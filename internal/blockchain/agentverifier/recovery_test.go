@@ -50,6 +50,34 @@ func TestExecuteRecoveryRequestUsesWriteTokenAndContract(t *testing.T) {
 	}
 }
 
+func TestFetchAuditTrailUsesDedicatedReadEndpoint(t *testing.T) {
+	var seenAuth, seenPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"found":true,"id":"620","tabel":"RUANGAN","operasi":"DELETE","db_user":"POLINEMA","data_lama":{"id":620,"nama":"ruangan"},"data_baru":null,"waktu":"2026-10-08T02:00:00Z"}`))
+	}))
+	defer server.Close()
+
+	record, err := fetchAuditTrailFromAgent(context.Background(), &models.AgentConfig{
+		AgentURL: server.URL, VerifyToken: "read-token", TimeoutSeconds: 2,
+	}, "620")
+	if err != nil {
+		t.Fatalf("fetchAuditTrailFromAgent() error = %v", err)
+	}
+	if seenAuth != "Bearer read-token" || seenPath != "/verify-audit/620" {
+		t.Fatalf("request auth/path = %q/%q", seenAuth, seenPath)
+	}
+	metadata, err := record.MetadataJSON()
+	if err != nil {
+		t.Fatalf("MetadataJSON() error = %v", err)
+	}
+	if string(metadata) != `{"data_lama":{"id":620,"nama":"ruangan"}}` {
+		t.Fatalf("metadata = %s", metadata)
+	}
+}
+
 func TestExecuteRecoveryRequestClassifiesAgentError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

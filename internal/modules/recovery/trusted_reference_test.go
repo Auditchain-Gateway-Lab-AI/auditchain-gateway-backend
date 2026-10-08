@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/pkg/crypto"
@@ -57,6 +58,32 @@ func TestValidateTrustedReferenceAcceptsSingleLeaf(t *testing.T) {
 	}
 	if trusted.LeafHash != logRow.HashValue || trusted.FabricRoot != logRow.HashValue {
 		t.Fatalf("trusted reference = %+v", trusted)
+	}
+}
+
+func TestTrustedGatewayLogFromAuditTrailRestoresOnlyHashMatchingMetadata(t *testing.T) {
+	logRow := trustedReferenceLog()
+	logRow.SourceRecordID = "audit-81"
+	logRow.Metadata = `{"data_lama":{"ID":81,"NAMA":"sebelum"},"data_baru":{"ID":81,"NAMA":"ruang"}}`
+	logRow.HashValue = hasher.GenerateLogHash(&logRow)
+	logRow.Metadata = `{"data_lama":{"ID":81,"NAMA":"sebelum"},"data_baru":{"ID":81,"NAMA":"tampered"}}`
+
+	trail := &agentverifier.AuditTrailRecord{
+		Found: true, ID: "audit-81", Tabel: "RUANGAN", Operasi: "UPDATE",
+		DataLama: map[string]interface{}{"ID": float64(81), "NAMA": "sebelum"},
+		DataBaru: map[string]interface{}{"ID": float64(81), "NAMA": "ruang"},
+	}
+	trusted, _, err := trustedGatewayLogFromAuditTrail(logRow, trail)
+	if err != nil {
+		t.Fatalf("trustedGatewayLogFromAuditTrail() error = %v", err)
+	}
+	if trusted.Metadata != `{"data_baru":{"ID":81,"NAMA":"ruang"},"data_lama":{"ID":81,"NAMA":"sebelum"}}` {
+		t.Fatalf("restored metadata = %s", trusted.Metadata)
+	}
+
+	trail.DataBaru["NAMA"] = "untrusted"
+	if _, _, err := trustedGatewayLogFromAuditTrail(logRow, trail); err == nil || err.Error() != "reference_local_hash_mismatch" {
+		t.Fatalf("mismatched source payload error = %v", err)
 	}
 }
 
