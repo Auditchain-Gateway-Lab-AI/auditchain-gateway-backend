@@ -883,3 +883,63 @@ func (h *Handler) GetLatestVerificationRun(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": ToVerificationRunResponse(run)})
 }
+
+// --- Agent API Handlers ---
+
+func (h *Handler) GetOffchainDataForAgent(c *gin.Context) {
+	clientID := c.GetHeader("X-Client-ID")
+	if clientID == "" {
+		// Fallback to JWT if testing via dashboard token
+		id, ok := h.getClientID(c)
+		if ok {
+			clientID = id
+		}
+	}
+
+	if clientID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan (gunakan header X-Client-ID)"})
+		return
+	}
+
+	logs, err := h.Service.GetLogsByResource(c.Param("resource"), clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data offchain"})
+		return
+	}
+	c.JSON(http.StatusOK, logs)
+}
+
+type VerifyMerkleRootRequest struct {
+	MerkleRoot     string `json:"merkle_root" binding:"required"`
+	BlockchainTxID string `json:"blockchain_tx_id" binding:"required"`
+}
+
+func (h *Handler) VerifyMerkleRootForAgent(c *gin.Context) {
+	var req VerifyMerkleRootRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format request tidak valid"})
+		return
+	}
+
+	fabricData, err := h.Service.GetFabricRecord(req.BlockchainTxID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data dari blockchain"})
+		return
+	}
+
+	chainRoot := ""
+	if root, ok := fabricData["merkle_root"].(string); ok {
+		chainRoot = root
+	} else if root, ok := fabricData["merkleRoot"].(string); ok {
+		chainRoot = root
+	}
+
+	isMatch := chainRoot == req.MerkleRoot
+
+	c.JSON(http.StatusOK, gin.H{
+		"is_match":             isMatch,
+		"expected_merkle_root": req.MerkleRoot,
+		"actual_merkle_root":   chainRoot,
+		"blockchain_tx_id":     req.BlockchainTxID,
+	})
+}
