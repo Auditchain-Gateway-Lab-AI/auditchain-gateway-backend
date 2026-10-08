@@ -87,6 +87,39 @@ func TestTrustedGatewayLogFromAuditTrailRestoresOnlyHashMatchingMetadata(t *test
 	}
 }
 
+func TestTrustedGatewayLogFromAuditTrailMatchesKafkaRowImage(t *testing.T) {
+	logRow := trustedReferenceLog()
+	logRow.Action = "DELETE"
+	logRow.Resource = "RUANGAN:613"
+	logRow.Metadata = `{"ID":613,"NAMA":"trusted name"}`
+	logRow.HashValue = hasher.GenerateLogHash(&logRow)
+	logRow.Metadata = `{"ID":613,"NAMA":"tampered name"}`
+
+	trail := &agentverifier.AuditTrailRecord{
+		Found: true, ID: "audit-613", Tabel: "RUANGAN", Operasi: "DELETE",
+		DataLama: map[string]interface{}{"ID": float64(613), "NAMA": "trusted name"},
+	}
+	trusted, metadata, err := trustedGatewayLogFromAuditTrail(logRow, trail)
+	if err != nil {
+		t.Fatalf("trustedGatewayLogFromAuditTrail() error = %v", err)
+	}
+	if trusted.Metadata != `{"ID":613,"NAMA":"trusted name"}` || string(metadata) != trusted.Metadata {
+		t.Fatalf("restored metadata = %s, bytes = %s", trusted.Metadata, metadata)
+	}
+}
+
+func TestAuditTrailImageMatchesConfiguredPrimaryKey(t *testing.T) {
+	trail := &agentverifier.AuditTrailRecord{
+		DataLama: map[string]interface{}{"ROOM_ID": "613"},
+	}
+	if !auditTrailImageMatchesID(trail, "room_id", "613") {
+		t.Fatal("expected configured primary key to match case-insensitively")
+	}
+	if auditTrailImageMatchesID(trail, "room_id", "614") {
+		t.Fatal("unexpected primary-key match")
+	}
+}
+
 func TestValidateTrustedReferenceAcceptsOrderedMultiLeafProof(t *testing.T) {
 	first := trustedReferenceLog()
 	second := first
