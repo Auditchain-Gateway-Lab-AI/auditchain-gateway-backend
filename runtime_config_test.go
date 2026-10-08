@@ -38,8 +38,48 @@ func TestValidateRecoveryScopeFlagsRejectsUnknownMode(t *testing.T) {
 	}
 }
 
+func TestValidateGatewaySnapshotRecoveryConfig(t *testing.T) {
+	cutoff := time.Date(2026, 9, 18, 14, 34, 33, 0, time.UTC)
+	tests := []struct {
+		name           string
+		enabled        bool
+		recovery       bool
+		snapshotWriter bool
+		cutoff         *time.Time
+		mode           string
+		wantErr        bool
+	}{
+		{name: "disabled by default"},
+		{name: "valid isolated direct gateway recovery", enabled: true, recovery: true, snapshotWriter: true, cutoff: &cutoff, mode: "agent_direct"},
+		{name: "requires recovery API", enabled: true, snapshotWriter: true, cutoff: &cutoff, mode: "agent_direct", wantErr: true},
+		{name: "requires snapshot runtime", enabled: true, recovery: true, cutoff: &cutoff, mode: "agent_direct", wantErr: true},
+		{name: "requires recovery cutoff", enabled: true, recovery: true, snapshotWriter: true, mode: "agent_direct", wantErr: true},
+		{name: "not supported by unknown mode", enabled: true, recovery: true, snapshotWriter: true, cutoff: &cutoff, mode: "unknown", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGatewaySnapshotRecoveryConfig(tt.enabled, tt.recovery, tt.snapshotWriter, tt.cutoff, tt.mode)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr=%v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGatewaySnapshotRecoveryFlagIsOptIn(t *testing.T) {
+	t.Setenv("GATEWAY_SNAPSHOT_RECOVERY_ENABLED", "false")
+	if gatewaySnapshotRecoveryEnabled() {
+		t.Fatal("Gateway snapshot recovery must be disabled by default")
+	}
+	t.Setenv("GATEWAY_SNAPSHOT_RECOVERY_ENABLED", "true")
+	if !gatewaySnapshotRecoveryEnabled() {
+		t.Fatal("Gateway snapshot recovery flag was not read")
+	}
+}
+
 func TestDirectRecoveryIgnoresLegacySnapshotWriterFlag(t *testing.T) {
 	t.Setenv("SNAPSHOT_WRITER_ENABLED", "true")
+	t.Setenv("GATEWAY_SNAPSHOT_RECOVERY_ENABLED", "false")
 	builder, store, cipher, err := buildSnapshotRuntime("agent_direct")
 	if err != nil {
 		t.Fatalf("buildSnapshotRuntime() error = %v", err)

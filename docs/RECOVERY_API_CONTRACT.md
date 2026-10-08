@@ -11,6 +11,7 @@ menjalankan recovery milik tenant-nya sendiri tanpa approval platform-admin.
 RECOVERY_ENABLED=true
 RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
+GATEWAY_SNAPSHOT_RECOVERY_ENABLED=false
 ```
 
 `agent_direct` adalah jalur baru: Fabric menjadi bukti anchor, PostgreSQL
@@ -18,6 +19,15 @@ AuditChain menjadi referensi event/metadata, dan Agent menjadi satu-satunya
 komponen yang menulis row database operasional client. `snapshot_legacy` tetap
 tersedia sementara untuk kompatibilitas/rollback, tetapi memakai alur MinIO
 lama dan tidak boleh dicampur dengan request direct.
+
+Deployment direct dapat secara opt-in mengaktifkan
+`GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true` untuk incident `GATEWAY_INTEGRITY`
+saja. Jalur ini memulihkan `audit_logs` dari snapshot terverifikasi melalui
+validasi snapshot legacy. Incident `CLIENT_SOURCE` tetap memakai Agent-direct.
+Fitur ini membutuhkan `RECOVERY_ENABLED=true`, `SNAPSHOT_WRITER_ENABLED=true`,
+`RECOVERY_CUTOFF_AT`, MinIO, encryption key, dan Fabric; tanpa konfigurasi
+lengkap, Gateway menolak start. Tidak ada fallback ke metadata dari browser
+atau payload incident.
 
 ## Endpoint
 
@@ -151,3 +161,6 @@ Mode `snapshot_legacy` tetap memakai validasi object version, checksum,
 AES-GCM, snapshot hash, Merkle proof, dan anchor Fabric. Mode tersebut hanya
 untuk compatibility/rollback; tidak boleh dianggap sebagai implementasi direct
 client-DB. Data lama yang tidak memiliki snapshot valid tetap tidak eligible.
+Jalur snapshot opsional pada mode `agent_direct` dibatasi ke incident
+`GATEWAY_INTEGRITY` dan memakai validasi, request, serta execute snapshot yang
+sama. Permintaan `CLIENT_SOURCE` tetap dijalankan melalui Agent direct-write.

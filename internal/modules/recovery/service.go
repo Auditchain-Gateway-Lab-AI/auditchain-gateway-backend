@@ -26,14 +26,15 @@ type FabricReader interface {
 }
 
 type Service struct {
-	db              *gorm.DB
-	store           snapshotstore.SnapshotStore
-	cipher          *snapshotstore.Cipher
-	fabric          FabricReader
-	snapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
-	recoveryCutoff  *time.Time
-	agent           *agentverifier.Service
-	mode            string
+	db                      *gorm.DB
+	store                   snapshotstore.SnapshotStore
+	cipher                  *snapshotstore.Cipher
+	fabric                  FabricReader
+	snapshotBuilder         snapshotstore.RecoveryEventOutboxBuilder
+	recoveryCutoff          *time.Time
+	agent                   *agentverifier.Service
+	mode                    string
+	gatewaySnapshotRecovery bool
 }
 
 type IncidentFilter struct {
@@ -344,7 +345,25 @@ func (s *Service) ListVersions(ctx context.Context, clientID, resource string) (
 
 func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID string) ([]CandidateView, error) {
 	if s.directRecoveryEnabled() {
-		return s.listDirectCandidate(ctx, clientID, incidentID)
+		var directIncident models.TamperIncident
+		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&directIncident).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("incident_not_found")
+			}
+			return nil, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.listDirectCandidate(ctx, clientID, incidentID)
+		}
+		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
+			return []CandidateView{{
+				LogID: directIncident.LogID, Resource: directIncident.Resource,
+				Eligible: false, Reason: "gateway_snapshot_recovery_disabled",
+			}}, nil
+		}
+		if !s.snapshotRuntimeReady() {
+			return nil, errors.New("recovery_storage_unavailable")
+		}
 	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
@@ -399,7 +418,22 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 
 func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*PreflightResult, error) {
 	if s.directRecoveryEnabled() {
-		return s.preflightDirect(ctx, clientID, incidentID)
+		var directIncident models.TamperIncident
+		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&directIncident).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("incident_not_found")
+			}
+			return nil, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.preflightDirect(ctx, clientID, incidentID)
+		}
+		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
+			return nil, errors.New("gateway_snapshot_recovery_disabled")
+		}
+		if !s.snapshotRuntimeReady() {
+			return nil, errors.New("recovery_storage_unavailable")
+		}
 	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
@@ -490,7 +524,22 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		return &existing, nil
 	}
 	if s.directRecoveryEnabled() {
-		return s.createDirectRequest(ctx, clientID, userID, input)
+		var directIncident models.TamperIncident
+		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", input.IncidentID, clientID).First(&directIncident).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("incident_not_found")
+			}
+			return nil, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.createDirectRequest(ctx, clientID, userID, input)
+		}
+		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
+			return nil, errors.New("gateway_snapshot_recovery_disabled")
+		}
+		if !s.snapshotRuntimeReady() {
+			return nil, errors.New("recovery_storage_unavailable")
+		}
 	}
 
 	var incident models.TamperIncident
@@ -640,7 +689,29 @@ func (s *Service) transitionRequest(ctx context.Context, clientID, requestID, ac
 
 func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID string) (*models.RecoveryRequest, error) {
 	if s.directRecoveryEnabled() {
-		return s.executeDirect(ctx, clientID, requestID, executorID)
+		var directRequest models.RecoveryRequest
+		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", requestID, clientID).First(&directRequest).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("request_not_found")
+			}
+			return nil, err
+		}
+		var directIncident models.TamperIncident
+		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", directRequest.IncidentID, clientID).First(&directIncident).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("incident_not_found")
+			}
+			return nil, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.executeDirect(ctx, clientID, requestID, executorID)
+		}
+		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
+			return nil, errors.New("gateway_snapshot_recovery_disabled")
+		}
+		if !s.snapshotRuntimeReady() {
+			return nil, errors.New("recovery_storage_unavailable")
+		}
 	}
 	if s.store == nil || s.cipher == nil || s.snapshotBuilder == nil {
 		return nil, errors.New("recovery_storage_unavailable")

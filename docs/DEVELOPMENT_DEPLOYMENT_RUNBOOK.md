@@ -65,6 +65,12 @@ RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
 ```
 
+Untuk memulihkan metadata Gateway dari snapshot, tambahkan
+`GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true` hanya jika snapshot MinIO untuk log
+tersebut tersedia. Opsi ini juga memerlukan `SNAPSHOT_WRITER_ENABLED=true`,
+`RECOVERY_CUTOFF_AT`, MinIO, encryption key, dan Fabric. Insiden tanpa snapshot
+valid tetap tidak dapat direstore.
+
 Mode `snapshot_legacy` tetap dapat dijalankan untuk rollback/kompatibilitas
 dengan `docker-compose.snapshot.yml`; mode tersebut membutuhkan konfigurasi
 MinIO yang lengkap dan tidak boleh menjadi dependency deployment direct.

@@ -116,6 +116,27 @@ func TestServiceRecoveryCutoffKeepsLegacyOutOfScope(t *testing.T) {
 	}
 }
 
+func TestGatewaySnapshotRecoveryIsOptInAndScopeLimited(t *testing.T) {
+	service := NewService(nil, nil, nil, nil)
+	service.SetRecoveryMode("agent_direct")
+	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
+		t.Fatal("Gateway snapshot recovery must be disabled by default")
+	}
+
+	service.SetGatewaySnapshotRecoveryEnabled(true)
+	if !service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
+		t.Fatal("enabled Gateway snapshot recovery was not selected for Gateway incidents")
+	}
+	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeClientSource) {
+		t.Fatal("Gateway snapshot recovery must not route client-source incidents")
+	}
+
+	service.SetRecoveryMode("snapshot_legacy")
+	if service.usesGatewaySnapshotRecovery(models.RecoveryScopeGatewayIntegrity) {
+		t.Fatal("legacy mode should use its normal snapshot path, not the direct-mode hybrid path")
+	}
+}
+
 func TestRecoveryEventTrustedLineageAllowsRepeatRecovery(t *testing.T) {
 	event := &models.RecoveryEvent{
 		ResultStatus:             models.RecoveryResultSucceeded,
