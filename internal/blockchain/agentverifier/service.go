@@ -36,6 +36,11 @@ type AuditTrailRecord struct {
 	Waktu    time.Time              `json:"waktu"`
 }
 
+type AuditTrailLookupResult struct {
+	Records   []AuditTrailRecord `json:"records"`
+	Truncated bool               `json:"truncated"`
+}
+
 // Discrepancy mencatat satu perbedaan antara audit log di middleware vs data dari Agent
 type Discrepancy struct {
 	Field   string `json:"field"`
@@ -417,6 +422,76 @@ func (s *Service) ReadAuditTrail(ctx context.Context, clientID, sourceRecordID s
 		return nil, fmt.Errorf("agent_not_configured")
 	}
 	return fetchAuditTrailFromAgent(ctx, cfg, sourceRecordID)
+}
+
+// FindAuditTrailCandidates asks the Agent for a bounded set of nearby audit
+// events. A candidate is not trusted until recovery matches it to the stored
+// AuditChain leaf, Merkle proof, and Fabric root.
+func (s *Service) FindAuditTrailCandidates(ctx context.Context, clientID, tableName, operation, primaryKey, recordID string, at time.Time) (*AuditTrailLookupResult, error) {
+	if strings.TrimSpace(tableName) == "" || strings.TrimSpace(primaryKey) == "" || strings.TrimSpace(recordID) == "" || at.IsZero() {
+		return nil, fmt.Errorf("audit_trail_lookup_invalid_request")
+	}
+	cfg, err := s.loadAgentConfig(clientID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("agent_not_configured")
+		}
+		return nil, fmt.Errorf("agent_config_unavailable: %w", err)
+	}
+	if !cfg.IsActive || strings.TrimSpace(cfg.AgentURL) == "" || strings.Contains(cfg.AgentURL, ":8083") {
+		return nil, fmt.Errorf("agent_not_configured")
+	}
+	return fetchAuditTrailCandidatesFromAgent(ctx, cfg, tableName, operation, primaryKey, recordID, at)
+}
+
+func fetchAuditTrailCandidatesFromAgent(ctx context.Context, cfg *models.AgentConfig, tableName, operation, primaryKey, recordID string, at time.Time) (*AuditTrailLookupResult, error) {
+	if cfg == nil || strings.TrimSpace(cfg.AgentURL) == "" {
+		return nil, fmt.Errorf("agent_not_configured")
+	}
+	values := url.Values{}
+	values.Set("table", strings.TrimSpace(tableName))
+	values.Set("operation", strings.ToUpper(strings.TrimSpace(operation)))
+	values.Set("primary_key", strings.TrimSpace(primaryKey))
+	values.Set("record_id", strings.TrimSpace(recordID))
+	values.Set("at", at.UTC().Format(time.RFC3339Nano))
+	values.Set("window_seconds", "300")
+	values.Set("limit", "50")
+	baseURL := strings.TrimRight(cfg.AgentURL, "/")
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
+	requestURL := baseURL + "/verify-audit-lookup?" + values.Encode()
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("audit_trail_lookup_request_invalid: %w", err)
+	}
+	if cfg.VerifyToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.VerifyToken)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("agent_audit_trail_lookup_unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent_audit_trail_lookup_http_%d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("agent_audit_trail_lookup_read_failed: %w", err)
+	}
+	var result AuditTrailLookupResult
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&result); err != nil {
+		return nil, fmt.Errorf("agent_audit_trail_lookup_response_invalid: %w", err)
+	}
+	return &result, nil
 }
 
 func agentAuditTrailURL(agentURL, sourceRecordID string) string {

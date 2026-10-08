@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,6 +19,8 @@ import (
 )
 
 const gatewayAuditRecoverySource = "CLIENT_AUDIT_TRAIL"
+
+const gatewayAuditTrailLookupWindow = 5 * time.Minute
 
 type gatewayAuditRecoveryData struct {
 	Incident    models.TamperIncident
@@ -60,16 +63,30 @@ func (s *Service) loadGatewayAuditRecoveryData(ctx context.Context, clientID, in
 		}
 		return nil, err
 	}
-	if strings.TrimSpace(logRow.SourceRecordID) == "" {
-		return nil, errors.New("audit_trail_reference_missing")
-	}
 	if logRow.BlockchainTxID == nil || strings.TrimSpace(*logRow.BlockchainTxID) == "" || strings.TrimSpace(logRow.MerkleRoot) == "" {
 		return nil, errors.New("reference_anchor_missing")
 	}
 
-	trail, err := s.agent.ReadAuditTrail(ctx, clientID, logRow.SourceRecordID)
-	if err != nil {
-		return nil, err
+	var trail *agentverifier.AuditTrailRecord
+	var err error
+	if strings.TrimSpace(logRow.SourceRecordID) != "" {
+		trail, err = s.agent.ReadAuditTrail(ctx, clientID, logRow.SourceRecordID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		trail, err = s.findGatewayAuditTrailReference(ctx, clientID, logRow)
+		if err != nil {
+			return nil, err
+		}
+		// Backfill the pointer only after the source image recreates the exact
+		// leaf hash stored in AuditChain. SourceRecordID is not part of that hash.
+		if err := s.db.WithContext(ctx).Model(&models.AuditLog{}).
+			Where("log_id = ? AND client_id = ? AND COALESCE(source_record_id, '') = ''", logRow.LogID, clientID).
+			Update("source_record_id", trail.ID).Error; err != nil {
+			return nil, fmt.Errorf("audit_trail_reference_persist_failed: %w", err)
+		}
+		logRow.SourceRecordID = trail.ID
 	}
 	if trail == nil || !trail.Found {
 		return nil, errors.New("audit_trail_record_not_found")
@@ -99,11 +116,97 @@ func (s *Service) loadGatewayAuditRecoveryData(ctx context.Context, clientID, in
 	}, nil
 }
 
+func (s *Service) findGatewayAuditTrailReference(ctx context.Context, clientID string, logRow models.AuditLog) (*agentverifier.AuditTrailRecord, error) {
+	parts := strings.SplitN(strings.TrimSpace(logRow.Resource), ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return nil, errors.New("audit_trail_reference_missing")
+	}
+	if logRow.Timestamp.IsZero() {
+		return nil, errors.New("audit_trail_timestamp_missing")
+	}
+	pkField := "ID"
+	var kafkaConfig models.ClientKafkaConfig
+	if err := s.db.WithContext(ctx).Where("client_id = ? AND is_active = true", clientID).First(&kafkaConfig).Error; err == nil && strings.TrimSpace(kafkaConfig.PKField) != "" {
+		pkField = strings.TrimSpace(kafkaConfig.PKField)
+	}
+	targetID := strings.TrimSpace(parts[1])
+	lookup, err := s.agent.FindAuditTrailCandidates(ctx, clientID, strings.TrimSpace(parts[0]), logRow.Action, pkField, targetID, logRow.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+	if lookup == nil {
+		return nil, errors.New("audit_trail_reference_missing")
+	}
+	if lookup.Truncated {
+		return nil, errors.New("audit_trail_lookup_ambiguous")
+	}
+	if len(lookup.Records) == 0 {
+		return nil, errors.New("audit_trail_reference_missing")
+	}
+	var matched *agentverifier.AuditTrailRecord
+	var matchingEvents int
+	var hashMatched int
+	for index := range lookup.Records {
+		candidate := &lookup.Records[index]
+		if !candidate.Found || strings.TrimSpace(candidate.ID) == "" ||
+			!sameAuditTrailResource(logRow.Resource, candidate.Tabel) ||
+			!strings.EqualFold(strings.TrimSpace(logRow.Action), strings.TrimSpace(candidate.Operasi)) ||
+			candidate.Waktu.IsZero() || absDuration(candidate.Waktu.Sub(logRow.Timestamp)) > gatewayAuditTrailLookupWindow ||
+			!auditTrailImageMatchesID(candidate, pkField, targetID) {
+			continue
+		}
+		matchingEvents++
+		linkedLog := logRow
+		linkedLog.SourceRecordID = candidate.ID
+		if _, _, err := trustedGatewayLogFromAuditTrail(linkedLog, candidate); err != nil {
+			continue
+		}
+		matched = candidate
+		hashMatched++
+	}
+	if hashMatched == 1 {
+		return matched, nil
+	}
+	if hashMatched > 1 {
+		return nil, errors.New("audit_trail_reference_ambiguous")
+	}
+	if matchingEvents > 0 {
+		return nil, errors.New("audit_trail_reference_hash_mismatch")
+	}
+	return nil, errors.New("audit_trail_reference_missing")
+}
+
+func auditTrailImageMatchesID(trail *agentverifier.AuditTrailRecord, primaryKey, expected string) bool {
+	if trail == nil || strings.TrimSpace(expected) == "" {
+		return false
+	}
+	key := strings.TrimSpace(primaryKey)
+	if key == "" {
+		key = "ID"
+	}
+	images := []map[string]interface{}{trail.DataLama, trail.DataBaru}
+	for _, image := range images {
+		for field, value := range image {
+			if strings.EqualFold(field, key) && value != nil && strings.TrimSpace(fmt.Sprint(value)) == expected {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func absDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func trustedGatewayLogFromAuditTrail(logRow models.AuditLog, trail *agentverifier.AuditTrailRecord) (models.AuditLog, []byte, error) {
 	if trail == nil || !trail.Found {
 		return models.AuditLog{}, nil, errors.New("audit_trail_record_not_found")
 	}
-	if strings.TrimSpace(trail.ID) != "" && strings.TrimSpace(trail.ID) != strings.TrimSpace(logRow.SourceRecordID) {
+	if strings.TrimSpace(trail.ID) != "" && strings.TrimSpace(logRow.SourceRecordID) != "" && strings.TrimSpace(trail.ID) != strings.TrimSpace(logRow.SourceRecordID) {
 		return models.AuditLog{}, nil, errors.New("audit_trail_reference_mismatch")
 	}
 	if !sameAuditTrailResource(logRow.Resource, trail.Tabel) {
@@ -112,16 +215,51 @@ func trustedGatewayLogFromAuditTrail(logRow models.AuditLog, trail *agentverifie
 	if !strings.EqualFold(strings.TrimSpace(logRow.Action), strings.TrimSpace(trail.Operasi)) {
 		return models.AuditLog{}, nil, errors.New("audit_trail_operation_mismatch")
 	}
-	metadata, err := trail.MetadataJSON()
+	trustedLog := logRow
+	metadataCandidates, err := gatewayAuditTrailMetadataCandidates(logRow.Action, trail)
 	if err != nil {
 		return models.AuditLog{}, nil, err
 	}
-	trustedLog := logRow
-	trustedLog.Metadata = string(metadata)
-	if actual := hasher.GenerateLogHash(&trustedLog); !strings.EqualFold(actual, logRow.HashValue) {
-		return models.AuditLog{}, nil, errors.New("reference_local_hash_mismatch")
+	for _, metadata := range metadataCandidates {
+		trustedLog.Metadata = string(metadata)
+		if actual := hasher.GenerateLogHash(&trustedLog); strings.EqualFold(actual, logRow.HashValue) {
+			return trustedLog, metadata, nil
+		}
 	}
-	return trustedLog, metadata, nil
+	return models.AuditLog{}, nil, errors.New("reference_local_hash_mismatch")
+}
+
+func gatewayAuditTrailMetadataCandidates(action string, trail *agentverifier.AuditTrailRecord) ([][]byte, error) {
+	if trail == nil || !trail.Found {
+		return nil, errors.New("audit_trail_record_not_found")
+	}
+	images := []map[string]interface{}{trail.DataBaru, trail.DataLama}
+	if strings.EqualFold(strings.TrimSpace(action), "DELETE") {
+		images = []map[string]interface{}{trail.DataLama, trail.DataBaru}
+	}
+	metadata := make([][]byte, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	for _, image := range images {
+		if image == nil {
+			continue
+		}
+		raw, err := json.Marshal(image)
+		if err != nil {
+			return nil, fmt.Errorf("reference_metadata_invalid: %w", err)
+		}
+		if _, exists := seen[string(raw)]; !exists {
+			seen[string(raw)] = struct{}{}
+			metadata = append(metadata, raw)
+		}
+	}
+	envelope, err := trail.MetadataJSON()
+	if err != nil {
+		return nil, err
+	}
+	if _, exists := seen[string(envelope)]; !exists {
+		metadata = append(metadata, envelope)
+	}
+	return metadata, nil
 }
 
 func sameAuditTrailResource(resource, tableName string) bool {
