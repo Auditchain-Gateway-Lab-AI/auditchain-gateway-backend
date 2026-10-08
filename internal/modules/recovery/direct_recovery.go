@@ -40,6 +40,21 @@ func (s *Service) SetRecoveryMode(mode string) {
 	s.mode = mode
 }
 
+// SetGatewaySnapshotRecoveryEnabled opts agent_direct deployments into the
+// isolated, snapshot-backed restore path for GATEWAY_INTEGRITY incidents.
+// CLIENT_SOURCE incidents continue to use the Agent direct-write flow.
+func (s *Service) SetGatewaySnapshotRecoveryEnabled(enabled bool) {
+	s.gatewaySnapshotRecovery = enabled
+}
+
+func (s *Service) snapshotRuntimeReady() bool {
+	return s.store != nil && s.cipher != nil && s.snapshotBuilder != nil && s.fabric != nil
+}
+
+func (s *Service) usesGatewaySnapshotRecovery(scope string) bool {
+	return s.directRecoveryEnabled() && s.gatewaySnapshotRecovery && strings.EqualFold(strings.TrimSpace(scope), models.RecoveryScopeGatewayIntegrity)
+}
+
 func (s *Service) SetAgentVerifier(agent *agentverifier.Service) {
 	s.agent = agent
 }
