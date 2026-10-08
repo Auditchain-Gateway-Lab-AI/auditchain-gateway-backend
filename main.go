@@ -56,29 +56,6 @@ func recoveryEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("RECOVERY_ENABLED")), "true")
 }
 
-func gatewaySnapshotRecoveryEnabled() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("GATEWAY_SNAPSHOT_RECOVERY_ENABLED")), "true")
-}
-
-func validateGatewaySnapshotRecoveryConfig(enabled, recovery, snapshotWriter bool, cutoff *time.Time, mode string) error {
-	if !enabled || strings.EqualFold(strings.TrimSpace(mode), "snapshot_legacy") {
-		return nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(mode), "agent_direct") {
-		return fmt.Errorf("GATEWAY_SNAPSHOT_RECOVERY_ENABLED hanya didukung pada RECOVERY_MODE=agent_direct")
-	}
-	if !recovery {
-		return fmt.Errorf("GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true membutuhkan RECOVERY_ENABLED=true")
-	}
-	if !snapshotWriter {
-		return fmt.Errorf("GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true membutuhkan SNAPSHOT_WRITER_ENABLED=true")
-	}
-	if cutoff == nil {
-		return fmt.Errorf("GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true membutuhkan RECOVERY_CUTOFF_AT")
-	}
-	return nil
-}
-
 func tamperScannerEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAMPER_SCANNER_ENABLED")), "true")
 }
@@ -109,10 +86,9 @@ func validateRecoveryScopeFlags(recovery, snapshotRequired bool, cutoff *time.Ti
 }
 
 func buildSnapshotRuntime(recoveryMode string) (snapshotstore.OutboxBuilder, snapshotstore.SnapshotStore, *snapshotstore.Cipher, error) {
-	// agent_direct writes through the client Agent and must remain independent
-	// of stale snapshot/MinIO flags left in an older environment file unless
-	// the isolated Gateway snapshot-recovery path is explicitly enabled.
-	if (recoveryMode == "agent_direct" && !gatewaySnapshotRecoveryEnabled()) || !snapshotWriterEnabled() {
+	// All agent_direct recovery paths use AuditChain/Fabric references and the
+	// client Agent. MinIO remains only for explicit legacy snapshot mode.
+	if recoveryMode == "agent_direct" || !snapshotWriterEnabled() {
 		return nil, nil, nil, nil
 	}
 
@@ -366,14 +342,9 @@ func main() {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", cutoffErr)
 	}
 	recoveryMode := configuredRecoveryMode()
-	gatewaySnapshotRecovery := gatewaySnapshotRecoveryEnabled()
-	if err := validateGatewaySnapshotRecoveryConfig(gatewaySnapshotRecovery, recoveryEnabled(), snapshotWriterEnabled(), recoveryCutoff, recoveryMode); err != nil {
-		log.Fatalf("❌ Konfigurasi Gateway snapshot recovery tidak valid: %v", err)
-	}
-	// The direct client-DB path has no MinIO dependency. Keep the legacy
-	// snapshot gate for the compatibility mode. The explicit Gateway snapshot
-	// recovery option is the only direct-mode exception.
-	effectiveSnapshotRequired := snapshotRequiredForAnchor() && (recoveryMode != "agent_direct" || gatewaySnapshotRecovery)
+	// Direct recovery never requires MinIO, even if stale snapshot flags remain
+	// in an environment file. Legacy mode retains its snapshot gate.
+	effectiveSnapshotRequired := snapshotRequiredForAnchor() && recoveryMode != "agent_direct"
 	if scopeErr := validateRecoveryScopeFlags(recoveryEnabled(), effectiveSnapshotRequired, recoveryCutoff, recoveryMode); scopeErr != nil {
 		log.Fatalf("❌ Konfigurasi recovery scope tidak valid: %v", scopeErr)
 	}
@@ -409,9 +380,6 @@ func main() {
 	if recoveryEnabled() && recoveryMode != "agent_direct" && (snapshotStore == nil || snapshotCipher == nil || snapshotBuilder == nil || fabricSvc == nil) {
 		log.Fatal("❌ RECOVERY_ENABLED=true membutuhkan MinIO, encryption key, snapshot builder, dan Fabric yang valid")
 	}
-	if recoveryEnabled() && recoveryMode == "agent_direct" && gatewaySnapshotRecovery && (snapshotStore == nil || snapshotCipher == nil || snapshotBuilder == nil || fabricSvc == nil) {
-		log.Fatal("❌ GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true membutuhkan MinIO, encryption key, snapshot builder, dan Fabric yang valid")
-	}
 	if recoveryEnabled() && recoveryMode == "agent_direct" && fabricSvc == nil {
 		log.Fatal("❌ RECOVERY_MODE=agent_direct membutuhkan koneksi Fabric yang valid")
 	}
@@ -426,7 +394,6 @@ func main() {
 	recoveryService := recovery.NewService(db, snapshotStore, snapshotCipher, fabricSvc, recoverySnapshotBuilder)
 	recoveryService.SetRecoveryCutoff(recoveryCutoff)
 	recoveryService.SetRecoveryMode(recoveryMode)
-	recoveryService.SetGatewaySnapshotRecoveryEnabled(gatewaySnapshotRecovery)
 	agentService := agentverifier.NewService(db)
 	recoveryService.SetAgentVerifier(agentService)
 

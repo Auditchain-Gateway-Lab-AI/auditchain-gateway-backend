@@ -26,15 +26,14 @@ type FabricReader interface {
 }
 
 type Service struct {
-	db                      *gorm.DB
-	store                   snapshotstore.SnapshotStore
-	cipher                  *snapshotstore.Cipher
-	fabric                  FabricReader
-	snapshotBuilder         snapshotstore.RecoveryEventOutboxBuilder
-	recoveryCutoff          *time.Time
-	agent                   *agentverifier.Service
-	mode                    string
-	gatewaySnapshotRecovery bool
+	db              *gorm.DB
+	store           snapshotstore.SnapshotStore
+	cipher          *snapshotstore.Cipher
+	fabric          FabricReader
+	snapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
+	recoveryCutoff  *time.Time
+	agent           *agentverifier.Service
+	mode            string
 }
 
 type IncidentFilter struct {
@@ -69,6 +68,7 @@ type CandidateView struct {
 	LogID                 string     `json:"log_id"`
 	Resource              string     `json:"resource,omitempty"`
 	Operation             string     `json:"operation,omitempty"`
+	RecoverySource        string     `json:"recovery_source,omitempty"`
 	ReferenceLogHash      string     `json:"reference_log_hash,omitempty"`
 	ReferenceMerkleRoot   string     `json:"reference_merkle_root,omitempty"`
 	ReferenceAnchorID     string     `json:"reference_anchor_id,omitempty"`
@@ -95,24 +95,28 @@ type SnapshotPreview struct {
 }
 
 type PreflightResult struct {
-	Status           string          `json:"status"`
-	Recoverable      bool            `json:"recoverable"`
-	LogID            string          `json:"log_id"`
-	CurrentHash      string          `json:"current_hash"`
-	CurrentIntegrity string          `json:"current_integrity"`
-	SnapshotHash     string          `json:"snapshot_hash"`
-	MerkleRoot       string          `json:"merkle_root"`
-	AnchorID         string          `json:"anchor_id"`
-	ObjectVersionID  string          `json:"object_version_id"`
-	SnapshotPreview  SnapshotPreview `json:"snapshot_preview"`
-	Operation        string          `json:"operation,omitempty"`
-	ReferenceLogHash string          `json:"reference_log_hash,omitempty"`
-	FabricRoot       string          `json:"fabric_root,omitempty"`
-	ClientStateHash  string          `json:"client_state_hash,omitempty"`
-	DesiredStateHash string          `json:"desired_state_hash,omitempty"`
-	SourceStatus     string          `json:"source_status,omitempty"`
-	AgentStatus      string          `json:"agent_status,omitempty"`
-	SourceFound      bool            `json:"source_found,omitempty"`
+	Status                  string           `json:"status"`
+	Recoverable             bool             `json:"recoverable"`
+	LogID                   string           `json:"log_id"`
+	RecoverySource          string           `json:"recovery_source,omitempty"`
+	CurrentHash             string           `json:"current_hash"`
+	CurrentIntegrity        string           `json:"current_integrity"`
+	SnapshotHash            string           `json:"snapshot_hash"`
+	MerkleRoot              string           `json:"merkle_root"`
+	AnchorID                string           `json:"anchor_id"`
+	ObjectVersionID         string           `json:"object_version_id"`
+	SnapshotPreview         SnapshotPreview  `json:"snapshot_preview"`
+	TrustedReferencePreview *SnapshotPreview `json:"trusted_reference_preview,omitempty"`
+	Operation               string           `json:"operation,omitempty"`
+	ReferenceLogHash        string           `json:"reference_log_hash,omitempty"`
+	ReferenceMerkleRoot     string           `json:"reference_merkle_root,omitempty"`
+	ReferenceAnchorID       string           `json:"reference_anchor_id,omitempty"`
+	FabricRoot              string           `json:"fabric_root,omitempty"`
+	ClientStateHash         string           `json:"client_state_hash,omitempty"`
+	DesiredStateHash        string           `json:"desired_state_hash,omitempty"`
+	SourceStatus            string           `json:"source_status,omitempty"`
+	AgentStatus             string           `json:"agent_status,omitempty"`
+	SourceFound             bool             `json:"source_found,omitempty"`
 }
 
 type CreateRequestInput struct {
@@ -352,18 +356,10 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 			}
 			return nil, err
 		}
-		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
-			return s.listDirectCandidate(ctx, clientID, incidentID)
+		if strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.listGatewayAuditTrailCandidate(ctx, clientID, incidentID)
 		}
-		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
-			return []CandidateView{{
-				LogID: directIncident.LogID, Resource: directIncident.Resource,
-				Eligible: false, Reason: "gateway_snapshot_recovery_disabled",
-			}}, nil
-		}
-		if !s.snapshotRuntimeReady() {
-			return nil, errors.New("recovery_storage_unavailable")
-		}
+		return s.listDirectCandidate(ctx, clientID, incidentID)
 	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
@@ -425,15 +421,10 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 			}
 			return nil, err
 		}
-		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
-			return s.preflightDirect(ctx, clientID, incidentID)
+		if strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.preflightGatewayAuditTrail(ctx, clientID, incidentID)
 		}
-		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
-			return nil, errors.New("gateway_snapshot_recovery_disabled")
-		}
-		if !s.snapshotRuntimeReady() {
-			return nil, errors.New("recovery_storage_unavailable")
-		}
+		return s.preflightDirect(ctx, clientID, incidentID)
 	}
 	var incident models.TamperIncident
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&incident).Error; err != nil {
@@ -531,15 +522,10 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 			}
 			return nil, err
 		}
-		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
-			return s.createDirectRequest(ctx, clientID, userID, input)
+		if strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.createGatewayAuditTrailRequest(ctx, clientID, userID, input)
 		}
-		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
-			return nil, errors.New("gateway_snapshot_recovery_disabled")
-		}
-		if !s.snapshotRuntimeReady() {
-			return nil, errors.New("recovery_storage_unavailable")
-		}
+		return s.createDirectRequest(ctx, clientID, userID, input)
 	}
 
 	var incident models.TamperIncident
@@ -703,15 +689,10 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 			}
 			return nil, err
 		}
-		if !strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
-			return s.executeDirect(ctx, clientID, requestID, executorID)
+		if strings.EqualFold(strings.TrimSpace(directIncident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
+			return s.executeGatewayAuditTrail(ctx, clientID, requestID, executorID)
 		}
-		if !s.usesGatewaySnapshotRecovery(directIncident.IncidentScope) {
-			return nil, errors.New("gateway_snapshot_recovery_disabled")
-		}
-		if !s.snapshotRuntimeReady() {
-			return nil, errors.New("recovery_storage_unavailable")
-		}
+		return s.executeDirect(ctx, clientID, requestID, executorID)
 	}
 	if s.store == nil || s.cipher == nil || s.snapshotBuilder == nil {
 		return nil, errors.New("recovery_storage_unavailable")

@@ -137,7 +137,6 @@ VERIFICATION_SCHEDULER_RUN_ON_START=false
 RECOVERY_ENABLED=false
 RECOVERY_MODE=agent_direct
 RECOVERY_CDC_TIMEOUT_SECONDS=120
-GATEWAY_SNAPSHOT_RECOVERY_ENABLED=false
 SNAPSHOT_WRITER_ENABLED=false
 SNAPSHOT_REQUIRED_FOR_ANCHOR=false
 SNAPSHOT_WORKER_CONCURRENCY=1
@@ -147,10 +146,8 @@ SNAPSHOT_POLL_INTERVAL_SECONDS=2
 SNAPSHOT_ENCRYPTION_ACTIVE_KEY_ID=key-2026-01
 SNAPSHOT_ENCRYPTION_KEY=ganti-dengan-key-32-byte-base64-atau-hex
 
-# Optional for legacy snapshot compatibility or Gateway audit-log restore:
+# Optional only for deployments still using legacy snapshot compatibility:
 # RECOVERY_MODE=snapshot_legacy
-# Or keep agent_direct and opt only Gateway integrity restores into the verified snapshot path:
-# GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true
 # RECOVERY_CUTOFF_AT=2026-09-18T14:34:33Z
 # MINIO_ENDPOINT=minio:9000
 # MINIO_BUCKET=auditchain-recovery
@@ -218,22 +215,20 @@ Aktifkan recovery hanya setelah migration additive dan smoke test staging
 berhasil.
 Dalam mode `snapshot_legacy`, `SNAPSHOT_REQUIRED_FOR_ANCHOR=true` membuat
 `SNAPSHOT_WRITER_ENABLED` dan konfigurasi MinIO wajib aktif; Gateway akan
-menolak start bila tidak. Pada mode `agent_direct`, flag snapshot lama
-diabaikan agar environment lama tidak menghidupkan dependency MinIO, kecuali
-`GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true` diaktifkan secara eksplisit.
+menolak start bila tidak. Pada mode `agent_direct`, Gateway tidak memulai
+runtime snapshot MinIO. Recovery data client memakai Agent; perbaikan metadata
+audit log Gateway membaca event sumber `audit_trail` melalui Agent, lalu
+memvalidasi hash leaf, Merkle proof, dan anchor Fabric sebelum menyimpan.
 
 Mode `agent_direct` memulihkan row database operasional client
 yang sudah ada melalui Agent, tanpa SQL arbitrer dan tanpa membuat tabel baru.
 Request client tidak membutuhkan approval admin; tenant tetap dibatasi oleh
 `client_id` JWT.
 
-Pemulihan insiden `GATEWAY_INTEGRITY` dapat diaktifkan secara terpisah pada mode
-direct dengan `GATEWAY_SNAPSHOT_RECOVERY_ENABLED=true`. Jalur ini hanya
-memulihkan row `audit_logs` dari versi snapshot yang checksum, hash, Merkle
-proof, dan anchor Fabric-nya lolos verifikasi. Pengaturan ini memerlukan
-`RECOVERY_ENABLED=true`, `SNAPSHOT_WRITER_ENABLED=true`, `RECOVERY_CUTOFF_AT`,
-MinIO, encryption key, dan Fabric. Insiden `CLIENT_SOURCE` tetap memakai Agent;
-insiden Gateway tanpa snapshot valid tetap read-only.
+Pemulihan metadata `GATEWAY_INTEGRITY` tersedia pada mode `agent_direct` jika
+`source_record_id` menghubungkan log ke event `audit_trail` yang dapat dibaca
+Agent. Log tanpa referensi sumber atau bukti anchor tetap read-only. Jalur ini
+tidak memerlukan MinIO atau event tamper baru.
 
 Mode `snapshot_legacy` masih tersedia hanya untuk kompatibilitas/rollback. Jika
 mode itu memang diperlukan, jalankan Compose dengan override khusus berikut:
