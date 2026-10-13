@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -1031,8 +1032,7 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 				agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
 				logRangeTiming(requestID, "agent_verify", agentStarted, agentErr, "log_id", logID)
 				if agentErr != nil {
-					agentStatus = "unreachable"
-					sourceStatus = models.SourceStatusUnreachable
+					agentStatus, sourceStatus = agentFailureStatuses(agentErr)
 				} else if agentResult == nil {
 					agentStatus = "unreachable"
 					sourceStatus = models.SourceStatusUnreachable
@@ -1431,6 +1431,25 @@ func sourceStatusFromAgentStatus(status string) string {
 	default:
 		return ""
 	}
+}
+
+// agentFailureStatuses distinguishes an Agent that answered but denied or
+// rejected the request from an Agent that could not be reached. A denied
+// request is not evidence that the client row mismatches; no comparison ran.
+func agentFailureStatuses(err error) (agentStatus, sourceStatus string) {
+	var statusErr *agentverifier.HTTPStatusError
+	if errors.As(err, &statusErr) && statusErr != nil {
+		switch statusErr.StatusCode {
+		case http.StatusUnauthorized:
+			return "unauthorized", models.SourceStatusNotComparable
+		case http.StatusForbidden:
+			return "forbidden", models.SourceStatusNotComparable
+		default:
+			return "http_error", models.SourceStatusNotComparable
+		}
+	}
+
+	return "unreachable", models.SourceStatusUnreachable
 }
 
 // recordClientSourceIncident records a discrepancy between a trusted latest
@@ -1923,8 +1942,7 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 	logCopy := auditLog
 	agentResult, err := s.agent.VerifyAgainstAgent(&logCopy)
 	if err != nil {
-		item.AgentStatus = "unreachable"
-		item.SourceStatus = models.SourceStatusUnreachable
+		item.AgentStatus, item.SourceStatus = agentFailureStatuses(err)
 	} else if agentResult.AgentUsed {
 		if agentResult.IsMatch {
 			item.AgentStatus = "matched"

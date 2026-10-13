@@ -2,8 +2,10 @@ package audit
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
+	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/models"
 )
 
@@ -115,6 +117,50 @@ func TestResourceGatewayStatusesDoNotUseAgentReachability(t *testing.T) {
 			if gotIntegrity != tt.wantIntegrity || gotChain != tt.wantChain {
 				t.Fatalf("resourceGatewayStatuses(%q) = (%q, %q), want (%q, %q)",
 					tt.baseStatus, gotIntegrity, gotChain, tt.wantIntegrity, tt.wantChain)
+			}
+		})
+	}
+}
+
+func TestAgentFailureStatusesDistinguishHTTPDenialFromUnreachable(t *testing.T) {
+	tests := []struct {
+		name             string
+		err              error
+		wantAgentStatus  string
+		wantSourceStatus string
+	}{
+		{
+			name:             "forbidden means reached but access denied",
+			err:              fmt.Errorf("wrapped Agent error: %w", &agentverifier.HTTPStatusError{StatusCode: 403}),
+			wantAgentStatus:  "forbidden",
+			wantSourceStatus: models.SourceStatusNotComparable,
+		},
+		{
+			name:             "unauthorized means verification token rejected",
+			err:              &agentverifier.HTTPStatusError{StatusCode: 401},
+			wantAgentStatus:  "unauthorized",
+			wantSourceStatus: models.SourceStatusNotComparable,
+		},
+		{
+			name:             "other HTTP failure means Agent responded",
+			err:              &agentverifier.HTTPStatusError{StatusCode: 500},
+			wantAgentStatus:  "http_error",
+			wantSourceStatus: models.SourceStatusNotComparable,
+		},
+		{
+			name:             "transport failure means unreachable",
+			err:              errors.New("dial tcp: i/o timeout"),
+			wantAgentStatus:  "unreachable",
+			wantSourceStatus: models.SourceStatusUnreachable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAgentStatus, gotSourceStatus := agentFailureStatuses(tt.err)
+			if gotAgentStatus != tt.wantAgentStatus || gotSourceStatus != tt.wantSourceStatus {
+				t.Fatalf("agentFailureStatuses() = (%q, %q), want (%q, %q)",
+					gotAgentStatus, gotSourceStatus, tt.wantAgentStatus, tt.wantSourceStatus)
 			}
 		})
 	}

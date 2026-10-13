@@ -77,6 +77,31 @@ type ResourceRecord struct {
 	CheckedAt time.Time              `json:"checked_at"`
 }
 
+// HTTPStatusError reports an HTTP response received from the Agent. It is
+// distinct from transport errors: a 403 means the Agent was reached but
+// refused the verification request, not that the Agent is unreachable.
+type HTTPStatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPStatusError) Error() string {
+	if e == nil {
+		return "Agent mengembalikan status HTTP yang tidak valid"
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	switch e.StatusCode {
+	case http.StatusUnauthorized:
+		return "token verifikasi Agent tidak valid (401)"
+	case http.StatusForbidden:
+		return "akses verifikasi Agent ditolak (403)"
+	default:
+		return fmt.Sprintf("Agent mengembalikan status %d", e.StatusCode)
+	}
+}
+
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
@@ -277,11 +302,8 @@ func (s *Service) fetchResourceFromAgentContext(ctx context.Context, cfg *models
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("token verifikasi Agent tidak valid (401)")
-	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Agent mengembalikan status %d", resp.StatusCode)
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -380,14 +402,15 @@ func fetchAuditTrailFromAgent(ctx context.Context, cfg *models.AgentConfig, sour
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("token verifikasi Agent tidak valid (401) — periksa AGENT_VERIFY_TOKEN")
-	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("audit_trail_record_not_found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent_audit_trail_unavailable: Agent mengembalikan status %d", resp.StatusCode)
+		message := fmt.Sprintf("agent_audit_trail_unavailable: Agent mengembalikan status %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusUnauthorized {
+			message = "token verifikasi Agent tidak valid (401) — periksa AGENT_VERIFY_TOKEN"
+		}
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Message: message}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
