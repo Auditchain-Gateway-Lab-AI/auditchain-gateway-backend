@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+    "sha256": "6d03649c6f850f2937cefa0522d5a257ef7e5da545a40df1ae7283edbaa7128d",
+    "bytes": 8049
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html",
+    "sha256": "b92f3c24f9695f9abd3a9ca4c97336a518f13e77e3a0c01a0e7a94added923e8",
+    "bytes": 771935
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "composition/label-canvas-containment",
+      "severity": "error",
+      "message": "[composition/label-canvas-containment] showcase sequence label \"GET /api/dashboard/verify/{log_id} + JWT\" on messages[0] id \"start-verify\" \"portal\" -> \"api\" extends past the left edge by 22px (label rect [-22, 164, 276, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+      "subject": {
+        "diagramType": "sequence",
+        "collection": "messages",
+        "index": 0,
+        "id": "start-verify",
+        "from": "portal",
+        "to": "api"
+      },
+      "evidence": {
+        "label": "GET /api/dashboard/verify/{log_id} + JWT",
+        "labelRect": {
+          "x": -22,
+          "y": 164,
+          "width": 276,
+          "height": 18
+        },
+        "viewBox": [
+          920,
+          1178
+        ],
+        "overflowPx": {
+          "left": 22
+        },
+        "tolerancePx": 0.5
+      },
+      "supportedFixes": [
+        "shorten the label, reorder participants, or enlarge meta.viewBox"
+      ]
+    },
+    {
+      "code": "composition/label-canvas-containment",
+      "severity": "error",
+      "message": "[composition/label-canvas-containment] showcase sequence label \"Tampilkan hasil verifikasi dan rincian status\" on messages[18] id \"result-to-portal\" \"api\" -> \"portal\" extends past the left edge by 38.5px (label rect [-38, 1028, 309, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+      "subject": {
+        "diagramType": "sequence",
+        "collection": "messages",
+        "index": 18,
+        "id": "result-to-portal",
+        "from": "api",
+        "to": "portal"
+      },
+      "evidence": {
+        "label": "Tampilkan hasil verifikasi dan rincian status",
+        "labelRect": {
+          "x": -38.5,
+          "y": 1028,
+          "width": 309,
+          "height": 18
+        },
+        "viewBox": [
+          920,
+          1178
+        ],
+        "overflowPx": {
+          "left": 38.5
+        },
+        "tolerancePx": 0.5
+      },
+      "supportedFixes": [
+        "shorten the label, reorder participants, or enlarge meta.viewBox"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 2,
+    "shown": 2,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.finalize-summary.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1111,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+    "constraint": "Preserve unaffected semantics and geometry; do not replace the whole candidate.",
+    "then": "finalize-once"
+  }
+}

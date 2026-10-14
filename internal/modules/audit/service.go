@@ -24,6 +24,8 @@ import (
 
 type VerificationResult struct {
 	Status             string                      `json:"status"`
+	Assessment         string                      `json:"verification_assessment,omitempty"`
+	ProofStatus        string                      `json:"proof_status,omitempty"`
 	Message            string                      `json:"message"`
 	IsValid            bool                        `json:"is_valid"`
 	ExpectedHash       string                      `json:"expected_hash"`
@@ -38,6 +40,13 @@ type VerificationResult struct {
 	TxID               *string                     `json:"blockchain_tx_id,omitempty"`
 	AgentStatus        string                      `json:"agent_status,omitempty"`
 	SourceStatus       string                      `json:"source_status,omitempty"`
+	StateComparison    string                      `json:"state_comparison,omitempty"`
+	ComparisonBasis    string                      `json:"comparison_basis,omitempty"`
+	OffchainStateHash  string                      `json:"offchain_state_hash,omitempty"`
+	ClientStateHash    string                      `json:"client_state_hash,omitempty"`
+	SourceCheckedAt    *time.Time                  `json:"source_checked_at,omitempty"`
+	AuditTrailStatus   string                      `json:"audit_trail_status,omitempty"`
+	AuditTrailDiffs    []agentverifier.Discrepancy `json:"audit_trail_discrepancies,omitempty"`
 	SourceStateHash    string                      `json:"-"`
 	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
 }
@@ -152,6 +161,8 @@ type ResourceLogVerification struct {
 	HashValue       string `json:"hash_value"`
 	IntegrityStatus string `json:"integrity_status"` // valid | tampered | pending | unreachable
 	ChainStatus     string `json:"chain_status"`     // Alias untuk kompabilitas frontend
+	ProofStatus     string `json:"proof_status,omitempty"`
+	Assessment      string `json:"verification_assessment,omitempty"`
 	// RecoveryStatus adalah status workflow recovery untuk log target ini.
 	// Status ini sengaja dipisah dari IntegrityStatus: Agent client yang tidak
 	// dapat dihubungi tidak boleh membuat log yang sudah pulih terlihat rusak.
@@ -164,8 +175,14 @@ type ResourceLogVerification struct {
 	RecoveryExecutedAt *time.Time `json:"recovery_executed_at,omitempty"`
 	// SourceStatus is the live-client comparison dimension. It must not be
 	// folded into IntegrityStatus/ChainStatus, which describe Gateway + Fabric.
-	SourceStatus    string `json:"source_status,omitempty"`
-	SourceStateHash string `json:"-"`
+	SourceStatus      string     `json:"source_status,omitempty"`
+	StateComparison   string     `json:"state_comparison,omitempty"`
+	ComparisonBasis   string     `json:"comparison_basis,omitempty"`
+	OffchainStateHash string     `json:"offchain_state_hash,omitempty"`
+	ClientStateHash   string     `json:"client_state_hash,omitempty"`
+	SourceCheckedAt   *time.Time `json:"source_checked_at,omitempty"`
+	AuditTrailStatus  string     `json:"audit_trail_status,omitempty"`
+	SourceStateHash   string     `json:"-"`
 	// IsLatest marks the newest event in the timeline. A RECOVERY event can be
 	// latest because it is a valid AuditChain event.
 	IsLatest bool `json:"is_latest"`
@@ -232,6 +249,7 @@ type RangeSummary struct {
 	Valid           int `json:"valid"`
 	Invalid         int `json:"invalid"`
 	Pending         int `json:"pending"`
+	Inconclusive    int `json:"inconclusive"`
 	AlreadyVerified int `json:"already_verified"`
 	VerifiedNow     int `json:"verified_now"`
 }
@@ -282,12 +300,22 @@ func normalizeDBEngine(engine string) string {
 }
 
 type RangeItemResult struct {
-	LogID              string                      `json:"log_id"`
-	Log                models.AuditLog             `json:"log"`
-	VerifyStatus       string                      `json:"verify_status"`
-	Message            string                      `json:"message,omitempty"`
-	AgentStatus        string                      `json:"agent_status,omitempty"`
-	AgentDiscrepancies []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
+	LogID                   string                      `json:"log_id"`
+	Log                     models.AuditLog             `json:"log"`
+	VerifyStatus            string                      `json:"verify_status"`
+	Message                 string                      `json:"message,omitempty"`
+	VerificationAssessment  string                      `json:"verification_assessment,omitempty"`
+	ProofStatus             string                      `json:"proof_status,omitempty"`
+	AgentStatus             string                      `json:"agent_status,omitempty"`
+	SourceStatus            string                      `json:"source_status,omitempty"`
+	StateComparison         string                      `json:"state_comparison,omitempty"`
+	ComparisonBasis         string                      `json:"comparison_basis,omitempty"`
+	OffchainStateHash       string                      `json:"offchain_state_hash,omitempty"`
+	ClientStateHash         string                      `json:"client_state_hash,omitempty"`
+	SourceCheckedAt         *time.Time                  `json:"source_checked_at,omitempty"`
+	AuditTrailStatus        string                      `json:"audit_trail_status,omitempty"`
+	AgentDiscrepancies      []agentverifier.Discrepancy `json:"agent_discrepancies,omitempty"`
+	AuditTrailDiscrepancies []agentverifier.Discrepancy `json:"audit_trail_discrepancies,omitempty"`
 }
 
 // EstimateLogRange menghitung jumlah log yang akan diproses sebelum operasi
@@ -410,6 +438,7 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 
 	if hasCachedIntegrity(&auditLog) {
 		item.VerifyStatus, item.Message = cachedRangeStatus(auditLog.IntegrityStatus)
+		item.VerificationAssessment = cachedRangeAssessment(auditLog.IntegrityStatus)
 		return item, false
 	}
 
@@ -429,8 +458,18 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 	} else {
 		item.VerifyStatus = verifyResult.Status
 		item.Message = verifyResult.Message
+		item.VerificationAssessment = verifyResult.Assessment
+		item.ProofStatus = verifyResult.ProofStatus
 		item.AgentStatus = verifyResult.AgentStatus
+		item.SourceStatus = verifyResult.SourceStatus
+		item.StateComparison = verifyResult.StateComparison
+		item.ComparisonBasis = verifyResult.ComparisonBasis
+		item.OffchainStateHash = verifyResult.OffchainStateHash
+		item.ClientStateHash = verifyResult.ClientStateHash
+		item.SourceCheckedAt = verifyResult.SourceCheckedAt
+		item.AuditTrailStatus = verifyResult.AuditTrailStatus
 		item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
+		item.AuditTrailDiscrepancies = verifyResult.AuditTrailDiffs
 		persistedStatus = integrityStatusFromVerificationResult(verifyResult)
 		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, nil)
 	}
@@ -461,9 +500,24 @@ func cachedRangeStatus(status string) (string, string) {
 	case models.IntegrityStatusTampered:
 		return "failed_cached", "Hasil verifikasi tampered tersimpan dan digunakan kembali."
 	case models.IntegrityStatusUnreachable:
-		return "error", "Hasil verifikasi unavailable tersimpan dan digunakan kembali."
+		return "inconclusive_cached", "Pemeriksaan tersimpan belum dapat disimpulkan; verifikasi ulang diperlukan."
 	default:
 		return "error", "Hasil verifikasi tersimpan dengan status tidak dikenal."
+	}
+}
+
+func cachedRangeAssessment(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case models.IntegrityStatusValid:
+		return "CACHED_GATEWAY_INTEGRITY_ONLY"
+	case models.IntegrityStatusPending:
+		return "PENDING"
+	case models.IntegrityStatusTampered:
+		return "CACHED_GATEWAY_INTEGRITY_FAILED"
+	case models.IntegrityStatusUnreachable:
+		return "INCONCLUSIVE_CACHED_RESULT"
+	default:
+		return "INCONCLUSIVE_CACHED_RESULT"
 	}
 }
 
@@ -477,6 +531,8 @@ func integrityStatusFromVerificationResult(result *VerificationResult) string {
 		return models.IntegrityStatusValid
 	case "pending":
 		return models.IntegrityStatusPending
+	case "inconclusive":
+		return models.IntegrityStatusUnreachable
 	case "failed_local", "failed_onchain", "failed_source":
 		return models.IntegrityStatusTampered
 	default:
@@ -491,8 +547,10 @@ func addRangeSummary(summary *RangeSummary, status string) {
 		summary.Valid++
 	case "pending":
 		summary.Pending++
-	default:
+	case "failed_local", "failed_onchain", "failed_source", "failed_cached":
 		summary.Invalid++
+	default:
+		summary.Inconclusive++
 	}
 }
 
@@ -541,9 +599,11 @@ func (s *auditService) updateRangeDashboardStats(clientID string, newlyVerified 
 			case "pending":
 				totalPending++
 				table.Pending++
-			default:
+			case "failed_local", "failed_onchain", "failed_source", "failed_cached":
 				totalTampered++
 				table.Invalid++
+			default:
+				table.Unavailable++
 			}
 			tableResults[tableName] = table
 		}
@@ -665,6 +725,8 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 			status = models.IntegrityStatusValid
 		case "pending":
 			status = models.IntegrityStatusPending
+		case "inconclusive":
+			status = models.IntegrityStatusUnreachable
 		case "failed_local", "failed_onchain", "failed_source":
 			status = models.IntegrityStatusTampered
 		}
@@ -690,7 +752,7 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 			result.IncidentID = incident.ID
 			result.IncidentScope = incident.IncidentScope
 			result.IncidentStatus = incident.Status
-		} else if err == nil && isClientSourceIncidentStatus(result.SourceStatus) {
+		} else if err == nil && shouldRecordClientSourceIncident(result.ProofStatus, result.SourceStatus) {
 			auditLog, lookupErr := s.repo.GetLogByID(result.LogID, clientID)
 			if lookupErr != nil {
 				return result, &IncidentPersistenceError{
@@ -801,7 +863,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			continue
 		}
 
-		if auditLog.MerkleRoot == "" || auditLog.MerkleRoot != anchor.root {
+		if auditLog.MerkleRoot != "" && auditLog.MerkleRoot != anchor.root {
 			result.Status = models.IntegrityStatusTampered
 			s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
 			results[auditLog.LogID] = result
@@ -816,6 +878,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
 			continue
 		}
+		proofs = proofsForAnchorRoot(proofs, anchor.root)
 		for _, proof := range proofs {
 			if proof.MerkleRoot != "" && proof.MerkleRoot != anchor.root {
 				result.Status = models.IntegrityStatusTampered
@@ -834,8 +897,16 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			reconstructedRoot = crypto.ReconstructMerkleRoot(auditLog.HashValue, toMerkleProofData(proofs))
 		}
 		if reconstructedRoot != anchor.root {
-			result.Status = models.IntegrityStatusTampered
-			s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", reconstructedRoot)
+			if auditLog.MerkleRoot == anchor.root {
+				result.Status = models.IntegrityStatusUnreachable
+				result.Err = errors.New("legacy_merkle_proof_incomplete")
+			} else if len(proofs) == 0 && auditLog.MerkleRoot == "" {
+				result.Status = models.IntegrityStatusUnreachable
+				result.Err = errors.New("merkle_proof_missing")
+			} else {
+				result.Status = models.IntegrityStatusTampered
+				s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", reconstructedRoot)
+			}
 		} else {
 			result.Status = models.IntegrityStatusValid
 		}
@@ -912,10 +983,12 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 
 	if isHashStillPending(auditLog) {
 		return &VerificationResult{
-			Status:  "pending",
-			Message: "Log sudah diterima, tetapi hash final masih diproses pipeline.",
-			IsValid: true,
-			LogID:   auditLog.LogID,
+			Status:      "pending",
+			Assessment:  "PENDING",
+			ProofStatus: "PENDING",
+			Message:     "Log sudah diterima, tetapi hash final masih diproses pipeline.",
+			IsValid:     true,
+			LogID:       auditLog.LogID,
 		}, nil
 	}
 
@@ -925,7 +998,9 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 		s.recordTamperIncident(*auditLog, "METADATA_HASH_MISMATCH", recalculatedHash)
 		return &VerificationResult{
 			Status:       "failed_local",
-			Message:      "🚨 DATA TERMANIPULASI: Isi data telah diubah di database middleware.",
+			Assessment:   "OFFCHAIN_INTEGRITY_FAILED",
+			ProofStatus:  "FAILED_LOCAL_HASH",
+			Message:      "Hash log off-chain tidak cocok dengan isi log yang tersimpan. Bukti integritas Gateway gagal.",
 			IsValid:      false,
 			LogID:        auditLog.LogID,
 			IncidentType: "METADATA_HASH_MISMATCH",
@@ -936,36 +1011,65 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 
 	if auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "PENDING_OR_FAILED" {
 		return &VerificationResult{
-			Status:  "pending",
-			Message: "Log otentik secara lokal. Menunggu antrean Blockchain.",
-			IsValid: true,
-			LogID:   auditLog.LogID,
+			Status:      "pending",
+			Assessment:  "PENDING",
+			ProofStatus: "PENDING_ANCHOR",
+			Message:     "Log otentik secara lokal. Menunggu antrean Blockchain.",
+			IsValid:     true,
+			LogID:       auditLog.LogID,
 		}, nil
 	}
 
 	if s.fabric == nil {
-		return nil, errors.New("fabric_error")
+		return &VerificationResult{
+			Status: "inconclusive", Assessment: "INCONCLUSIVE_FABRIC_UNAVAILABLE",
+			ProofStatus: "UNAVAILABLE_FABRIC", Message: "Fabric tidak tersedia; bukti anchor belum dapat diperiksa.",
+			LogID: auditLog.LogID,
+		}, nil
 	}
 	fabricStarted := time.Now()
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	logRangeTiming(requestID, "fabric_anchor_lookup", fabricStarted, err, "log_id", logID)
 	if err != nil {
-		return nil, errors.New("fabric_error")
+		return &VerificationResult{
+			Status: "inconclusive", Assessment: "INCONCLUSIVE_FABRIC_UNAVAILABLE",
+			ProofStatus: "UNAVAILABLE_FABRIC", Message: "Fabric tidak merespons; bukti anchor belum dapat diperiksa.",
+			LogID: auditLog.LogID,
+		}, nil
 	}
 
 	var fabricResponse struct {
 		MerkleRoot string `json:"merkle_root"`
 	}
 	if err := json.Unmarshal([]byte(onChainData), &fabricResponse); err != nil {
-		return nil, errors.New("parse_error")
+		return &VerificationResult{
+			Status: "inconclusive", Assessment: "INCONCLUSIVE_FABRIC_ANCHOR_INVALID",
+			ProofStatus: "UNAVAILABLE_FABRIC_ANCHOR_INVALID", Message: "Respons anchor Fabric tidak dapat dibaca; bukti belum dapat disimpulkan.",
+			LogID: auditLog.LogID,
+		}, nil
+	}
+	fabricResponse.MerkleRoot = strings.TrimSpace(fabricResponse.MerkleRoot)
+	if fabricResponse.MerkleRoot == "" {
+		return &VerificationResult{
+			Status:      "inconclusive",
+			Assessment:  "INCONCLUSIVE_FABRIC_ANCHOR_INVALID",
+			ProofStatus: "UNAVAILABLE_FABRIC_ROOT",
+			Message:     "Anchor ditemukan, tetapi Merkle root tidak tersedia untuk pembuktian.",
+			LogID:       auditLog.LogID,
+		}, nil
 	}
 
 	proofLookupStarted := time.Now()
 	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
 	logRangeTiming(requestID, "db_proof_lookup", proofLookupStarted, perr, "log_id", logID)
 	if perr != nil {
-		return nil, errors.New("proof_lookup_error")
+		return &VerificationResult{
+			Status: "inconclusive", Assessment: "INCONCLUSIVE_MERKLE_PROOF_LOOKUP_FAILED",
+			ProofStatus: "UNAVAILABLE_MERKLE_PROOF_LOOKUP", Message: "Proof Merkle gagal dibaca dari off-chain; hasil belum dapat disimpulkan.",
+			LogID: auditLog.LogID,
+		}, nil
 	}
+	proofs = proofsForAnchorRoot(proofs, fabricResponse.MerkleRoot)
 
 	reconstructedRoot := auditLog.HashValue // batch 1-leaf: root == hash itu sendiri
 	if len(proofs) > 0 {
@@ -975,7 +1079,9 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 		s.recordTamperIncident(*auditLog, "MERKLE_ROOT_MISMATCH", recalculatedHash)
 		return &VerificationResult{
 			Status:       "failed_onchain",
-			Message:      "🚨 DATA TERMANIPULASI: Merkle root pada database berbeda dari anchor Fabric.",
+			Assessment:   "OFFCHAIN_FABRIC_PROOF_FAILED",
+			ProofStatus:  "FAILED_ANCHOR_ROOT",
+			Message:      "Merkle root off-chain berbeda dari anchor yang tercatat di Fabric.",
 			IsValid:      false,
 			LogID:        auditLog.LogID,
 			IncidentType: "MERKLE_ROOT_MISMATCH",
@@ -985,17 +1091,52 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 			ChainRoot:    fabricResponse.MerkleRoot,
 		}, nil
 	}
+	for _, proof := range proofs {
+		if proof.MerkleRoot != "" && proof.MerkleRoot != fabricResponse.MerkleRoot {
+			s.recordTamperIncident(*auditLog, "MERKLE_PROOF_MISMATCH", recalculatedHash)
+			return &VerificationResult{
+				Status:       "failed_onchain",
+				Assessment:   "OFFCHAIN_FABRIC_PROOF_FAILED",
+				ProofStatus:  "FAILED_PROOF_BATCH_ROOT",
+				Message:      "Proof off-chain merujuk ke root batch yang berbeda dari anchor Fabric.",
+				IsValid:      false,
+				LogID:        auditLog.LogID,
+				IncidentType: "MERKLE_PROOF_MISMATCH",
+				ExpectedHash: auditLog.HashValue,
+				ActualHash:   recalculatedHash,
+				DBRoot:       proof.MerkleRoot,
+				ChainRoot:    fabricResponse.MerkleRoot,
+			}, nil
+		}
+	}
 
 	verifiedVia := "merkle_proof"
 	if reconstructedRoot != fabricResponse.MerkleRoot {
 		// Fallback untuk data lama yang di-anchor SEBELUM fix ini (proof
 		// level>0 & IsLeft belum tersimpan benar) — supaya tidak false-positive
 		// menandai log lama yang sebenarnya sah sebagai "tampered".
-		if auditLog.MerkleRoot != fabricResponse.MerkleRoot {
+		if auditLog.MerkleRoot == fabricResponse.MerkleRoot {
+			verifiedVia = "legacy_field_fallback"
+		} else if len(proofs) == 0 && auditLog.MerkleRoot == "" {
+			return &VerificationResult{
+				Status:       "inconclusive",
+				Assessment:   "INCONCLUSIVE_MERKLE_PROOF_MISSING",
+				ProofStatus:  "UNAVAILABLE_MERKLE_PROOF",
+				Message:      "Hash log lokal cocok, tetapi proof Merkle atau root off-chain yang dapat dibandingkan tidak tersedia.",
+				IsValid:      false,
+				LogID:        auditLog.LogID,
+				ExpectedHash: auditLog.HashValue,
+				ActualHash:   recalculatedHash,
+				DBRoot:       reconstructedRoot,
+				ChainRoot:    fabricResponse.MerkleRoot,
+			}, nil
+		} else {
 			s.recordTamperIncident(*auditLog, "MERKLE_ROOT_MISMATCH", recalculatedHash)
 			return &VerificationResult{
 				Status:       "failed_onchain",
-				Message:      "🚨 FATAL MISMATCH: Merkle Root tidak diakui oleh jaringan Blockchain!",
+				Assessment:   "OFFCHAIN_FABRIC_PROOF_FAILED",
+				ProofStatus:  "FAILED_MERKLE_PROOF",
+				Message:      "Merkle proof dari log off-chain tidak menghasilkan root anchor Fabric.",
 				IsValid:      false,
 				LogID:        auditLog.LogID,
 				IncidentType: "MERKLE_ROOT_MISMATCH",
@@ -1005,17 +1146,26 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 				ChainRoot:    fabricResponse.MerkleRoot,
 			}, nil
 		}
-		verifiedVia = "legacy_field_fallback"
 	}
 
 	successMsg := "✅ DATA OTENTIK: Terverifikasi di database dan Blockchain."
 	if verifiedVia == "legacy_field_fallback" {
 		successMsg += " (diverifikasi via metode lama — log ini di-anchor sebelum perbaikan Merkle proof)"
 	}
+	proofStatus := "VERIFIED"
+	if verifiedVia == "legacy_field_fallback" {
+		proofStatus = "LEGACY_LIMITED"
+	}
 
 	agentStatus := "skipped_historical"
 	sourceStatus := ""
 	sourceStateHash := ""
+	offchainStateHash := ""
+	var sourceCheckedAt *time.Time
+	stateComparison := ""
+	comparisonBasis := ""
+	auditTrailStatus := ""
+	var auditTrailDiffs []agentverifier.Discrepancy
 	var agentDiscrepancies []agentverifier.Discrepancy
 
 	if !skipAgent {
@@ -1037,15 +1187,26 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 					agentStatus = "unreachable"
 					sourceStatus = models.SourceStatusUnreachable
 				} else if agentResult.AgentUsed {
-					if agentResult.IsMatch {
+					offchainStateHash = agentResult.OffchainStateHash
+					sourceStateHash = agentResult.ClientStateHash
+					sourceCheckedAt = agentResult.SourceCheckedAt
+					stateComparison = agentResult.StateComparison
+					comparisonBasis = agentResult.ComparisonBasis
+					auditTrailStatus = agentResult.AuditTrailStatus
+					auditTrailDiffs = agentResult.AuditTrailDiffs
+					if !agentResult.StateComparable {
+						agentStatus = "not_comparable"
+						sourceStatus = models.SourceStatusNotComparable
+					} else if agentResult.IsMatch {
 						agentStatus = "matched"
 						sourceStatus = models.SourceStatusMatched
 					} else {
 						agentStatus = "mismatch"
 						sourceStatus = sourceStatusFromAgentResult(*auditLog, agentResult)
-						sourceStateHash = agentResult.ClientStateHash
 						agentDiscrepancies = agentResult.Discrepancies
-						s.recordClientSourceIncident(*auditLog, sourceStatusFromAgentResult(*auditLog, agentResult), agentResult.ClientStateHash, agentResult.Discrepancies)
+						if shouldRecordClientSourceIncident(proofStatus, sourceStatusFromAgentResult(*auditLog, agentResult)) {
+							s.recordClientSourceIncident(*auditLog, sourceStatusFromAgentResult(*auditLog, agentResult), agentResult.ClientStateHash, agentResult.Discrepancies)
+						}
 					}
 				} else {
 					sourceStatus = models.SourceStatusNotComparable
@@ -1053,9 +1214,21 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 			}
 		}
 	}
+	assessment := verificationAssessment(proofStatus, sourceStatus, agentStatus, auditTrailStatus)
+	if proofStatus == "LEGACY_LIMITED" && (sourceStatus == models.SourceStatusMismatch || sourceStatus == models.SourceStatusMissing || sourceStatus == models.SourceStatusUnexpectedPresent) {
+		successMsg = "Proof Merkle legacy terbatas cocok dengan root Fabric, tetapi belum membuktikan membership secara penuh; terdapat perbedaan pada proyeksi data sumber sehingga kesimpulan end-to-end belum dapat dipastikan."
+	} else if sourceStatus == models.SourceStatusMismatch || sourceStatus == models.SourceStatusMissing || sourceStatus == models.SourceStatusUnexpectedPresent {
+		successMsg = "Bukti log dan Fabric terverifikasi, tetapi proyeksi field data klien berbeda dari event klien terakhir yang tercatat."
+	} else if sourceStatus == models.SourceStatusUnreachable || sourceStatus == models.SourceStatusNotComparable {
+		successMsg = "Bukti log dan Fabric terverifikasi; pemeriksaan state database klien belum dapat disimpulkan."
+	} else if agentStatus == "skipped_historical" || agentStatus == "skipped_recovery" {
+		successMsg = "Bukti log dan Fabric terverifikasi; pemeriksaan data live dilewati karena event ini bukan event klien terbaru."
+	}
 
 	return &VerificationResult{
 		Status:             "success",
+		Assessment:         assessment,
+		ProofStatus:        proofStatus,
 		Message:            successMsg,
 		IsValid:            true,
 		LogID:              auditLog.LogID,
@@ -1064,6 +1237,13 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 		TxID:               auditLog.BlockchainTxID,
 		AgentStatus:        agentStatus,
 		SourceStatus:       sourceStatus,
+		StateComparison:    stateComparison,
+		ComparisonBasis:    comparisonBasis,
+		OffchainStateHash:  offchainStateHash,
+		ClientStateHash:    sourceStateHash,
+		SourceCheckedAt:    sourceCheckedAt,
+		AuditTrailStatus:   auditTrailStatus,
+		AuditTrailDiffs:    auditTrailDiffs,
 		SourceStateHash:    sourceStateHash,
 		AgentDiscrepancies: agentDiscrepancies,
 	}, nil
@@ -1277,41 +1457,51 @@ func (s *auditService) VerifyDataIntegrity(resource, clientID string, rawData *m
 // status "pending" karena belum bisa diverifikasi sampai Layer 4.
 // Verifikasi sepenuhnya berbasis DB (off-chain) + Fabric (on-chain) saja.
 func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
+	status, _ := s.classifyIntegrityDetailed(auditLog)
+	return status
+}
+
+func (s *auditService) classifyIntegrityDetailed(auditLog models.AuditLog) (string, string) {
 	if isHashStillPending(&auditLog) {
-		return "pending"
+		return "pending", "PENDING_HASH"
 	}
 
 	canonicalizeLog(&auditLog)
 	recalculated := hasher.GenerateLogHash(&auditLog)
 	if recalculated != auditLog.HashValue {
 		s.recordTamperIncident(auditLog, "METADATA_HASH_MISMATCH", recalculated)
-		return "tampered"
+		return "tampered", "FAILED_LOCAL_HASH"
 	}
 
 	if auditLog.Status != "ANCHORED" || auditLog.BlockchainTxID == nil || *auditLog.BlockchainTxID == "" {
-		return "pending"
+		return "pending", "PENDING_ANCHOR"
 	}
 
 	if s.fabric == nil {
-		return "unreachable"
+		return "unreachable", "UNAVAILABLE_FABRIC"
 	}
 
 	onChainData, err := s.fabric.GetAnchorFromLedger(*auditLog.BlockchainTxID)
 	if err != nil {
-		return "unreachable"
+		return "unreachable", "UNAVAILABLE_FABRIC"
 	}
 
 	var fabricResponse struct {
 		MerkleRoot string `json:"merkle_root"`
 	}
 	if err := json.Unmarshal([]byte(onChainData), &fabricResponse); err != nil {
-		return "unreachable"
+		return "unreachable", "UNAVAILABLE_FABRIC_ANCHOR_INVALID"
+	}
+	fabricResponse.MerkleRoot = strings.TrimSpace(fabricResponse.MerkleRoot)
+	if fabricResponse.MerkleRoot == "" {
+		return "unreachable", "UNAVAILABLE_FABRIC_ROOT"
 	}
 
 	proofs, perr := s.repo.GetProofsByHash(auditLog.HashValue)
 	if perr != nil {
-		return "unreachable"
+		return "unreachable", "UNAVAILABLE_MERKLE_PROOF_LOOKUP"
 	}
+	proofs = proofsForAnchorRoot(proofs, fabricResponse.MerkleRoot)
 
 	reconstructedRoot := auditLog.HashValue
 	if len(proofs) > 0 {
@@ -1320,17 +1510,28 @@ func (s *auditService) classifyIntegrity(auditLog models.AuditLog) string {
 
 	if auditLog.MerkleRoot != "" && auditLog.MerkleRoot != fabricResponse.MerkleRoot {
 		s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
-		return "tampered"
+		return "tampered", "FAILED_ANCHOR_ROOT"
+	}
+	for _, proof := range proofs {
+		if proof.MerkleRoot != "" && proof.MerkleRoot != fabricResponse.MerkleRoot {
+			s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", recalculated)
+			return "tampered", "FAILED_PROOF_BATCH_ROOT"
+		}
 	}
 	if reconstructedRoot != fabricResponse.MerkleRoot {
-		// Legacy batches may have incomplete Merkle proof direction data. The
-		// persisted DB root still matches Fabric, so keep the historical
-		// fallback behavior while treating an actual DB-root mismatch above as
-		// tampering.
-		return "valid"
+		// Legacy batches may have incomplete proof direction data. The fallback
+		// is allowed only when the stored off-chain root itself matches Fabric.
+		if auditLog.MerkleRoot == fabricResponse.MerkleRoot {
+			return "unreachable", "LEGACY_LIMITED"
+		}
+		if len(proofs) == 0 && auditLog.MerkleRoot == "" {
+			return "unreachable", "UNAVAILABLE_MERKLE_PROOF"
+		}
+		s.recordTamperIncident(auditLog, "MERKLE_PROOF_MISMATCH", recalculated)
+		return "tampered", "FAILED_MERKLE_PROOF"
 	}
 
-	return "valid"
+	return "valid", "VERIFIED_MERKLE_PROOF"
 }
 
 // recordTamperIncident membuat satu incident aktif per log dan jenis deteksi.
@@ -1431,6 +1632,64 @@ func sourceStatusFromAgentStatus(status string) string {
 	default:
 		return ""
 	}
+}
+
+func shouldRecordClientSourceIncident(proofStatus, sourceStatus string) bool {
+	return proofStatus != "LEGACY_LIMITED" && isClientSourceIncidentStatus(sourceStatus)
+}
+
+func verificationAssessment(proofStatus, sourceStatus, agentStatus, auditTrailStatus string) string {
+	switch proofStatus {
+	case "FAILED_LOCAL_HASH", "FAILED_ANCHOR_ROOT", "FAILED_PROOF_BATCH_ROOT", "FAILED_MERKLE_PROOF":
+		return "OFFCHAIN_INTEGRITY_FAILED"
+	case "PENDING", "PENDING_HASH", "PENDING_ANCHOR":
+		return "PENDING"
+	case "UNAVAILABLE", "UNAVAILABLE_FABRIC":
+		return "INCONCLUSIVE_FABRIC_UNAVAILABLE"
+	case "UNAVAILABLE_FABRIC_ROOT", "UNAVAILABLE_FABRIC_ANCHOR_INVALID":
+		return "INCONCLUSIVE_FABRIC_ANCHOR_INVALID"
+	case "UNAVAILABLE_MERKLE_PROOF":
+		return "INCONCLUSIVE_MERKLE_PROOF_MISSING"
+	case "UNAVAILABLE_MERKLE_PROOF_LOOKUP":
+		return "INCONCLUSIVE_MERKLE_PROOF_LOOKUP_FAILED"
+	}
+	if proofStatus == "LEGACY_LIMITED" {
+		if auditTrailStatus == "mismatch" {
+			return "INCONCLUSIVE_LEGACY_PROOF_WITH_SOURCE_EVENT_DIVERGENCE"
+		}
+		if sourceStatus == models.SourceStatusMatched {
+			return "VERIFIED_LEGACY_LIMITED_PROOF"
+		}
+		if sourceStatus == models.SourceStatusMismatch || sourceStatus == models.SourceStatusMissing || sourceStatus == models.SourceStatusUnexpectedPresent {
+			return "INCONCLUSIVE_LEGACY_PROOF_WITH_SOURCE_DIVERGENCE"
+		}
+		if sourceStatus == models.SourceStatusUnreachable {
+			return "INCONCLUSIVE_LEGACY_PROOF_AGENT_UNREACHABLE"
+		}
+		if sourceStatus == models.SourceStatusNotComparable {
+			return "INCONCLUSIVE_LEGACY_PROOF_SOURCE_NOT_COMPARABLE"
+		}
+		return "INCONCLUSIVE_LEGACY_PROOF"
+	}
+	if auditTrailStatus == "mismatch" {
+		return "SOURCE_EVENT_DIVERGENCE"
+	}
+	if agentStatus == "skipped_historical" || agentStatus == "skipped_recovery" {
+		return "GATEWAY_PROOF_VERIFIED_SOURCE_SKIPPED"
+	}
+	if sourceStatus == models.SourceStatusMatched {
+		return "VERIFIED"
+	}
+	if sourceStatus == models.SourceStatusMismatch || sourceStatus == models.SourceStatusMissing || sourceStatus == models.SourceStatusUnexpectedPresent {
+		return "CLIENT_STATE_DIVERGENCE"
+	}
+	if sourceStatus == models.SourceStatusUnreachable {
+		return "INCONCLUSIVE_AGENT_UNREACHABLE"
+	}
+	if sourceStatus == models.SourceStatusNotComparable || sourceStatus == "" {
+		return "INCONCLUSIVE_SOURCE_NOT_COMPARABLE"
+	}
+	return "INCONCLUSIVE"
 }
 
 // agentFailureStatuses distinguishes an Agent that answered but denied or
@@ -1776,7 +2035,7 @@ func (s *auditService) VerifyResourceHistory(resource, clientID string) (*Resour
 			item.IncidentID = incident.ID
 			item.IncidentScope = models.RecoveryScopeGatewayIntegrity
 		}
-		if isClientSourceIncidentStatus(item.SourceStatus) {
+		if shouldRecordClientSourceIncident(item.ProofStatus, item.SourceStatus) {
 			incident, persistErr := s.ensureClientSourceIncident(auditLog, item.SourceStatus, item.SourceStateHash, item.AgentDiscrepancies)
 			if persistErr != nil {
 				return nil, &IncidentPersistenceError{
@@ -1900,12 +2159,35 @@ func toMerkleProofData(proofs []models.MerkleProof) []crypto.MerkleProofData {
 	return result
 }
 
+// proofsForAnchorRoot narrows legacy hash-only proof lookups to the batch root
+// recorded by Fabric whenever proof rows carry a root. MerkleProof has no
+// tenant column, so this uses the existing root field without a schema change.
+// If no row identifies its root, retain the legacy rows and let the caller
+// classify the evidence as legacy-limited or unavailable.
+func proofsForAnchorRoot(proofs []models.MerkleProof, anchorRoot string) []models.MerkleProof {
+	anchorRoot = strings.TrimSpace(anchorRoot)
+	if anchorRoot == "" || len(proofs) == 0 {
+		return proofs
+	}
+
+	var matching []models.MerkleProof
+	for _, proof := range proofs {
+		if strings.TrimSpace(proof.MerkleRoot) == anchorRoot {
+			matching = append(matching, proof)
+		}
+	}
+	if len(matching) > 0 {
+		return matching
+	}
+	return proofs
+}
+
 // classifyResourceLog menjalankan Layer 2+4 (rehash + Merkle vs Fabric) untuk
 // SEMUA log, tapi Layer 3 (Agent, live data klien) HANYA untuk event client
 // terbaru. RECOVERY adalah event internal Gateway: tetap dapat menjadi latest
 // secara kronologis, tetapi tidak mengambil posisi latest client event.
 func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, isLatestClientEvent bool) ResourceLogVerification {
-	baseStatus := s.classifyIntegrity(auditLog)
+	baseStatus, proofStatus := s.classifyIntegrityDetailed(auditLog)
 	integrityStatus, chainStatus := resourceGatewayStatuses(baseStatus, "skipped_historical")
 
 	item := ResourceLogVerification{
@@ -1919,6 +2201,8 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 		HashValue:           auditLog.HashValue,
 		IntegrityStatus:     integrityStatus,
 		ChainStatus:         chainStatus,
+		ProofStatus:         proofStatus,
+		Assessment:          verificationAssessment(proofStatus, "", "skipped_historical", ""),
 		RecoveryStatus:      recoveryDisplayNotRecovered,
 		IsLatest:            isLatest,
 		IsLatestClientEvent: isLatestClientEvent,
@@ -1927,6 +2211,7 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 
 	if isRecoveryAction(auditLog.Action) {
 		item.AgentStatus = "skipped_recovery"
+		item.Assessment = verificationAssessment(proofStatus, "", item.AgentStatus, "")
 		if requestID := recoveryRequestIDFromAuthorizationContext(auditLog.AuthorizationContext); requestID != "" {
 			item.RecoveryStatus = recoveryDisplayRecovered
 			item.RecoveryRequestID = requestID
@@ -1943,16 +2228,25 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 	agentResult, err := s.agent.VerifyAgainstAgent(&logCopy)
 	if err != nil {
 		item.AgentStatus, item.SourceStatus = agentFailureStatuses(err)
-	} else if agentResult.AgentUsed {
-		if agentResult.IsMatch {
+	} else if agentResult != nil && agentResult.AgentUsed {
+		item.StateComparison = agentResult.StateComparison
+		item.ComparisonBasis = agentResult.ComparisonBasis
+		item.OffchainStateHash = agentResult.OffchainStateHash
+		item.ClientStateHash = agentResult.ClientStateHash
+		item.SourceCheckedAt = agentResult.SourceCheckedAt
+		item.SourceStateHash = agentResult.ClientStateHash
+		item.AuditTrailStatus = agentResult.AuditTrailStatus
+		if !agentResult.StateComparable {
+			item.AgentStatus = "not_comparable"
+			item.SourceStatus = models.SourceStatusNotComparable
+		} else if agentResult.IsMatch {
 			item.AgentStatus = "matched"
 			item.SourceStatus = models.SourceStatusMatched
 		} else {
 			item.AgentStatus = "mismatch"
 			item.SourceStatus = sourceStatusFromAgentResult(auditLog, agentResult)
-			item.SourceStateHash = agentResult.ClientStateHash
 			item.AgentDiscrepancies = agentResult.Discrepancies
-			if baseStatus == "valid" {
+			if baseStatus == "valid" && shouldRecordClientSourceIncident(proofStatus, item.SourceStatus) {
 				s.recordClientSourceIncident(auditLog, item.SourceStatus, agentResult.ClientStateHash, agentResult.Discrepancies)
 			}
 		}
@@ -1964,6 +2258,7 @@ func (s *auditService) classifyResourceLog(auditLog models.AuditLog, isLatest, i
 	// operasional client. Jangan pernah menurunkan status integritas/chain
 	// Gateway ketika Agent sedang offline; validasi Gateway/Fabric tetap sah.
 	item.IntegrityStatus, item.ChainStatus = resourceGatewayStatuses(baseStatus, item.AgentStatus)
+	item.Assessment = verificationAssessment(proofStatus, item.SourceStatus, item.AgentStatus, item.AuditTrailStatus)
 
 	return item
 }

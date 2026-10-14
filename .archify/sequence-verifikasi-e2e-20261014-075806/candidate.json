@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Verifikasi End-to-End AuditChain",
+    "output": ".archify/sequence-verifikasi-e2e-20261014-075806/verifikasi-e2e.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "0980c2d3cfd55ad968ba6323cbf1c4009ed923cf"
+    }
+  },
+  "participants": [
+    {
+      "id": "portal",
+      "type": "frontend",
+      "label": "Portal Morbis",
+      "sublabel": "Klik Verify"
+    },
+    {
+      "id": "api",
+      "type": "security",
+      "label": "Gateway API",
+      "sublabel": "JWT gate",
+      "sources": [
+        { "path": "internal/modules/audit/router.go", "line": 17, "end_line": 24 },
+        { "path": "internal/middleware/jwt.go", "line": 12, "end_line": 82 }
+      ]
+    },
+    {
+      "id": "verify",
+      "type": "backend",
+      "label": "Verifikasi",
+      "sublabel": "Go verify",
+      "sources": [
+        { "path": "internal/modules/audit/handler.go", "line": 201, "end_line": 210 },
+        { "path": "internal/modules/audit/service.go", "line": 905, "end_line": 1055 },
+        { "path": "internal/modules/audit/service.go", "line": 659, "end_line": 714 }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "log + proof",
+      "sources": [
+        { "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 89 },
+        { "path": "internal/modules/audit/repository.go", "line": 128, "end_line": 138 },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 368, "end_line": 375 }
+      ]
+    },
+    {
+      "id": "fabric",
+      "type": "external",
+      "label": "Fabric",
+      "sublabel": "read anchor",
+      "sources": [
+        { "path": "internal/blockchain/fabric.go", "line": 214, "end_line": 222 }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Agent Mini PC",
+      "sublabel": "GET /verify",
+      "sources": [
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 201, "end_line": 219 },
+        { "path": "internal/blockchain/agentverifier/service.go", "line": 282, "end_line": 319 }
+      ]
+    },
+    {
+      "id": "oracle",
+      "type": "database",
+      "label": "Oracle Morbis",
+      "sublabel": "DB client · read-only"
+    }
+  ],
+  "segments": [
+    { "from": 158, "to": 350, "label": "1 · Akses log dan cek hash" },
+    { "from": 362, "to": 554, "label": "2 · Proof Merkle dan anchor Fabric" },
+    { "from": 566, "to": 938, "label": "3 · Cocokkan data terbaru client" },
+    { "from": 950, "to": 1080, "label": "4 · Simpan dan tampilkan hasil" }
+  ],
+  "messages": [
+    {
+      "id": "start-verify",
+      "from": "portal",
+      "to": "api",
+      "y": 184,
+      "label": "GET /api/dashboard/verify/{log_id} + JWT",
+      "variant": "emphasis"
+    },
+    {
+      "id": "jwt-identity",
+      "from": "api",
+      "to": "verify",
+      "y": 232,
+      "label": "Validasi JWT; ambil client_id dari claims",
+      "variant": "security"
+    },
+    {
+      "id": "load-audit-log",
+      "from": "verify",
+      "to": "postgres",
+      "y": 280,
+      "label": "Cari log berdasarkan log_id + client_id"
+    },
+    {
+      "id": "audit-log-data",
+      "from": "postgres",
+      "to": "verify",
+      "y": 328,
+      "label": "Kirim log; Gateway hitung ulang hash SHA3-256",
+      "variant": "return",
+      "note": "Gateway mengkanonisasi event dan membandingkan hash hasil hitung dengan hash yang tersimpan."
+    },
+    {
+      "id": "query-fabric",
+      "from": "verify",
+      "to": "fabric",
+      "y": 376,
+      "label": "QueryMerkleRoot(blockchain_tx_id) · read",
+      "variant": "emphasis",
+      "note": "Dilanjutkan bila hash lokal cocok dan anchor tersedia."
+    },
+    {
+      "id": "fabric-root",
+      "from": "fabric",
+      "to": "verify",
+      "y": 424,
+      "label": "Anchor berisi merkle_root",
+      "variant": "return"
+    },
+    {
+      "id": "load-proof",
+      "from": "verify",
+      "to": "postgres",
+      "y": 472,
+      "label": "Ambil sibling proof untuk hash_value"
+    },
+    {
+      "id": "proof-data",
+      "from": "postgres",
+      "to": "verify",
+      "y": 520,
+      "label": "Proof diterima; Gateway rekonstruksi root Merkle",
+      "variant": "return",
+      "note": "Gateway menyusun ulang jalur leaf-to-root dan membandingkan hasilnya dengan root dari Fabric."
+    },
+    {
+      "id": "latest-log",
+      "from": "verify",
+      "to": "postgres",
+      "y": 568,
+      "label": "Cari log client terbaru untuk resource; RECOVERY dikecualikan",
+      "note": "Pemeriksaan Agent hanya berjalan untuk event client terbaru yang bukan RECOVERY."
+    },
+    {
+      "id": "latest-log-result",
+      "from": "postgres",
+      "to": "verify",
+      "y": 616,
+      "label": "Log terbaru untuk resource tersebut",
+      "variant": "return"
+    },
+    {
+      "id": "agent-config",
+      "from": "verify",
+      "to": "postgres",
+      "y": 664,
+      "label": "Baca Agent config aktif milik client"
+    },
+    {
+      "id": "agent-config-result",
+      "from": "postgres",
+      "to": "verify",
+      "y": 712,
+      "label": "agent_url + verify_token + timeout",
+      "variant": "return"
+    },
+    {
+      "id": "agent-live-read",
+      "from": "verify",
+      "to": "agent",
+      "y": 760,
+      "label": "GET /verify/{table}/{id} + Bearer verify_token",
+      "variant": "security",
+      "note": "Dipanggil untuk log client terbaru non-RECOVERY dengan resource berbentuk TABLE:ID."
+    },
+    {
+      "id": "oracle-select",
+      "from": "agent",
+      "to": "oracle",
+      "y": 808,
+      "label": "SELECT kolom allowlist WHERE PK=ID",
+      "variant": "emphasis"
+    },
+    {
+      "id": "oracle-row",
+      "from": "oracle",
+      "to": "agent",
+      "y": 856,
+      "label": "Baris terbaru atau found=false",
+      "variant": "return"
+    },
+    {
+      "id": "agent-response",
+      "from": "agent",
+      "to": "verify",
+      "y": 904,
+      "label": "JSON: found + data + checked_at (atau error HTTP)",
+      "variant": "return"
+    },
+    {
+      "id": "persist-check",
+      "from": "verify",
+      "to": "postgres",
+      "y": 952,
+      "label": "Simpan status cek; catat incident bila ada mismatch",
+      "note": "Pembacaan Oracle tetap read-only; status verifikasi dan incident dicatat di Gateway."
+    },
+    {
+      "id": "result-to-api",
+      "from": "verify",
+      "to": "api",
+      "y": 1000,
+      "label": "Kembalikan is_valid + agent_status + source_status",
+      "variant": "return"
+    },
+    {
+      "id": "result-to-portal",
+      "from": "api",
+      "to": "portal",
+      "y": 1048,
+      "label": "Tampilkan hasil verifikasi dan rincian status",
+      "variant": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Lulus pada contoh Morbis",
+      "items": [
+        "Contoh uji yang dikirim: is_valid=true, agent_status=matched, source_status=MATCHED",
+        "Artinya hash/proof cocok dengan Fabric dan data live Agent berhasil dicocokkan"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Pemeriksaan memiliki gerbang",
+      "items": [
+        "Hash log berbeda: berhenti dengan failed_local",
+        "Hash atau anchor belum siap: hasil pending",
+        "Root hasil proof berbeda dari anchor: failed_onchain",
+        "Agent live dicek hanya untuk log client terbaru non-RECOVERY"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Baca tiga status secara terpisah",
+      "items": [
+        "is_valid menunjukkan integritas log Gateway dan bukti Fabric",
+        "agent_status menunjukkan apakah Agent merespons dan hasil prosesnya",
+        "source_status=MATCHED baru berarti data client cocok; 401/403 menjadi NOT_COMPARABLE, timeout menjadi UNREACHABLE",
+        "Karena itu HTTP success atau is_valid=true saja belum membuktikan data Agent cocok"
+      ]
+    }
+  ]
+}

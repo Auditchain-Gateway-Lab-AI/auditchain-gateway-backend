@@ -5,6 +5,7 @@
 package agentverifier
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/pkg/canonicalstate"
 
 	"gorm.io/gorm"
 )
@@ -60,7 +62,14 @@ type VerifyResult struct {
 	// the canonical empty object when the row is missing). It is deliberately
 	// separate from the AuditLog leaf hash so source-state incidents can be
 	// correlated without pretending the client row is itself a Merkle leaf.
-	ClientStateHash string
+	ClientStateHash   string
+	OffchainStateHash string
+	SourceCheckedAt   *time.Time
+	StateComparable   bool
+	StateComparison   string
+	ComparisonBasis   string
+	AuditTrailStatus  string
+	AuditTrailDiffs   []Discrepancy
 }
 
 // Service mengelola request verifikasi ke Agent klien
@@ -106,16 +115,10 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-// VerifyAgainstAgent adalah entry point Lapis 3.
-//
-// Alur:
-//  1. Cek apakah log punya SourceRecordID (audit_trail_id dari Agent).
-//     Jika kosong → log bukan dari Agent, lapis ini dilewati.
-//  2. Ambil AgentConfig klien dari DB.
-//     Jika belum dikonfigurasi → lapis ini dilewati.
-//  3. Panggil GET <agent_url>/verify-audit/<source_record_id>.
-//  4. Bandingkan field kunci: tabel↔resource, operasi↔action, app_user/db_user↔actor,
-//     serta metadata (data_lama+data_baru) ↔ metadata di log.
+// VerifyAgainstAgent membandingkan row terkini dari Agent dengan state sesudah
+// event klien terakhir di AuditLog. Jika SourceRecordID tersedia, event
+// audit_trail juga diperiksa sebagai bukti terpisah; event historis itu tidak
+// menggantikan pembacaan row operasional.
 func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, error) {
 	cfg, err := s.loadAgentConfig(auditLog.ClientID)
 	if err != nil {
@@ -139,14 +142,32 @@ func (s *Service) VerifyAgainstAgent(auditLog *models.AuditLog) (*VerifyResult, 
 		return &VerifyResult{IsMatch: true, AgentUsed: false}, nil
 	}
 
-	// Mode 1: SIMRS — verifikasi via audit_trail_id (source_record_id)
-	if auditLog.SourceRecordID != "" {
-		return s.verifyViaAuditTrail(cfg, auditLog)
+	// Format resource TABLE:ID memungkinkan Agent membaca row operasional saat
+	// ini, yang dibutuhkan untuk alur verifikasi state terbaru.
+	if auditLog.Resource != "" && strings.Contains(auditLog.Resource, ":") {
+		result, err := s.verifyViaResource(cfg, auditLog)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(auditLog.SourceRecordID) != "" {
+			trailResult, trailErr := s.verifyViaAuditTrail(cfg, auditLog)
+			if trailErr != nil {
+				result.AuditTrailStatus = "unavailable"
+			} else if trailResult != nil && trailResult.AgentUsed {
+				if trailResult.IsMatch {
+					result.AuditTrailStatus = "matched"
+				} else {
+					result.AuditTrailStatus = "mismatch"
+					result.AuditTrailDiffs = trailResult.Discrepancies
+				}
+			}
+		}
+		return result, nil
 	}
 
-	// Mode 2: Satu Peta — verifikasi via resource (format: tabel:id)
-	if auditLog.Resource != "" && strings.Contains(auditLog.Resource, ":") {
-		return s.verifyViaResource(cfg, auditLog)
+	// Event audit sumber saja tidak membuktikan kondisi row saat ini.
+	if auditLog.SourceRecordID != "" {
+		return s.verifyViaAuditTrail(cfg, auditLog)
 	}
 
 	// Tidak ada yang bisa diverifikasi — lewati
@@ -167,9 +188,13 @@ func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.
 
 	if !agentRec.Found {
 		return &VerifyResult{
-			IsMatch:     false,
-			SourceFound: false,
-			AgentUsed:   true,
+			IsMatch:          false,
+			SourceFound:      false,
+			AgentUsed:        true,
+			StateComparable:  false,
+			StateComparison:  "not_comparable",
+			ComparisonBasis:  "audit_trail_event_only",
+			AuditTrailStatus: "missing",
 			Discrepancies: []Discrepancy{{
 				Field:   "existence",
 				InLog:   fmt.Sprintf("audit_trail.id=%s", auditLog.SourceRecordID),
@@ -188,13 +213,21 @@ func (s *Service) verifyViaAuditTrail(cfg *models.AgentConfig, auditLog *models.
 	clientMetadata := marshalToJSON(agentMeta)
 
 	discrepancies := s.compareFields(auditLog, agentRec)
+	auditTrailStatus := "matched"
+	if len(discrepancies) > 0 {
+		auditTrailStatus = "mismatch"
+	}
 	return &VerifyResult{
-		IsMatch:        len(discrepancies) == 0,
-		SourceFound:    true,
-		AgentUsed:      true,
-		Discrepancies:  discrepancies,
-		AgentRecord:    agentRec,
-		ClientMetadata: clientMetadata,
+		IsMatch:          len(discrepancies) == 0,
+		SourceFound:      true,
+		AgentUsed:        true,
+		Discrepancies:    discrepancies,
+		AgentRecord:      agentRec,
+		ClientMetadata:   clientMetadata,
+		StateComparable:  false,
+		StateComparison:  "not_comparable",
+		ComparisonBasis:  "audit_trail_event_only",
+		AuditTrailStatus: auditTrailStatus,
 	}, nil
 }
 
@@ -217,25 +250,40 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 	if err != nil {
 		return nil, fmt.Errorf("gagal menghubungi Agent untuk resource: %w", err)
 	}
+	if resourceRec.Table != "" && !strings.EqualFold(resourceRec.Table, tableName) {
+		return nil, fmt.Errorf("respons Agent memiliki tabel yang tidak sesuai dengan resource yang diminta")
+	}
+	if resourceRec.ID != "" && resourceRec.ID != resourceID {
+		return nil, fmt.Errorf("respons Agent memiliki ID yang tidak sesuai dengan resource yang diminta")
+	}
+	stateResult := compareCurrentResourceState(auditLog, resourceRec)
 
 	// Jika action adalah DELETE, baris memang tidak boleh ada lagi
-	if auditLog.Action == "DELETE" {
+	if strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") {
 		if !resourceRec.Found {
-			clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
 			return &VerifyResult{
-				IsMatch:         true,
-				SourceFound:     false,
-				AgentUsed:       true,
-				ClientStateHash: clientHash,
+				IsMatch:           stateResult.Match,
+				SourceFound:       false,
+				AgentUsed:         true,
+				SourceCheckedAt:   checkedAtUTC(resourceRec.CheckedAt),
+				ClientStateHash:   stateResult.ClientHash,
+				OffchainStateHash: stateResult.OffchainHash,
+				StateComparable:   stateResult.Comparable,
+				StateComparison:   stateComparisonLabel(stateResult),
+				ComparisonBasis:   stateResult.Basis,
 			}, nil
 		}
-		clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, resourceRec.Data)
 		// Baris masih ada padahal sudah di-DELETE — anomali
 		return &VerifyResult{
-			IsMatch:         false,
-			SourceFound:     true,
-			AgentUsed:       true,
-			ClientStateHash: clientHash,
+			IsMatch:           false,
+			SourceFound:       true,
+			AgentUsed:         true,
+			SourceCheckedAt:   checkedAtUTC(resourceRec.CheckedAt),
+			ClientStateHash:   stateResult.ClientHash,
+			OffchainStateHash: stateResult.OffchainHash,
+			StateComparable:   true,
+			StateComparison:   "mismatch",
+			ComparisonBasis:   stateResult.Basis,
 			Discrepancies: []Discrepancy{{
 				Field:   "existence",
 				InLog:   "DELETE — baris seharusnya tidak ada",
@@ -246,12 +294,16 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 
 	// Untuk INSERT/UPDATE — baris harus ada
 	if !resourceRec.Found {
-		clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
 		return &VerifyResult{
-			IsMatch:         false,
-			SourceFound:     false,
-			AgentUsed:       true,
-			ClientStateHash: clientHash,
+			IsMatch:           false,
+			SourceFound:       false,
+			AgentUsed:         true,
+			SourceCheckedAt:   checkedAtUTC(resourceRec.CheckedAt),
+			ClientStateHash:   stateResult.ClientHash,
+			OffchainStateHash: stateResult.OffchainHash,
+			StateComparable:   true,
+			StateComparison:   "mismatch",
+			ComparisonBasis:   stateResult.Basis,
 			Discrepancies: []Discrepancy{{
 				Field:   "existence",
 				InLog:   fmt.Sprintf("%s — baris seharusnya ada", auditLog.Action),
@@ -260,18 +312,28 @@ func (s *Service) verifyViaResource(cfg *models.AgentConfig, auditLog *models.Au
 		}, nil
 	}
 
-	// Bandingkan metadata log dengan data aktual dari Agent
-	discrepancies := s.CompareResourceData(auditLog, resourceRec)
 	clientMetadata := marshalToJSON(resourceRec.Data)
-	clientHash, _ := HashResourceState(auditLog.ClientID, auditLog.Resource, resourceRec.Data)
 	return &VerifyResult{
-		IsMatch:         len(discrepancies) == 0,
-		SourceFound:     true,
-		AgentUsed:       true,
-		Discrepancies:   discrepancies,
-		ClientMetadata:  clientMetadata,
-		ClientStateHash: clientHash,
+		IsMatch:           stateResult.Match,
+		SourceFound:       true,
+		AgentUsed:         true,
+		SourceCheckedAt:   checkedAtUTC(resourceRec.CheckedAt),
+		Discrepancies:     stateResult.Discrepancies,
+		ClientMetadata:    clientMetadata,
+		ClientStateHash:   stateResult.ClientHash,
+		OffchainStateHash: stateResult.OffchainHash,
+		StateComparable:   stateResult.Comparable,
+		StateComparison:   stateComparisonLabel(stateResult),
+		ComparisonBasis:   stateResult.Basis,
 	}, nil
+}
+
+func checkedAtUTC(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	checkedAt := value.UTC()
+	return &checkedAt
 }
 
 // fetchResourceFromAgent memanggil GET <agent_url>/verify/<table>/<id>
@@ -312,7 +374,9 @@ func (s *Service) fetchResourceFromAgentContext(ctx context.Context, cfg *models
 	}
 
 	var rec ResourceRecord
-	if err := json.Unmarshal(body, &rec); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&rec); err != nil {
 		return nil, fmt.Errorf("gagal parse response Agent: %w", err)
 	}
 
@@ -562,8 +626,8 @@ func agentVerifyURL(agentURL, tableName, resourceID string) string {
 	return fmt.Sprintf("%s/verify/%s/%s", baseURL, tableName, resourceID)
 }
 
-// compareFields membandingkan field-field penting antara AuditLog di middleware
-// dengan data aktual dari Agent. Mapping dilakukan sesuai ClientFieldMapping:
+// compareFields membandingkan metadata event dengan audit_trail di Agent.
+// Mapping dilakukan sesuai ClientFieldMapping:
 //   - audit_trail.tabel    ↔ AuditLog.Resource
 //   - audit_trail.operasi  ↔ AuditLog.Action
 //   - audit_trail.app_user (fallback db_user) ↔ AuditLog.Actor
@@ -571,17 +635,19 @@ func agentVerifyURL(agentURL, tableName, resourceID string) string {
 func (s *Service) compareFields(auditLog *models.AuditLog, agent *AuditTrailRecord) []Discrepancy {
 	var diffs []Discrepancy
 
-	// Resource ↔ tabel
-	if auditLog.Resource != agent.Tabel {
+	// Resource dapat berbentuk TABLE:ID, sedangkan audit_trail.tabel hanya nama tabel.
+	logTable := strings.TrimSpace(strings.SplitN(auditLog.Resource, ":", 2)[0])
+	agentTable := strings.TrimSpace(strings.SplitN(agent.Tabel, ":", 2)[0])
+	if !strings.EqualFold(logTable, agentTable) {
 		diffs = append(diffs, Discrepancy{
-			Field:   "resource/tabel",
-			InLog:   auditLog.Resource,
+			Field:   "table/resource",
+			InLog:   logTable,
 			InAgent: agent.Tabel,
 		})
 	}
 
 	// Action ↔ operasi
-	if auditLog.Action != agent.Operasi {
+	if !strings.EqualFold(strings.TrimSpace(auditLog.Action), strings.TrimSpace(agent.Operasi)) {
 		diffs = append(diffs, Discrepancy{
 			Field:   "action/operasi",
 			InLog:   auditLog.Action,
@@ -614,7 +680,7 @@ func (s *Service) compareFields(auditLog *models.AuditLog, agent *AuditTrailReco
 		}
 
 		logMetaNorm := normalizeJSON(auditLog.Metadata)
-		agentMetaNorm := marshalToJSON(agentMeta)
+		agentMetaNorm := normalizeJSON(marshalToJSON(agentMeta))
 
 		if logMetaNorm != agentMetaNorm {
 			diffs = append(diffs, Discrepancy{
@@ -626,6 +692,168 @@ func (s *Service) compareFields(auditLog *models.AuditLog, agent *AuditTrailReco
 	}
 
 	return diffs
+}
+
+type resourceStateComparison struct {
+	Match         bool
+	Comparable    bool
+	ClientHash    string
+	OffchainHash  string
+	Basis         string
+	Discrepancies []Discrepancy
+}
+
+// compareCurrentResourceState hashes the same projected state on both sides.
+// The state hash is deliberately distinct from the audit-log leaf hash.
+func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceRecord) resourceStateComparison {
+	result := resourceStateComparison{Basis: "latest_event_field_projection:v1"}
+	if auditLog == nil || record == nil {
+		result.Discrepancies = []Discrepancy{{Field: "comparison", InLog: "event state", InAgent: "missing response"}}
+		return result
+	}
+
+	expected, err := offchainResourceState(auditLog)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "valid state object", InAgent: "not comparable"}}
+		return result
+	}
+	expected = removeRedactedStateFields(expected)
+	if !strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") && len(expected) == 0 {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "non-empty event state", InAgent: "empty or redacted projection"}}
+		return result
+	}
+	result.OffchainHash, err = HashResourceState(auditLog.ClientID, auditLog.Resource, expected)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "canonical state", InAgent: "invalid state"}}
+		return result
+	}
+
+	if strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") {
+		result.Basis = "latest_event_row_absence:v1"
+		if !record.Found {
+			result.ClientHash, _ = HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
+			result.Comparable = true
+			result.Match = true
+			return result
+		}
+		result.ClientHash, _ = HashResourceState(auditLog.ClientID, auditLog.Resource, record.Data)
+		result.Comparable = true
+		result.Discrepancies = []Discrepancy{{
+			Field: "existence", InLog: "DELETE — row tidak ada", InAgent: "row masih ada",
+		}}
+		return result
+	}
+
+	if !record.Found {
+		result.ClientHash, _ = HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
+		result.Comparable = true
+		result.Discrepancies = []Discrepancy{{Field: "existence", InLog: "row seharusnya ada", InAgent: "row tidak ditemukan"}}
+		return result
+	}
+	if record.Data == nil {
+		result.Discrepancies = []Discrepancy{{Field: "client_state", InLog: "state object", InAgent: "data kosong"}}
+		return result
+	}
+
+	actualRaw, err := json.Marshal(record.Data)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "client_state", InLog: "canonical state", InAgent: "invalid JSON"}}
+		return result
+	}
+	expectedRaw, err := json.Marshal(expected)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "canonical state", InAgent: "invalid JSON"}}
+		return result
+	}
+	expectedCanonical, _, err := canonicalstate.CanonicalizeObject(expectedRaw)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "canonical state", InAgent: "invalid canonical state"}}
+		return result
+	}
+	actualCanonical, _, err := canonicalstate.CanonicalizeObject(actualRaw)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "client_state", InLog: "canonical state", InAgent: "invalid canonical state"}}
+		return result
+	}
+
+	projected := make(map[string]interface{}, len(expectedCanonical))
+	for key, expectedValue := range expectedCanonical {
+		actualValue, exists := actualCanonical[key]
+		if !exists {
+			result.Discrepancies = append(result.Discrepancies, Discrepancy{
+				Field: key, InLog: "field present in latest event", InAgent: "field not returned by Agent",
+			})
+			continue
+		}
+		projected[key] = actualValue
+		expectedJSON, _ := json.Marshal(expectedValue)
+		actualJSON, _ := json.Marshal(actualValue)
+		if !bytes.Equal(expectedJSON, actualJSON) {
+			result.Discrepancies = append(result.Discrepancies, Discrepancy{
+				Field: key, InLog: string(expectedJSON), InAgent: string(actualJSON),
+			})
+		}
+	}
+	if len(projected) != len(expectedCanonical) {
+		return result
+	}
+	result.ClientHash, err = HashResourceState(auditLog.ClientID, auditLog.Resource, projected)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "client_state", InLog: "canonical state", InAgent: "hash failed"}}
+		return result
+	}
+	result.Comparable = true
+	result.Match = len(result.Discrepancies) == 0 && result.ClientHash == result.OffchainHash
+	return result
+}
+
+func stateComparisonLabel(comparison resourceStateComparison) string {
+	if !comparison.Comparable {
+		return "not_comparable"
+	}
+	if comparison.Match {
+		return "matched"
+	}
+	return "mismatch"
+}
+
+func offchainResourceState(auditLog *models.AuditLog) (map[string]interface{}, error) {
+	if strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") {
+		return map[string]interface{}{}, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(auditLog.Metadata))
+	decoder.UseNumber()
+	var state map[string]interface{}
+	if err := decoder.Decode(&state); err != nil || state == nil {
+		return nil, fmt.Errorf("metadata event tidak dapat dibaca sebagai state object")
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("metadata event memiliki konten tambahan")
+	}
+	for _, wrapper := range []string{"data_baru", "after"} {
+		for key, value := range state {
+			if strings.EqualFold(key, wrapper) {
+				wrapped, ok := value.(map[string]interface{})
+				if !ok || wrapped == nil {
+					return nil, fmt.Errorf("metadata %s bukan state object", wrapper)
+				}
+				return wrapped, nil
+			}
+		}
+	}
+	return state, nil
+}
+
+func removeRedactedStateFields(state map[string]interface{}) map[string]interface{} {
+	filtered := make(map[string]interface{}, len(state))
+	for key, value := range state {
+		if redacted, ok := value.(string); ok && strings.EqualFold(strings.TrimSpace(redacted), "[REDACTED]") {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
 }
 
 func formatValueToString(val interface{}) string {
@@ -698,12 +926,11 @@ func tryNormalizeTimeMatch(strLog, strAgent string) (string, string) {
 }
 
 func normalizeJSON(raw string) string {
-	var m interface{}
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+	_, canonical, err := canonicalstate.CanonicalizeObject([]byte(raw))
+	if err != nil {
 		return raw
 	}
-	b, _ := json.Marshal(m)
-	return string(b)
+	return string(canonical)
 }
 
 func marshalToJSON(m map[string]interface{}) string {

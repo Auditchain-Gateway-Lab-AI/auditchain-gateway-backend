@@ -1,0 +1,1820 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "workflow",
+  "quality": "showcase",
+  "startedAt": "2026-10-14T01:27:19.101Z",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\candidate.json",
+    "sha256": "461889edc3212b7f33b682a9b11e73a1eb6aa05b097fefdfccd8377c22f9655c",
+    "bytes": 15351
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.html"
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\Alleviate\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "workflow",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\candidate.json",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "7b3e2e0a-1f02-4969-8ab8-b1b3ecc41e50",
+        "stage": "render",
+        "type": "workflow",
+        "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\candidate.json",
+        "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.html",
+        "error": "workflow schema validation failed:\n  /phases/1/toCol (id/label: \"proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /phases/2/fromCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /phases/2/toCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/7/icon (id/label: \"rehash\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/8/type (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/8/icon (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/10/col (id/label: \"anchor_ready\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/10/type (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/10/icon (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/11/col (id/label: \"anchor_pending\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/12/col (id/label: \"fabric_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/12/type (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/12/icon (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/13/col (id/label: \"load_proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/14/col (id/label: \"dependency_error\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/15/col (id/label: \"root_match\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/15/type (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/15/icon (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/16/col (id/label: \"merkle_tampered\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/17/col (id/label: \"agent_gate\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/17/type (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/17/icon (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/18/col (id/label: \"skip_agent\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/18/icon (id/label: \"skip_agent\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/19/col (id/label: \"agent_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/19/type (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}\n  /nodes/19/icon (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/20/col (id/label: \"source_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/20/icon (id/label: \"source_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /nodes/21/col (id/label: \"persist_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/22/col (id/label: \"return_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}\n  /nodes/22/icon (id/label: \"return_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}\n  /cards/1/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}\n  /cards/3/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}",
+        "diagnostics": [
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/phases/1/toCol (id/label: \"proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/phases/1/toCol",
+              "identity": "proof"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/phases/2/fromCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/phases/2/fromCol",
+              "identity": "source"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/phases/2/toCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/phases/2/toCol",
+              "identity": "source"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/7/icon (id/label: \"rehash\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/7/icon",
+              "identity": "rehash"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/8/type (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/8/type",
+              "identity": "hash_match"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/8/icon (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/8/icon",
+              "identity": "hash_match"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/10/col (id/label: \"anchor_ready\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/10/col",
+              "identity": "anchor_ready"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/10/type (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/10/type",
+              "identity": "anchor_ready"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/10/icon (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/10/icon",
+              "identity": "anchor_ready"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/11/col (id/label: \"anchor_pending\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/11/col",
+              "identity": "anchor_pending"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/12/col (id/label: \"fabric_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/12/col",
+              "identity": "fabric_lookup"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/12/type (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/12/type",
+              "identity": "fabric_lookup"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/12/icon (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/12/icon",
+              "identity": "fabric_lookup"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/13/col (id/label: \"load_proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/13/col",
+              "identity": "load_proof"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/14/col (id/label: \"dependency_error\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/14/col",
+              "identity": "dependency_error"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/15/col (id/label: \"root_match\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/15/col",
+              "identity": "root_match"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/15/type (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/15/type",
+              "identity": "root_match"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/15/icon (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/15/icon",
+              "identity": "root_match"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/16/col (id/label: \"merkle_tampered\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/16/col",
+              "identity": "merkle_tampered"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/17/col (id/label: \"agent_gate\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/17/col",
+              "identity": "agent_gate"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/17/type (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/17/type",
+              "identity": "agent_gate"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/17/icon (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/17/icon",
+              "identity": "agent_gate"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/18/col (id/label: \"skip_agent\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/18/col",
+              "identity": "skip_agent"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/18/icon (id/label: \"skip_agent\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/18/icon",
+              "identity": "skip_agent"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/19/col (id/label: \"agent_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/19/col",
+              "identity": "agent_lookup"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/19/type (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/19/type",
+              "identity": "agent_lookup"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/19/icon (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/19/icon",
+              "identity": "agent_lookup"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/20/col (id/label: \"source_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/20/col",
+              "identity": "source_result"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/20/icon (id/label: \"source_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/20/icon",
+              "identity": "source_result"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/21/col (id/label: \"persist_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/21/col",
+              "identity": "persist_result"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/nodes/22/col (id/label: \"return_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/22/col",
+              "identity": "return_result"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 5
+            },
+            "supportedFixes": [
+              "use a value <= 5"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/nodes/22/icon (id/label: \"return_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/nodes/22/icon",
+              "identity": "return_result"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "calendar",
+                "clock",
+                "person",
+                "briefcase",
+                "flag",
+                "moon",
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+                "start",
+                "active",
+                "waiting",
+                "success",
+                "failure",
+                "neutral",
+                "none"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/cards/1/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/cards/1/dot"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "cyan",
+                "emerald",
+                "violet",
+                "amber",
+                "rose",
+                "orange",
+                "slate"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]"
+            ]
+          },
+          {
+            "code": "schema/enum",
+            "severity": "error",
+            "message": "/cards/3/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/cards/3/dot"
+            },
+            "evidence": {
+              "keyword": "enum",
+              "allowedValues": [
+                "cyan",
+                "emerald",
+                "violet",
+                "amber",
+                "rose",
+                "orange",
+                "slate"
+              ]
+            },
+            "supportedFixes": [
+              "choose one of [\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]"
+            ]
+          }
+        ],
+        "provenance": "absent",
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/1/toCol (id/label: \"proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/1/toCol",
+        "identity": "proof"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/2/fromCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/2/fromCol",
+        "identity": "source"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/2/toCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/2/toCol",
+        "identity": "source"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/7/icon (id/label: \"rehash\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/7/icon",
+        "identity": "rehash"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/8/type (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/8/type",
+        "identity": "hash_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/8/icon (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/8/icon",
+        "identity": "hash_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/10/col (id/label: \"anchor_ready\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/10/col",
+        "identity": "anchor_ready"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/10/type (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/10/type",
+        "identity": "anchor_ready"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/10/icon (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/10/icon",
+        "identity": "anchor_ready"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/11/col (id/label: \"anchor_pending\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/11/col",
+        "identity": "anchor_pending"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/12/col (id/label: \"fabric_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/12/col",
+        "identity": "fabric_lookup"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/12/type (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/12/type",
+        "identity": "fabric_lookup"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/12/icon (id/label: \"fabric_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/12/icon",
+        "identity": "fabric_lookup"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/13/col (id/label: \"load_proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/13/col",
+        "identity": "load_proof"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/14/col (id/label: \"dependency_error\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/14/col",
+        "identity": "dependency_error"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/15/col (id/label: \"root_match\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/15/col",
+        "identity": "root_match"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/15/type (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/15/type",
+        "identity": "root_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/15/icon (id/label: \"root_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/15/icon",
+        "identity": "root_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/16/col (id/label: \"merkle_tampered\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/16/col",
+        "identity": "merkle_tampered"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/17/col (id/label: \"agent_gate\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/17/col",
+        "identity": "agent_gate"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/17/type (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/17/type",
+        "identity": "agent_gate"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/17/icon (id/label: \"agent_gate\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/17/icon",
+        "identity": "agent_gate"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/18/col (id/label: \"skip_agent\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/18/col",
+        "identity": "skip_agent"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/18/icon (id/label: \"skip_agent\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/18/icon",
+        "identity": "skip_agent"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/19/col (id/label: \"agent_lookup\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/19/col",
+        "identity": "agent_lookup"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/19/type (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/19/type",
+        "identity": "agent_lookup"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/19/icon (id/label: \"agent_lookup\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/19/icon",
+        "identity": "agent_lookup"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/20/col (id/label: \"source_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/20/col",
+        "identity": "source_result"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/20/icon (id/label: \"source_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/20/icon",
+        "identity": "source_result"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/21/col (id/label: \"persist_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/21/col",
+        "identity": "persist_result"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/22/col (id/label: \"return_result\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/22/col",
+        "identity": "return_result"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/22/icon (id/label: \"return_result\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/22/icon",
+        "identity": "return_result"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/cards/1/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/cards/1/dot"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "cyan",
+          "emerald",
+          "violet",
+          "amber",
+          "rose",
+          "orange",
+          "slate"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/cards/3/dot must be equal to one of the allowed values {\"allowedValues\":[\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/cards/3/dot"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "cyan",
+          "emerald",
+          "violet",
+          "amber",
+          "rose",
+          "orange",
+          "slate"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"cyan\",\"emerald\",\"violet\",\"amber\",\"rose\",\"orange\",\"slate\"]"
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-14T01:27:20.002Z",
+  "durationMs": 900,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  }
+}

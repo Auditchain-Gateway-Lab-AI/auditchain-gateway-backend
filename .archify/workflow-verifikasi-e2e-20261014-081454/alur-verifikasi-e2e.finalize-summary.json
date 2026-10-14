@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\candidate.json",
+    "sha256": "d02bb6b42077964317edf34d9e6cf0680fd44c494c3465e995ebc6a8337ddd3c",
+    "bytes": 22079
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\alur-verifikasi-e2e.html"
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "layout/constraint",
+      "severity": "error",
+      "message": "Label \"Bandingkan data Agent dengan log\" (~218px) is wider than node \"compare_source\" (204px) — shorten the label or increase node.width.",
+      "subject": {
+        "diagramType": "workflow"
+      }
+    },
+    {
+      "code": "composition/proper-crossing",
+      "severity": "error",
+      "message": "[composition/proper-crossing] showcase workflow edges[0] id \"agent-request-error\" \"agent_lookup\" -> \"agent_not_comparable\" crosses edges[22] id \"not-found-response\" \"log_not_found\" -> \"return_result\" at [1234, 1370] (segments 1 and 1) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 0,
+        "id": "agent-request-error",
+        "from": "agent_lookup",
+        "to": "agent_not_comparable"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 22,
+          "id": "not-found-response",
+          "from": "log_not_found",
+          "to": "return_result"
+        },
+        "point": [
+          1234,
+          1370
+        ],
+        "segmentIndex": 1,
+        "otherSegmentIndex": 1
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    },
+    {
+      "code": "composition/ambiguous-corridor",
+      "severity": "error",
+      "message": "[composition/ambiguous-corridor] showcase workflow edges[1] id \"agent-return-data\" \"agent_lookup\" -> \"compare_source\" shares a 472px corridor with edges[2] id \"anchor-query\" \"anchor_ready\" -> \"fabric_lookup\" at [20, 491] -> [20, 963] (segments 1 and 2; minimum 8px) — adjust route/via, bias, or channel coordinates so unrelated edges do not visually merge.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 1,
+        "id": "agent-return-data",
+        "from": "agent_lookup",
+        "to": "compare_source"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 2,
+          "id": "anchor-query",
+          "from": "anchor_ready",
+          "to": "fabric_lookup"
+        },
+        "overlapLengthPx": 472,
+        "minimumPx": 8,
+        "from": [
+          20,
+          491
+        ],
+        "to": [
+          20,
+          963
+        ],
+        "segmentIndex": 1,
+        "otherSegmentIndex": 2
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so unrelated edges do not visually merge"
+      ]
+    },
+    {
+      "code": "composition/arrowhead-collision",
+      "severity": "error",
+      "message": "[composition/arrowhead-collision] workflow arrows \"not-comparable-save\" and \"source-incident-save\" overlap at their destination (clearance 0px; minimum 9.799999999999999px).",
+      "subject": {
+        "diagramType": "workflow",
+        "edge": "not-comparable-save",
+        "from": "agent_not_comparable",
+        "to": "persist_result"
+      },
+      "evidence": {
+        "otherEdge": "source-incident-save",
+        "distancePx": 0,
+        "minimumPx": 9.799999999999999
+      },
+      "supportedFixes": [
+        "use separate destination sides or ports with clearance for both arrow markers"
+      ]
+    },
+    {
+      "code": "composition/proper-crossing",
+      "severity": "error",
+      "message": "[composition/proper-crossing] showcase workflow edges[6] id \"auth-response\" \"auth_rejected\" -> \"return_result\" crosses edges[27] id \"proof-read-error\" \"load_proofs\" -> \"dependency_error\" at [20, 1486] (segments 1 and 2) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 6,
+        "id": "auth-response",
+        "from": "auth_rejected",
+        "to": "return_result"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 27,
+          "id": "proof-read-error",
+          "from": "load_proofs",
+          "to": "dependency_error"
+        },
+        "point": [
+          20,
+          1486
+        ],
+        "segmentIndex": 1,
+        "otherSegmentIndex": 2
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    },
+    {
+      "code": "composition/proper-crossing",
+      "severity": "error",
+      "message": "[composition/proper-crossing] showcase workflow edges[7] id \"config-active\" \"agent_config\" -> \"agent_lookup\" crosses edges[11] id \"fabric-query-error\" \"fabric_lookup\" -> \"dependency_error\" at [1138, 921] (segments 1 and 1) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 7,
+        "id": "config-active",
+        "from": "agent_config",
+        "to": "agent_lookup"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 11,
+          "id": "fabric-query-error",
+          "from": "fabric_lookup",
+          "to": "dependency_error"
+        },
+        "point": [
+          1138,
+          921
+        ],
+        "segmentIndex": 1,
+        "otherSegmentIndex": 1
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    },
+    {
+      "code": "composition/proper-crossing",
+      "severity": "error",
+      "message": "[composition/proper-crossing] showcase workflow edges[8] id \"config-missing\" \"agent_config\" -> \"agent_not_comparable\" crosses edges[24] id \"pending-anchor-save\" \"anchor_pending\" -> \"persist_result\" at [1240, 846] (segments 2 and 3) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 8,
+        "id": "config-missing",
+        "from": "agent_config",
+        "to": "agent_not_comparable"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 24,
+          "id": "pending-anchor-save",
+          "from": "anchor_pending",
+          "to": "persist_result"
+        },
+        "point": [
+          1240,
+          845.9999999999999
+        ],
+        "segmentIndex": 2,
+        "otherSegmentIndex": 3
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    },
+    {
+      "code": "composition/proper-crossing",
+      "severity": "error",
+      "message": "[composition/proper-crossing] showcase workflow edges[9] id \"error-response\" \"dependency_error\" -> \"return_result\" crosses edges[24] id \"pending-anchor-save\" \"anchor_pending\" -> \"persist_result\" at [1258.4, 1518] (segments 2 and 1) — adjust route/via, bias, or channel coordinates so the edges use separate lane corridors.",
+      "subject": {
+        "diagramType": "workflow",
+        "collection": "edges",
+        "index": 9,
+        "id": "error-response",
+        "from": "dependency_error",
+        "to": "return_result"
+      },
+      "evidence": {
+        "otherRelationship": {
+          "diagramType": "workflow",
+          "collection": "edges",
+          "index": 24,
+          "id": "pending-anchor-save",
+          "from": "anchor_pending",
+          "to": "persist_result"
+        },
+        "point": [
+          1258.4,
+          1517.9999999999998
+        ],
+        "segmentIndex": 2,
+        "otherSegmentIndex": 1
+      },
+      "supportedFixes": [
+        "adjust route/via, bias, or channel coordinates so the edges use separate lane corridors"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 188,
+    "shown": 8,
+    "truncated": true
+  },
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\alur-verifikasi-e2e.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\alur-verifikasi-e2e.finalize-summary.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2388,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\candidate.json",
+    "constraint": "Preserve unaffected semantics and geometry; do not replace the whole candidate.",
+    "then": "finalize-once"
+  }
+}

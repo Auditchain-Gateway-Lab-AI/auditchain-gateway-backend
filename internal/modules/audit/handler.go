@@ -78,20 +78,29 @@ type ErrorResponse struct {
 }
 
 type VerifyLogData struct {
-	LogID              string      `json:"log_id"`
-	IsValid            bool        `json:"is_valid"`
-	Message            string      `json:"message"`
-	IncidentID         string      `json:"incident_id,omitempty"`
-	IncidentScope      string      `json:"incident_scope,omitempty"`
-	IncidentType       string      `json:"incident_type,omitempty"`
-	IncidentStatus     string      `json:"incident_status,omitempty"`
-	ExpectedHash       string      `json:"expected_hash,omitempty"`
-	ActualHash         string      `json:"actual_hash,omitempty"`
-	DBRoot             string      `json:"merkle_root,omitempty"`
-	ChainRoot          string      `json:"blockchain_tx_id,omitempty"`
-	AgentStatus        string      `json:"agent_status,omitempty"`
-	SourceStatus       string      `json:"source_status,omitempty"`
-	AgentDiscrepancies interface{} `json:"agent_discrepancies,omitempty"`
+	LogID                   string      `json:"log_id"`
+	IsValid                 bool        `json:"is_valid"`
+	Message                 string      `json:"message"`
+	VerificationAssessment  string      `json:"verification_assessment,omitempty"`
+	ProofStatus             string      `json:"proof_status,omitempty"`
+	IncidentID              string      `json:"incident_id,omitempty"`
+	IncidentScope           string      `json:"incident_scope,omitempty"`
+	IncidentType            string      `json:"incident_type,omitempty"`
+	IncidentStatus          string      `json:"incident_status,omitempty"`
+	ExpectedHash            string      `json:"expected_hash,omitempty"`
+	ActualHash              string      `json:"actual_hash,omitempty"`
+	DBRoot                  string      `json:"merkle_root,omitempty"`
+	ChainRoot               string      `json:"blockchain_tx_id,omitempty"`
+	AgentStatus             string      `json:"agent_status,omitempty"`
+	SourceStatus            string      `json:"source_status,omitempty"`
+	StateComparison         string      `json:"state_comparison,omitempty"`
+	ComparisonBasis         string      `json:"comparison_basis,omitempty"`
+	OffchainStateHash       string      `json:"offchain_state_hash,omitempty"`
+	ClientStateHash         string      `json:"client_state_hash,omitempty"`
+	SourceCheckedAt         *time.Time  `json:"source_checked_at,omitempty"`
+	AuditTrailStatus        string      `json:"audit_trail_status,omitempty"`
+	AgentDiscrepancies      interface{} `json:"agent_discrepancies,omitempty"`
+	AuditTrailDiscrepancies interface{} `json:"audit_trail_discrepancies,omitempty"`
 }
 
 type IncidentPersistenceErrorResponse struct {
@@ -218,14 +227,16 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 					payload["layer"] = verificationLayer(result.Status)
 				}
 				payload["data"] = gin.H{
-					"log_id":        result.LogID,
-					"is_valid":      result.IsValid,
-					"message":       result.Message,
-					"source_status": result.SourceStatus,
-					"expected_hash": result.ExpectedHash,
-					"actual_hash":   result.ActualHash,
-					"db_root":       result.DBRoot,
-					"chain_root":    result.ChainRoot,
+					"log_id":                  result.LogID,
+					"is_valid":                result.IsValid,
+					"message":                 result.Message,
+					"verification_assessment": result.Assessment,
+					"proof_status":            result.ProofStatus,
+					"source_status":           result.SourceStatus,
+					"expected_hash":           result.ExpectedHash,
+					"actual_hash":             result.ActualHash,
+					"db_root":                 result.DBRoot,
+					"chain_root":              result.ChainRoot,
 				}
 			}
 			c.JSON(http.StatusInternalServerError, payload)
@@ -253,63 +264,88 @@ func (h *Handler) VerifyLog(c *gin.Context) {
 			"status": "failed", "code": "INTEGRITY_TAMPERED", "layer": "2_local_hash",
 			"data": gin.H{
 				"is_valid": result.IsValid, "message": result.Message,
-				"log_id":          result.LogID,
-				"incident_id":     result.IncidentID,
-				"incident_scope":  result.IncidentScope,
-				"incident_type":   result.IncidentType,
-				"incident_status": result.IncidentStatus,
-				"expected_hash":   result.ExpectedHash, "actual_hash": result.ActualHash,
+				"verification_assessment": result.Assessment,
+				"proof_status":            result.ProofStatus,
+				"log_id":                  result.LogID,
+				"incident_id":             result.IncidentID,
+				"incident_scope":          result.IncidentScope,
+				"incident_type":           result.IncidentType,
+				"incident_status":         result.IncidentStatus,
+				"expected_hash":           result.ExpectedHash, "actual_hash": result.ActualHash,
 			},
 		})
 	case "failed_source":
 		c.JSON(http.StatusConflict, gin.H{
 			"status": "failed", "code": "CLIENT_SOURCE_MISMATCH", "layer": "3_agent_source",
 			"data": gin.H{
-				"is_valid":        result.IsValid,
-				"log_id":          result.LogID,
-				"message":         result.Message,
-				"incident_id":     result.IncidentID,
-				"incident_scope":  result.IncidentScope,
-				"incident_type":   result.IncidentType,
-				"incident_status": result.IncidentStatus,
+				"is_valid":                result.IsValid,
+				"verification_assessment": result.Assessment,
+				"proof_status":            result.ProofStatus,
+				"log_id":                  result.LogID,
+				"message":                 result.Message,
+				"incident_id":             result.IncidentID,
+				"incident_scope":          result.IncidentScope,
+				"incident_type":           result.IncidentType,
+				"incident_status":         result.IncidentStatus,
 			},
 		})
 	case "pending":
 		c.JSON(http.StatusAccepted, gin.H{
-			"status":  "pending",
-			"log_id":  result.LogID,
-			"message": result.Message,
+			"status":                  "pending",
+			"verification_assessment": result.Assessment,
+			"proof_status":            result.ProofStatus,
+			"log_id":                  result.LogID,
+			"message":                 result.Message,
+		})
+	case "inconclusive":
+		c.JSON(http.StatusAccepted, gin.H{
+			"status":                  "inconclusive",
+			"verification_assessment": result.Assessment,
+			"proof_status":            result.ProofStatus,
+			"log_id":                  result.LogID,
+			"message":                 result.Message,
 		})
 	case "failed_onchain":
 		c.JSON(http.StatusConflict, gin.H{
 			"status": "failed", "code": "INTEGRITY_TAMPERED", "layer": "4_blockchain",
 			"data": gin.H{
 				"is_valid": result.IsValid, "message": result.Message,
-				"log_id":          result.LogID,
-				"incident_id":     result.IncidentID,
-				"incident_scope":  result.IncidentScope,
-				"incident_type":   result.IncidentType,
-				"incident_status": result.IncidentStatus,
-				"db_root":         result.DBRoot, "chain_root": result.ChainRoot,
+				"verification_assessment": result.Assessment,
+				"proof_status":            result.ProofStatus,
+				"log_id":                  result.LogID,
+				"incident_id":             result.IncidentID,
+				"incident_scope":          result.IncidentScope,
+				"incident_type":           result.IncidentType,
+				"incident_status":         result.IncidentStatus,
+				"db_root":                 result.DBRoot, "chain_root": result.ChainRoot,
 			},
 		})
 	case "success":
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
 			"data": gin.H{
-				"log_id":              result.LogID,
-				"hash_value":          result.ExpectedHash,
-				"merkle_root":         result.DBRoot,
-				"blockchain_tx_id":    result.TxID,
-				"is_valid":            result.IsValid,
-				"message":             result.Message,
-				"agent_status":        result.AgentStatus,
-				"agent_discrepancies": result.AgentDiscrepancies,
-				"source_status":       result.SourceStatus,
-				"incident_id":         result.IncidentID,
-				"incident_scope":      result.IncidentScope,
-				"incident_type":       result.IncidentType,
-				"incident_status":     result.IncidentStatus,
+				"log_id":                    result.LogID,
+				"hash_value":                result.ExpectedHash,
+				"merkle_root":               result.DBRoot,
+				"blockchain_tx_id":          result.TxID,
+				"is_valid":                  result.IsValid,
+				"verification_assessment":   result.Assessment,
+				"proof_status":              result.ProofStatus,
+				"message":                   result.Message,
+				"agent_status":              result.AgentStatus,
+				"agent_discrepancies":       result.AgentDiscrepancies,
+				"source_status":             result.SourceStatus,
+				"state_comparison":          result.StateComparison,
+				"comparison_basis":          result.ComparisonBasis,
+				"offchain_state_hash":       result.OffchainStateHash,
+				"client_state_hash":         result.ClientStateHash,
+				"source_checked_at":         result.SourceCheckedAt,
+				"audit_trail_status":        result.AuditTrailStatus,
+				"audit_trail_discrepancies": result.AuditTrailDiffs,
+				"incident_id":               result.IncidentID,
+				"incident_scope":            result.IncidentScope,
+				"incident_type":             result.IncidentType,
+				"incident_status":           result.IncidentStatus,
 			},
 		})
 	}

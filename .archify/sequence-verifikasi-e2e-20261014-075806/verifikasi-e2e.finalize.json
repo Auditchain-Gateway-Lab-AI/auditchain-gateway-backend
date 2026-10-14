@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "sequence",
+  "quality": "showcase",
+  "startedAt": "2026-10-14T01:03:00.278Z",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+    "sha256": "6d03649c6f850f2937cefa0522d5a257ef7e5da545a40df1ae7283edbaa7128d",
+    "bytes": 8049
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html",
+    "sha256": "b92f3c24f9695f9abd3a9ca4c97336a518f13e77e3a0c01a0e7a94added923e8",
+    "bytes": 771935
+  },
+  "stages": {
+    "validate": {
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": null,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Users\\Alleviate\\.agents\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "sequence",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": false,
+        "command": "deliver",
+        "receiptId": "d505efee-4079-441e-b5de-1f8f9e1f257f",
+        "stage": "render",
+        "type": "sequence",
+        "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+        "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html",
+        "error": "Sequence layout validation failed:\n- [composition/label-canvas-containment] showcase sequence label \"GET /api/dashboard/verify/{log_id} + JWT\" on messages[0] id \"start-verify\" \"portal\" -> \"api\" extends past the left edge by 22px (label rect [-22, 164, 276, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.\n- [composition/label-canvas-containment] showcase sequence label \"Tampilkan hasil verifikasi dan rincian status\" on messages[18] id \"result-to-portal\" \"api\" -> \"portal\" extends past the left edge by 38.5px (label rect [-38, 1028, 309, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+        "diagnostics": [
+          {
+            "code": "composition/label-canvas-containment",
+            "severity": "error",
+            "message": "[composition/label-canvas-containment] showcase sequence label \"GET /api/dashboard/verify/{log_id} + JWT\" on messages[0] id \"start-verify\" \"portal\" -> \"api\" extends past the left edge by 22px (label rect [-22, 164, 276, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+            "subject": {
+              "diagramType": "sequence",
+              "collection": "messages",
+              "index": 0,
+              "id": "start-verify",
+              "from": "portal",
+              "to": "api"
+            },
+            "evidence": {
+              "label": "GET /api/dashboard/verify/{log_id} + JWT",
+              "labelRect": {
+                "x": -22,
+                "y": 164,
+                "width": 276,
+                "height": 18
+              },
+              "viewBox": [
+                920,
+                1178
+              ],
+              "overflowPx": {
+                "left": 22
+              },
+              "tolerancePx": 0.5
+            },
+            "supportedFixes": [
+              "shorten the label, reorder participants, or enlarge meta.viewBox"
+            ]
+          },
+          {
+            "code": "composition/label-canvas-containment",
+            "severity": "error",
+            "message": "[composition/label-canvas-containment] showcase sequence label \"Tampilkan hasil verifikasi dan rincian status\" on messages[18] id \"result-to-portal\" \"api\" -> \"portal\" extends past the left edge by 38.5px (label rect [-38, 1028, 309, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+            "subject": {
+              "diagramType": "sequence",
+              "collection": "messages",
+              "index": 18,
+              "id": "result-to-portal",
+              "from": "api",
+              "to": "portal"
+            },
+            "evidence": {
+              "label": "Tampilkan hasil verifikasi dan rincian status",
+              "labelRect": {
+                "x": -38.5,
+                "y": 1028,
+                "width": 309,
+                "height": 18
+              },
+              "viewBox": [
+                920,
+                1178
+              ],
+              "overflowPx": {
+                "left": 38.5
+              },
+              "tolerancePx": 0.5
+            },
+            "supportedFixes": [
+              "shorten the label, reorder participants, or enlarge meta.viewBox"
+            ]
+          }
+        ],
+        "provenance": "failed",
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      },
+      "execution": "embedded-in-deliver"
+    },
+    "deliver": {
+      "status": "not-run",
+      "execution": "blocked-by-validate"
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "composition/label-canvas-containment",
+      "severity": "error",
+      "message": "[composition/label-canvas-containment] showcase sequence label \"GET /api/dashboard/verify/{log_id} + JWT\" on messages[0] id \"start-verify\" \"portal\" -> \"api\" extends past the left edge by 22px (label rect [-22, 164, 276, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+      "subject": {
+        "diagramType": "sequence",
+        "collection": "messages",
+        "index": 0,
+        "id": "start-verify",
+        "from": "portal",
+        "to": "api"
+      },
+      "evidence": {
+        "label": "GET /api/dashboard/verify/{log_id} + JWT",
+        "labelRect": {
+          "x": -22,
+          "y": 164,
+          "width": 276,
+          "height": 18
+        },
+        "viewBox": [
+          920,
+          1178
+        ],
+        "overflowPx": {
+          "left": 22
+        },
+        "tolerancePx": 0.5
+      },
+      "supportedFixes": [
+        "shorten the label, reorder participants, or enlarge meta.viewBox"
+      ]
+    },
+    {
+      "code": "composition/label-canvas-containment",
+      "severity": "error",
+      "message": "[composition/label-canvas-containment] showcase sequence label \"Tampilkan hasil verifikasi dan rincian status\" on messages[18] id \"result-to-portal\" \"api\" -> \"portal\" extends past the left edge by 38.5px (label rect [-38, 1028, 309, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.",
+      "subject": {
+        "diagramType": "sequence",
+        "collection": "messages",
+        "index": 18,
+        "id": "result-to-portal",
+        "from": "api",
+        "to": "portal"
+      },
+      "evidence": {
+        "label": "Tampilkan hasil verifikasi dan rincian status",
+        "labelRect": {
+          "x": -38.5,
+          "y": 1028,
+          "width": 309,
+          "height": 18
+        },
+        "viewBox": [
+          920,
+          1178
+        ],
+        "overflowPx": {
+          "left": 38.5
+        },
+        "tolerancePx": 0.5
+      },
+      "supportedFixes": [
+        "shorten the label, reorder participants, or enlarge meta.viewBox"
+      ]
+    }
+  ],
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.finalize-summary.json"
+  },
+  "visualReview": "not-requested",
+  "failedStage": "validate",
+  "finishedAt": "2026-10-14T01:03:01.389Z",
+  "durationMs": 1111,
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  }
+}
