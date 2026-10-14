@@ -1,0 +1,122 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Flowchart Verifikasi End-to-End AuditChain",
+    "subtitle": "Dari permintaan cek log hingga hasil integritas Gateway dan status sumber client",
+    "output": ".archify/workflow-verifikasi-e2e-v2-20261014-082927/flowchart-verifikasi-e2e.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "0980c2d3cfd55ad968ba6323cbf1c4009ed923cf"
+    }
+  },
+  "lanes": [
+    { "id": "caller", "label": "Portal / Pemanggil" },
+    { "id": "gateway", "label": "AuditChain Gateway" },
+    { "id": "offchain", "label": "PostgreSQL · Off-chain" },
+    { "id": "fabric", "label": "Hyperledger Fabric" }
+  ],
+  "phases": [
+    { "id": "request", "label": "1 · Permintaan dan pencarian log", "fromCol": 0, "toCol": 2 },
+    { "id": "evidence", "label": "2 · Pemeriksaan hash dan bukti Fabric", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "source", "label": "3 · Pemeriksaan sumber dan hasil", "fromCol": 5, "toCol": 5 }
+  ],
+  "mainPath": [
+    "request_log",
+    "jwt_scope",
+    "load_log",
+    "hash_check",
+    "fabric_lookup",
+    "root_check",
+    "finish_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["request_log"],
+    "allowedTerminals": ["finish_result"]
+  },
+  "nodes": [
+    {
+      "id": "request_log", "lane": "caller", "col": 0,
+      "type": "frontend", "label": "Minta verifikasi", "sublabel": "Pilih satu log audit", "icon": "person", "width": 176,
+      "sources": [{ "path": "internal/modules/audit/router.go", "line": 17, "end_line": 24 }, { "path": "internal/modules/audit/handler.go", "line": 194, "end_line": 210 }]
+    },
+    {
+      "id": "jwt_scope", "lane": "gateway", "col": 1,
+      "type": "security", "label": "Validasi token dan client", "sublabel": "JWT menentukan client_id yang boleh diperiksa", "icon": "security", "width": 202,
+      "sources": [{ "path": "internal/middleware/jwt.go", "line": 13, "end_line": 68 }, { "path": "internal/modules/audit/handler.go", "line": 50, "end_line": 73 }]
+    },
+    {
+      "id": "load_log", "lane": "offchain", "col": 2,
+      "type": "database", "label": "Cari log di PostgreSQL", "sublabel": "log_id + client_id; tidak ada → 404", "icon": "database", "width": 206,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 905, "end_line": 920 }, { "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 83 }]
+    },
+    {
+      "id": "hash_check", "lane": "gateway", "col": 3,
+      "type": "backend", "label": "Hitung ulang dan cocokkan hash", "sublabel": "Belum siap → 202 · berbeda → 409 · cocok → lanjut", "icon": "security", "width": 226,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 639, "end_line": 653 }, { "path": "internal/engine/hasher/hasher.go", "line": 41, "end_line": 60 }, { "path": "internal/modules/audit/service.go", "line": 922, "end_line": 934 }]
+    },
+    {
+      "id": "fabric_lookup", "lane": "fabric", "col": 4,
+      "type": "external", "label": "Ambil root dari Fabric", "sublabel": "Anchor belum ada → 202 · lanjut query Merkle root", "icon": "external", "width": 218,
+      "sources": [{ "path": "internal/blockchain/fabric.go", "line": 214, "end_line": 223 }, { "path": "internal/modules/audit/service.go", "line": 937, "end_line": 961 }]
+    },
+    {
+      "id": "root_check", "lane": "gateway", "col": 5, "yOffset": -70,
+      "type": "backend", "label": "Cocokkan proof + status Agent", "sublabel": "Baca proof PostgreSQL; Agent hanya event terbaru non-RECOVERY", "icon": "security", "width": 250,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 963, "end_line": 1055 }, { "path": "internal/modules/audit/repository.go", "line": 86, "end_line": 89 }, { "path": "internal/blockchain/agentverifier/service.go", "line": 206, "end_line": 319 }]
+    },
+    {
+      "id": "finish_result", "lane": "gateway", "col": 5, "yOffset": 145,
+      "type": "backend", "label": "Simpan dan kembalikan hasil", "sublabel": "Integritas Gateway dan status Agent dilaporkan terpisah", "icon": "success", "width": 224,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 866, "end_line": 884 }, { "path": "internal/modules/audit/service.go", "line": 1485, "end_line": 1552 }, { "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    }
+  ],
+  "edges": [
+    { "id": "request-auth", "from": "request_log", "to": "jwt_scope", "label": "GET + Bearer JWT", "variant": "emphasis", "role": "main" },
+    { "id": "auth-log", "from": "jwt_scope", "to": "load_log", "label": "token valid", "variant": "emphasis", "role": "main" },
+    { "id": "log-hash", "from": "load_log", "to": "hash_check", "label": "log ditemukan", "variant": "emphasis", "role": "main" },
+    { "id": "hash-fabric", "from": "hash_check", "to": "fabric_lookup", "label": "hash cocok + anchor tersedia", "variant": "emphasis", "role": "main" },
+    { "id": "fabric-root", "from": "fabric_lookup", "to": "root_check", "label": "root Fabric + proof PostgreSQL", "variant": "emphasis", "role": "main" },
+    { "id": "root-finish", "from": "root_check", "to": "finish_result", "label": "simpan hasil dan kembalikan", "variant": "emphasis", "role": "main" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Urutan pemeriksaan",
+      "items": [
+        "Gateway memastikan log ditemukan dan hash lokal cocok.",
+        "Gateway membaca root dari Fabric dan proof dari PostgreSQL, lalu menyusun ulang dan membandingkan root.",
+        "Jika bukti Gateway lolos, hasil integritas disimpan dan dikembalikan."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Kapan Agent dibandingkan?",
+      "items": [
+        "Hanya event client terbaru yang bukan RECOVERY diperiksa live.",
+        "Event historis atau RECOVERY melewati pengecekan Agent."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Jangan samakan kedua status",
+      "items": [
+        "Hash/Fabric validitas berbeda dari status data Agent.",
+        "Agent unreachable atau not-comparable tidak otomatis berarti bukti Gateway rusak.",
+        "Mismatch data sumber dicatat sebagai source incident."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Respons yang mungkin",
+      "items": [
+        "401 token tidak valid; 404 log tidak ditemukan.",
+        "202 bukti belum siap; 409 hash atau Merkle root berbeda.",
+        "5xx dependency gagal dibaca; 200 saat verifikasi Gateway lolos."
+      ]
+    }
+  ]
+}

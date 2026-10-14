@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "command": "deliver",
+  "status": "pending",
+  "receiptId": "6f1c1ef1-abf7-47e5-9286-a1ee93cb3532",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-20261014-081454\\alur-verifikasi-e2e.html"
+}

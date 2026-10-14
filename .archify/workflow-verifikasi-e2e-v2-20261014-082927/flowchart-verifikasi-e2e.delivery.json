@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "a847cc6f-cc23-45d9-95a1-43a78d6d8825",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082927\\candidate-readable.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082927\\flowchart-verifikasi-e2e.html",
+  "specification": {
+    "sha256": "8bcff01b2df672d6525d62085df4196297fd50e779a66673b1e76e5cf8334c2d",
+    "bytes": 6666
+  },
+  "artifact": {
+    "sha256": "bd08c85d7b887d18b814c1a67ca4e7dd1fa0558052b2eaa46b0fce4c38d69759",
+    "bytes": 764375
+  }
+}

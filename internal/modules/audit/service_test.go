@@ -166,6 +166,77 @@ func TestAgentFailureStatusesDistinguishHTTPDenialFromUnreachable(t *testing.T) 
 	}
 }
 
+func TestVerificationAssessmentSeparatesProofAndSourceResults(t *testing.T) {
+	tests := []struct {
+		name             string
+		proofStatus      string
+		sourceStatus     string
+		agentStatus      string
+		auditTrailStatus string
+		want             string
+	}{
+		{name: "complete proof and live state match", proofStatus: "VERIFIED", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", want: "VERIFIED"},
+		{name: "anchored event differs from live client row", proofStatus: "VERIFIED", sourceStatus: models.SourceStatusMismatch, agentStatus: "mismatch", want: "CLIENT_STATE_DIVERGENCE"},
+		{name: "agent offline does not invalidate Fabric proof", proofStatus: "VERIFIED", sourceStatus: models.SourceStatusUnreachable, agentStatus: "unreachable", want: "INCONCLUSIVE_AGENT_UNREACHABLE"},
+		{name: "state fields are not comparable", proofStatus: "VERIFIED", sourceStatus: models.SourceStatusNotComparable, agentStatus: "not_comparable", want: "INCONCLUSIVE_SOURCE_NOT_COMPARABLE"},
+		{name: "historical event skips live lookup", proofStatus: "VERIFIED", agentStatus: "skipped_historical", want: "GATEWAY_PROOF_VERIFIED_SOURCE_SKIPPED"},
+		{name: "bad local proof is not attributed to source", proofStatus: "FAILED_MERKLE_PROOF", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", want: "OFFCHAIN_INTEGRITY_FAILED"},
+		{name: "legacy proof cannot establish client divergence", proofStatus: "LEGACY_LIMITED", sourceStatus: models.SourceStatusMismatch, agentStatus: "mismatch", want: "INCONCLUSIVE_LEGACY_PROOF_WITH_SOURCE_DIVERGENCE"},
+		{name: "legacy proof remains explicitly limited when source is skipped", proofStatus: "LEGACY_LIMITED", agentStatus: "skipped_historical", want: "INCONCLUSIVE_LEGACY_PROOF"},
+		{name: "legacy proof is not full verification even when projected source matches", proofStatus: "LEGACY_LIMITED", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", want: "VERIFIED_LEGACY_LIMITED_PROOF"},
+		{name: "missing Fabric proof is inconclusive", proofStatus: "UNAVAILABLE_MERKLE_PROOF", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", want: "INCONCLUSIVE_MERKLE_PROOF_MISSING"},
+		{name: "proof batch root mismatch is offchain failure", proofStatus: "FAILED_PROOF_BATCH_ROOT", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", want: "OFFCHAIN_INTEGRITY_FAILED"},
+		{name: "Fabric outage in history is inconclusive", proofStatus: "UNAVAILABLE_FABRIC", agentStatus: "unreachable", want: "INCONCLUSIVE_FABRIC_UNAVAILABLE"},
+		{name: "source audit event separately differs", proofStatus: "VERIFIED", sourceStatus: models.SourceStatusMatched, agentStatus: "matched", auditTrailStatus: "mismatch", want: "SOURCE_EVENT_DIVERGENCE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := verificationAssessment(tt.proofStatus, tt.sourceStatus, tt.agentStatus, tt.auditTrailStatus)
+			if got != tt.want {
+				t.Fatalf("verificationAssessment() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldRecordClientSourceIncidentRequiresNonLegacyProof(t *testing.T) {
+	tests := []struct {
+		name        string
+		proofStatus string
+		source      string
+		want        bool
+	}{
+		{name: "complete proof and divergence", proofStatus: "VERIFIED", source: models.SourceStatusMismatch, want: true},
+		{name: "legacy proof does not attribute divergence", proofStatus: "LEGACY_LIMITED", source: models.SourceStatusMismatch, want: false},
+		{name: "matched source has no incident", proofStatus: "VERIFIED", source: models.SourceStatusMatched, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldRecordClientSourceIncident(tt.proofStatus, tt.source); got != tt.want {
+				t.Fatalf("shouldRecordClientSourceIncident(%q, %q) = %v, want %v", tt.proofStatus, tt.source, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProofsForAnchorRootSelectsOnlyProofsForFabricBatch(t *testing.T) {
+	proofs := []models.MerkleProof{
+		{TransactionHash: "leaf", MerkleRoot: "root-a", TreeLevel: 0},
+		{TransactionHash: "leaf", MerkleRoot: "root-b", TreeLevel: 0},
+		{TransactionHash: "leaf", MerkleRoot: "root-b", TreeLevel: 1},
+	}
+
+	selected := proofsForAnchorRoot(proofs, "root-b")
+	if len(selected) != 2 {
+		t.Fatalf("selected proof count = %d, want 2", len(selected))
+	}
+	for _, proof := range selected {
+		if proof.MerkleRoot != "root-b" {
+			t.Fatalf("selected proof root = %q, want root-b", proof.MerkleRoot)
+		}
+	}
+}
+
 func TestRecoveryDisplayStatus(t *testing.T) {
 	tests := []struct {
 		name   string

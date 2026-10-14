@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "command": "deliver",
+  "status": "pending",
+  "receiptId": "d505efee-4079-441e-b5de-1f8f9e1f257f",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html"
+}

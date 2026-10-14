@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\candidate.json",
+    "sha256": "461889edc3212b7f33b682a9b11e73a1eb6aa05b097fefdfccd8377c22f9655c",
+    "bytes": 15351
+  },
+  "artifact": {
+    "path": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.html"
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/1/toCol (id/label: \"proof\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/1/toCol",
+        "identity": "proof"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/7/icon (id/label: \"rehash\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/7/icon",
+        "identity": "rehash"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/2/fromCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/2/fromCol",
+        "identity": "source"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/phases/2/toCol (id/label: \"source\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/phases/2/toCol",
+        "identity": "source"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/8/type (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/8/type",
+        "identity": "hash_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/8/icon (id/label: \"hash_match\") must be equal to one of the allowed values {\"allowedValues\":[\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/8/icon",
+        "identity": "hash_match"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "calendar",
+          "clock",
+          "person",
+          "briefcase",
+          "flag",
+          "moon",
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external",
+          "start",
+          "active",
+          "waiting",
+          "success",
+          "failure",
+          "neutral",
+          "none"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"calendar\",\"clock\",\"person\",\"briefcase\",\"flag\",\"moon\",\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\",\"start\",\"active\",\"waiting\",\"success\",\"failure\",\"neutral\",\"none\"]"
+      ]
+    },
+    {
+      "code": "schema/maximum",
+      "severity": "error",
+      "message": "/nodes/10/col (id/label: \"anchor_ready\") must be <= 5 {\"comparison\":\"<=\",\"limit\":5}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/10/col",
+        "identity": "anchor_ready"
+      },
+      "evidence": {
+        "keyword": "maximum",
+        "comparison": "<=",
+        "limit": 5
+      },
+      "supportedFixes": [
+        "use a value <= 5"
+      ]
+    },
+    {
+      "code": "schema/enum",
+      "severity": "error",
+      "message": "/nodes/10/type (id/label: \"anchor_ready\") must be equal to one of the allowed values {\"allowedValues\":[\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]}",
+      "subject": {
+        "diagramType": "workflow",
+        "path": "/nodes/10/type",
+        "identity": "anchor_ready"
+      },
+      "evidence": {
+        "keyword": "enum",
+        "allowedValues": [
+          "frontend",
+          "backend",
+          "database",
+          "cloud",
+          "security",
+          "messagebus",
+          "external"
+        ]
+      },
+      "supportedFixes": [
+        "choose one of [\"frontend\",\"backend\",\"database\",\"cloud\",\"security\",\"messagebus\",\"external\"]"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 34,
+    "shown": 8,
+    "truncated": true
+  },
+  "evidence": {
+    "receipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.finalize.json",
+    "summaryReceipt": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\flowchart-verifikasi-e2e.finalize-summary.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 900,
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\workflow-verifikasi-e2e-v2-20261014-082537\\candidate.json",
+    "constraint": "Preserve unaffected semantics and geometry; do not replace the whole candidate.",
+    "then": "finalize-once"
+  }
+}

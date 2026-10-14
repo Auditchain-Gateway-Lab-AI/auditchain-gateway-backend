@@ -80,7 +80,7 @@ func TestCachedRangeStatus(t *testing.T) {
 		{name: "valid", status: models.IntegrityStatusValid, want: "success"},
 		{name: "pending", status: models.IntegrityStatusPending, want: "pending"},
 		{name: "tampered", status: models.IntegrityStatusTampered, want: "failed_cached"},
-		{name: "unreachable", status: models.IntegrityStatusUnreachable, want: "error"},
+		{name: "unreachable is inconclusive", status: models.IntegrityStatusUnreachable, want: "inconclusive_cached"},
 	}
 
 	for _, tt := range tests {
@@ -90,6 +90,17 @@ func TestCachedRangeStatus(t *testing.T) {
 				t.Fatalf("cachedRangeStatus(%q) = %q, want %q", tt.status, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAddRangeSummaryKeepsInconclusiveSeparateFromInvalid(t *testing.T) {
+	var summary RangeSummary
+	addRangeSummary(&summary, "inconclusive")
+	addRangeSummary(&summary, "success")
+	addRangeSummary(&summary, "failed_onchain")
+
+	if summary.Total != 3 || summary.Inconclusive != 1 || summary.Valid != 1 || summary.Invalid != 1 {
+		t.Fatalf("unexpected range summary: %+v", summary)
 	}
 }
 

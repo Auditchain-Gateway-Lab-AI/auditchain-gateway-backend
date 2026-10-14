@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d505efee-4079-441e-b5de-1f8f9e1f257f",
+  "status": "failed",
+  "command": "deliver",
+  "stage": "render",
+  "input": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\candidate.json",
+  "output": "C:\\Peyimpanan Pribadi\\PROJEK BESAR\\auditchain-gateway-backend\\.archify\\sequence-verifikasi-e2e-20261014-075806\\verifikasi-e2e.html",
+  "artifact": {
+    "sha256": "b92f3c24f9695f9abd3a9ca4c97336a518f13e77e3a0c01a0e7a94added923e8",
+    "bytes": 771935
+  },
+  "error": "Sequence layout validation failed:\n- [composition/label-canvas-containment] showcase sequence label \"GET /api/dashboard/verify/{log_id} + JWT\" on messages[0] id \"start-verify\" \"portal\" -> \"api\" extends past the left edge by 22px (label rect [-22, 164, 276, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox.\n- [composition/label-canvas-containment] showcase sequence label \"Tampilkan hasil verifikasi dan rincian status\" on messages[18] id \"result-to-portal\" \"api\" -> \"portal\" extends past the left edge by 38.5px (label rect [-38, 1028, 309, 18]; viewBox 920x1178) — shorten the label, reorder participants, or enlarge meta.viewBox."
+}

@@ -1,0 +1,239 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Flowchart Verifikasi End-to-End AuditChain",
+    "subtitle": "Mulai dari permintaan verifikasi, pemeriksaan hash dan Fabric, hingga hasil pengecekan sumber client",
+    "output": ".archify/workflow-verifikasi-e2e-v2-20261014-082537/flowchart-verifikasi-e2e.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Auditchain-Gateway-Lab-AI/auditchain-gateway-backend",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "0980c2d3cfd55ad968ba6323cbf1c4009ed923cf"
+    }
+  },
+  "lanes": [
+    { "id": "caller", "label": "Portal / Pemanggil" },
+    { "id": "gateway", "label": "AuditChain Gateway" },
+    { "id": "offchain", "label": "PostgreSQL · Off-chain" },
+    { "id": "fabric", "label": "Hyperledger Fabric" },
+    { "id": "agent", "label": "Agent di sisi client" },
+    { "id": "outcomes", "label": "Hasil / kondisi berhenti", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "request", "label": "1 · Minta dan temukan log", "fromCol": 0, "toCol": 2 },
+    { "id": "proof", "label": "2 · Buktikan hash dan Merkle root", "fromCol": 3, "toCol": 9, "variant": "emphasis" },
+    { "id": "source", "label": "3 · Cek sumber client bila memenuhi syarat", "fromCol": 10, "toCol": 14 }
+  ],
+  "mainPath": [
+    "request_log",
+    "jwt_scope",
+    "load_log",
+    "hash_ready",
+    "rehash",
+    "hash_match",
+    "anchor_ready",
+    "fabric_lookup",
+    "load_proof",
+    "root_match",
+    "agent_gate",
+    "agent_lookup",
+    "source_result",
+    "persist_result",
+    "return_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["request_log"],
+    "allowedTerminals": [
+      "auth_rejected",
+      "log_not_found",
+      "hash_pending",
+      "local_tampered",
+      "anchor_pending",
+      "dependency_error",
+      "merkle_tampered",
+      "return_result"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "request_log", "lane": "caller", "col": 0,
+      "type": "frontend", "label": "Minta verifikasi", "sublabel": "Pilih satu log audit", "icon": "person", "width": 176,
+      "sources": [{ "path": "internal/modules/audit/router.go", "line": 17, "end_line": 24 }, { "path": "internal/modules/audit/handler.go", "line": 194, "end_line": 210 }]
+    },
+    {
+      "id": "jwt_scope", "lane": "gateway", "col": 1,
+      "type": "security", "label": "Validasi JWT dan client", "sublabel": "client_id menentukan ruang lingkup log", "icon": "security", "width": 188,
+      "sources": [{ "path": "internal/middleware/jwt.go", "line": 13, "end_line": 68 }, { "path": "internal/modules/audit/handler.go", "line": 50, "end_line": 73 }]
+    },
+    {
+      "id": "auth_rejected", "lane": "outcomes", "col": 1,
+      "type": "security", "label": "401 · Token ditolak", "sublabel": "Verifikasi berhenti", "icon": "failure", "width": 176,
+      "sources": [{ "path": "internal/middleware/jwt.go", "line": 13, "end_line": 45 }]
+    },
+    {
+      "id": "load_log", "lane": "offchain", "col": 2,
+      "type": "database", "label": "Cari log di PostgreSQL", "sublabel": "log_id + client_id", "icon": "database", "width": 188,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 905, "end_line": 920 }, { "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 83 }]
+    },
+    {
+      "id": "log_not_found", "lane": "outcomes", "col": 2,
+      "type": "security", "label": "404 · Log tidak ditemukan", "sublabel": "Atau bukan milik client ini", "icon": "failure", "width": 192,
+      "sources": [{ "path": "internal/modules/audit/repository.go", "line": 80, "end_line": 83 }, { "path": "internal/modules/audit/handler.go", "line": 234, "end_line": 237 }]
+    },
+    {
+      "id": "hash_ready", "lane": "gateway", "col": 3,
+      "type": "security", "label": "Hash siap diverifikasi?", "sublabel": "Bukan RECEIVED / kosong / PENDING-", "icon": "clock", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 639, "end_line": 653 }]
+    },
+    {
+      "id": "hash_pending", "lane": "outcomes", "col": 3,
+      "type": "security", "label": "202 · Masih diproses", "sublabel": "Status disimpan sebagai PENDING", "icon": "clock", "width": 188,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 639, "end_line": 653 }, { "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    },
+    {
+      "id": "rehash", "lane": "gateway", "col": 4,
+      "type": "security", "label": "Hitung ulang hash", "sublabel": "Data log dinormalisasi lalu di-hash SHA3-256", "icon": "hash", "width": 202,
+      "sources": [{ "path": "internal/engine/hasher/hasher.go", "line": 41, "end_line": 60 }, { "path": "internal/modules/audit/service.go", "line": 626, "end_line": 637 }]
+    },
+    {
+      "id": "hash_match", "lane": "gateway", "col": 5,
+      "type": "decision", "label": "Hash cocok?", "sublabel": "Bandingkan hasil hitung dengan hash log", "icon": "decision", "width": 190,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 922, "end_line": 934 }]
+    },
+    {
+      "id": "local_tampered", "lane": "outcomes", "col": 5,
+      "type": "security", "label": "409 · Hash berbeda", "sublabel": "TAMPERED lokal + incident", "icon": "failure", "width": 188,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 661, "end_line": 714 }, { "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    },
+    {
+      "id": "anchor_ready", "lane": "gateway", "col": 6,
+      "type": "decision", "label": "Anchor tersedia?", "sublabel": "Log sudah memiliki transaksi blockchain", "icon": "decision", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 937, "end_line": 944 }]
+    },
+    {
+      "id": "anchor_pending", "lane": "outcomes", "col": 6,
+      "type": "security", "label": "202 · Menunggu anchor", "sublabel": "Verifikasi dilanjutkan setelah tersedia", "icon": "clock", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 937, "end_line": 944 }, { "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    },
+    {
+      "id": "fabric_lookup", "lane": "fabric", "col": 7,
+      "type": "blockchain", "label": "Ambil Merkle root", "sublabel": "Query anchor di Hyperledger Fabric", "icon": "blockchain", "width": 200,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 946, "end_line": 961 }, { "path": "internal/blockchain/fabric.go", "line": 214, "end_line": 223 }]
+    },
+    {
+      "id": "load_proof", "lane": "offchain", "col": 8,
+      "type": "database", "label": "Ambil proof Merkle", "sublabel": "Proof tersimpan di PostgreSQL", "icon": "database", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/repository.go", "line": 86, "end_line": 89 }]
+    },
+    {
+      "id": "dependency_error", "lane": "outcomes", "col": 8,
+      "type": "security", "label": "5xx · Pemeriksaan gagal", "sublabel": "Fabric atau proof tidak dapat dibaca", "icon": "failure", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 946, "end_line": 961 }, { "path": "internal/modules/audit/repository.go", "line": 86, "end_line": 89 }]
+    },
+    {
+      "id": "root_match", "lane": "gateway", "col": 9,
+      "type": "decision", "label": "Merkle root cocok?", "sublabel": "Susun ulang proof, lalu cocokkan dengan Fabric", "icon": "decision", "width": 212,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 963, "end_line": 1009 }, { "path": "pkg/crypto/merkle.go", "line": 143, "end_line": 160 }]
+    },
+    {
+      "id": "merkle_tampered", "lane": "outcomes", "col": 9,
+      "type": "security", "label": "409 · Root berbeda", "sublabel": "TAMPERED on-chain + incident", "icon": "failure", "width": 194,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 974, "end_line": 1009 }, { "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    },
+    {
+      "id": "agent_gate", "lane": "gateway", "col": 10,
+      "type": "decision", "label": "Perlu cek Agent?", "sublabel": "Hanya event client terbaru; RECOVERY dilewati", "icon": "decision", "width": 210,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 1016, "end_line": 1055 }, { "path": "internal/modules/audit/repository.go", "line": 128, "end_line": 138 }, { "path": "internal/modules/audit/service.go", "line": 2014, "end_line": 2023 }]
+    },
+    {
+      "id": "skip_agent", "lane": "outcomes", "col": 11,
+      "type": "security", "label": "Agent dilewati", "sublabel": "Event lama / RECOVERY / config tak tersedia", "icon": "shield", "width": 206,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 1016, "end_line": 1055 }, { "path": "internal/blockchain/agentverifier/service.go", "line": 369, "end_line": 375 }]
+    },
+    {
+      "id": "agent_lookup", "lane": "agent", "col": 11,
+      "type": "agent", "label": "Minta data ke Agent", "sublabel": "source_record_id atau TABLE:ID", "icon": "agent", "width": 202,
+      "sources": [{ "path": "internal/blockchain/agentverifier/service.go", "line": 119, "end_line": 153 }, { "path": "internal/blockchain/agentverifier/service.go", "line": 206, "end_line": 219 }, { "path": "internal/blockchain/agentverifier/service.go", "line": 282, "end_line": 319 }]
+    },
+    {
+      "id": "source_result", "lane": "gateway", "col": 12,
+      "type": "security", "label": "Bandingkan data sumber", "sublabel": "MATCHED / MISMATCH / UNREACHABLE / NOT_COMPARABLE", "icon": "compare", "width": 242,
+      "sources": [{ "path": "internal/blockchain/agentverifier/service.go", "line": 221, "end_line": 275 }, { "path": "internal/blockchain/agentverifier/service.go", "line": 322, "end_line": 365 }, { "path": "internal/modules/audit/service.go", "line": 1405, "end_line": 1452 }]
+    },
+    {
+      "id": "persist_result", "lane": "offchain", "col": 13,
+      "type": "database", "label": "Simpan hasil terpisah", "sublabel": "Integritas Gateway dan status sumber client", "icon": "database", "width": 218,
+      "sources": [{ "path": "internal/modules/audit/service.go", "line": 661, "end_line": 714 }, { "path": "internal/modules/audit/service.go", "line": 866, "end_line": 884 }, { "path": "internal/modules/audit/service.go", "line": 1485, "end_line": 1552 }]
+    },
+    {
+      "id": "return_result", "lane": "caller", "col": 14,
+      "type": "frontend", "label": "Tampilkan hasil", "sublabel": "Hash/Fabric valid tidak disamakan dengan status Agent", "icon": "check", "width": 222,
+      "sources": [{ "path": "internal/modules/audit/handler.go", "line": 250, "end_line": 315 }]
+    }
+  ],
+  "edges": [
+    { "id": "request-auth", "from": "request_log", "to": "jwt_scope", "label": "GET + Bearer JWT", "variant": "emphasis", "role": "main" },
+    { "id": "auth-invalid", "from": "jwt_scope", "to": "auth_rejected", "label": "tidak valid", "variant": "security", "role": "error" },
+    { "id": "auth-valid", "from": "jwt_scope", "to": "load_log", "label": "valid", "variant": "emphasis", "role": "main" },
+    { "id": "lookup-missing", "from": "load_log", "to": "log_not_found", "label": "tidak ditemukan", "variant": "security", "role": "error" },
+    { "id": "lookup-found", "from": "load_log", "to": "hash_ready", "label": "ditemukan", "variant": "emphasis", "role": "main" },
+    { "id": "hash-not-ready", "from": "hash_ready", "to": "hash_pending", "label": "belum", "variant": "dashed", "role": "branch" },
+    { "id": "hash-ready", "from": "hash_ready", "to": "rehash", "label": "siap", "variant": "emphasis", "role": "main" },
+    { "id": "calculate-compare", "from": "rehash", "to": "hash_match", "variant": "emphasis", "role": "main" },
+    { "id": "hash-differs", "from": "hash_match", "to": "local_tampered", "label": "tidak cocok", "variant": "security", "role": "error" },
+    { "id": "hash-same", "from": "hash_match", "to": "anchor_ready", "label": "cocok", "variant": "emphasis", "role": "main" },
+    { "id": "anchor-missing", "from": "anchor_ready", "to": "anchor_pending", "label": "belum ada", "variant": "dashed", "role": "branch" },
+    { "id": "anchor-present", "from": "anchor_ready", "to": "fabric_lookup", "label": "tersedia", "variant": "emphasis", "role": "main" },
+    { "id": "fabric-to-proof", "from": "fabric_lookup", "to": "load_proof", "label": "Merkle root", "role": "main" },
+    { "id": "fabric-error", "from": "fabric_lookup", "to": "dependency_error", "label": "query gagal", "variant": "security", "role": "error" },
+    { "id": "proof-to-root", "from": "load_proof", "to": "root_match", "label": "proof dibaca", "variant": "emphasis", "role": "main" },
+    { "id": "proof-error", "from": "load_proof", "to": "dependency_error", "label": "baca gagal", "variant": "security", "role": "error" },
+    { "id": "root-differs", "from": "root_match", "to": "merkle_tampered", "label": "tidak cocok", "variant": "security", "role": "error" },
+    { "id": "root-same", "from": "root_match", "to": "agent_gate", "label": "cocok", "variant": "emphasis", "role": "main" },
+    { "id": "skip-agent-path", "from": "agent_gate", "to": "skip_agent", "label": "historical / RECOVERY / tanpa config", "variant": "dashed", "role": "branch" },
+    { "id": "check-agent-path", "from": "agent_gate", "to": "agent_lookup", "label": "event client terbaru", "variant": "emphasis", "role": "main" },
+    { "id": "agent-compare", "from": "agent_lookup", "to": "source_result", "label": "data atau status error", "role": "main" },
+    { "id": "agent-skip-save", "from": "skip_agent", "to": "persist_result", "label": "integritas tetap dilaporkan", "variant": "dashed", "role": "branch" },
+    { "id": "source-save", "from": "source_result", "to": "persist_result", "label": "simpan status sumber / incident mismatch", "variant": "emphasis", "role": "main" },
+    { "id": "return-response", "from": "persist_result", "to": "return_result", "label": "HTTP 200 bila bukti Gateway lolos", "variant": "emphasis", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Urutan bukti utama",
+      "items": [
+        "Gateway menghitung ulang hash log.",
+        "Gateway menyusun ulang proof Merkle dan membandingkan root dengan Fabric.",
+        "Jika keduanya cocok, integritas Gateway dinyatakan valid."
+      ]
+    },
+    {
+      "dot": "green",
+      "title": "Kapan Agent diperiksa?",
+      "items": [
+        "Pengecekan sumber hanya untuk event client terbaru yang bukan RECOVERY.",
+        "Data Agent dibandingkan dengan isi log; event lama dan RECOVERY melewati pemeriksaan live."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Baca hasil tanpa tertukar",
+      "items": [
+        "Hash/Fabric validitas dan status Agent adalah dua hasil berbeda.",
+        "Agent unreachable atau not-comparable tidak otomatis membuat bukti Gateway tampered.",
+        "Perbedaan data sumber dicatat sebagai source incident."
+      ]
+    },
+    {
+      "dot": "red",
+      "title": "Respons yang mungkin",
+      "items": [
+        "401 token tidak valid; 404 log tidak ditemukan.",
+        "202 bukti belum siap; 409 hash atau root tidak cocok.",
+        "5xx bila dependency pemeriksaan gagal; 200 bila verifikasi Gateway lolos."
+      ]
+    }
+  ]
+}

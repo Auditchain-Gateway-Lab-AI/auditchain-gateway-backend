@@ -121,7 +121,7 @@ func (r *auditRepoImpl) GetDashboardStats(clientID string) (map[string]int64, er
 func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*models.AuditLog, error) {
 	var log models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ? AND "+clientAuditEventPredicate, resource, clientID).
-		Order("timestamp desc").First(&log).Error
+		Order("timestamp desc, db_timestamp desc nulls last, log_id desc").First(&log).Error
 	return &log, err
 }
 
@@ -134,7 +134,7 @@ func (r *auditRepoImpl) GetLatestClientLogByResource(resource, clientID string) 
 		resource,
 		clientID,
 		"RECOVERY",
-	).Order("timestamp desc").First(&log).Error
+	).Order("timestamp desc, db_timestamp desc nulls last, log_id desc").First(&log).Error
 	return &log, err
 }
 
@@ -241,7 +241,7 @@ func (r *auditRepoImpl) GetAnchoredLogsPage(clientID string, page, pageSize int)
 func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Raw(
-		"SELECT DISTINCT ON (resource) * FROM audit_logs WHERE client_id = ? AND "+clientAuditEventPredicate+" ORDER BY resource, timestamp DESC",
+		"SELECT DISTINCT ON (resource) * FROM audit_logs WHERE client_id = ? AND "+clientAuditEventPredicate+" ORDER BY resource, timestamp DESC, db_timestamp DESC NULLS LAST, log_id DESC",
 		clientID,
 	).Scan(&logs).Error
 	return logs, err
@@ -250,7 +250,7 @@ func (r *auditRepoImpl) GetResourceInventory(clientID string) ([]models.AuditLog
 func (r *auditRepoImpl) GetLogsByResource(resource, clientID string) ([]models.AuditLog, error) {
 	var logs []models.AuditLog
 	err := r.db.Where("resource = ? AND client_id = ? AND "+clientAuditEventPredicate, resource, clientID).
-		Order("timestamp asc").Find(&logs).Error
+		Order("timestamp asc, db_timestamp asc nulls first, log_id asc").Find(&logs).Error
 	return logs, err
 }
 
@@ -261,7 +261,7 @@ func (r *auditRepoImpl) GetTableResources(tableName, clientID string) ([]models.
 		SELECT DISTINCT ON (resource) * 
 		FROM audit_logs 
 		WHERE client_id = ? AND `+clientAuditEventPredicate+` AND (resource = ? OR resource LIKE ?)
-		ORDER BY resource, timestamp DESC
+		ORDER BY resource, timestamp DESC, db_timestamp DESC NULLS LAST, log_id DESC
 	`, clientID, tableName, tableName+":%").Scan(&logs).Error
 	return logs, err
 }
