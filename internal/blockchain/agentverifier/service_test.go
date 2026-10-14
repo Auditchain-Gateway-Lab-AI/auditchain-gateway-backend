@@ -71,8 +71,73 @@ func TestCompareCurrentResourceStateUsesCanonicalEventProjection(t *testing.T) {
 	if result.ClientHash == "" || result.ClientHash != result.OffchainHash {
 		t.Fatalf("state hashes = (%q, %q), want same non-empty hash", result.ClientHash, result.OffchainHash)
 	}
-	if result.Basis != "latest_event_field_projection:v1" {
+	if result.Basis != "latest_event_field_projection:v2" {
 		t.Fatalf("comparison basis = %q", result.Basis)
+	}
+}
+
+func TestCompareCurrentResourceStateNormalizesAgentStringIdentity(t *testing.T) {
+	log := &models.AuditLog{
+		ClientID: "client-1",
+		Resource: "AGAMA:923",
+		Action:   "UPDATE",
+		Metadata: `{"ID":923,"NAMA":"Indosian"}`,
+	}
+	record := &ResourceRecord{
+		Found: true,
+		Table: "AGAMA",
+		ID:    "923",
+		Data: map[string]interface{}{
+			"ID":   "923", // Oracle Agent returns the primary key as a string.
+			"NAMA": "Indosian",
+		},
+	}
+
+	result := compareCurrentResourceState(log, record)
+	if !result.Comparable || !result.Match {
+		t.Fatalf("comparison = %+v, want comparable match for numeric/string ID encodings", result)
+	}
+	if len(result.Discrepancies) != 0 {
+		t.Fatalf("discrepancies = %+v, want none", result.Discrepancies)
+	}
+	if result.ClientHash == "" || result.ClientHash != result.OffchainHash {
+		t.Fatalf("state hashes = (%q, %q), want same non-empty hash", result.ClientHash, result.OffchainHash)
+	}
+	if result.Basis != "latest_event_field_projection:v2" {
+		t.Fatalf("comparison basis = %q", result.Basis)
+	}
+}
+
+func TestCompareCurrentResourceStateDoesNotNormalizeWrongIdentity(t *testing.T) {
+	log := &models.AuditLog{
+		ClientID: "client-1",
+		Resource: "AGAMA:923",
+		Action:   "UPDATE",
+		Metadata: `{"ID":923,"NAMA":"Indosian"}`,
+	}
+	record := &ResourceRecord{
+		Found: true,
+		Table: "AGAMA",
+		ID:    "923",
+		Data: map[string]interface{}{
+			"ID":   "924",
+			"NAMA": "Indosian",
+		},
+	}
+
+	result := compareCurrentResourceState(log, record)
+	if !result.Comparable || result.Match {
+		t.Fatalf("comparison = %+v, want comparable mismatch for a different identity", result)
+	}
+	foundIdentityDiscrepancy := false
+	for _, discrepancy := range result.Discrepancies {
+		if discrepancy.Field == "id" {
+			foundIdentityDiscrepancy = true
+			break
+		}
+	}
+	if !foundIdentityDiscrepancy {
+		t.Fatalf("discrepancies = %+v, want an id discrepancy", result.Discrepancies)
 	}
 }
 

@@ -706,7 +706,7 @@ type resourceStateComparison struct {
 // compareCurrentResourceState hashes the same projected state on both sides.
 // The state hash is deliberately distinct from the audit-log leaf hash.
 func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceRecord) resourceStateComparison {
-	result := resourceStateComparison{Basis: "latest_event_field_projection:v1"}
+	result := resourceStateComparison{Basis: "latest_event_field_projection:v2"}
 	if auditLog == nil || record == nil {
 		result.Discrepancies = []Discrepancy{{Field: "comparison", InLog: "event state", InAgent: "missing response"}}
 		return result
@@ -729,6 +729,8 @@ func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceReco
 	}
 
 	if strings.EqualFold(strings.TrimSpace(auditLog.Action), "DELETE") {
+		// A DELETE is verified by row absence, as before. Its tombstone state
+		// remains tied to the original event projection.
 		result.Basis = "latest_event_row_absence:v1"
 		if !record.Found {
 			result.ClientHash, _ = HashResourceState(auditLog.ClientID, auditLog.Resource, map[string]interface{}{})
@@ -776,6 +778,23 @@ func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceReco
 		return result
 	}
 
+	resourceID := resourceIDFromAuditLog(auditLog)
+	if resourceID != "" {
+		if discrepancy := normalizeResourceIdentityProjection(expectedCanonical, resourceID, false); discrepancy != nil {
+			result.Discrepancies = append(result.Discrepancies, *discrepancy)
+		}
+		if discrepancy := normalizeResourceIdentityProjection(actualCanonical, resourceID, true); discrepancy != nil {
+			result.Discrepancies = append(result.Discrepancies, *discrepancy)
+		}
+		// Hash both projections using the same representation for a primary key
+		// already validated against TABLE:ID and the Agent response ID.
+		result.OffchainHash, err = HashResourceState(auditLog.ClientID, auditLog.Resource, expectedCanonical)
+		if err != nil {
+			result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "canonical state", InAgent: "hash failed"}}
+			return result
+		}
+	}
+
 	projected := make(map[string]interface{}, len(expectedCanonical))
 	for key, expectedValue := range expectedCanonical {
 		actualValue, exists := actualCanonical[key]
@@ -805,6 +824,43 @@ func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceReco
 	result.Comparable = true
 	result.Match = len(result.Discrepancies) == 0 && result.ClientHash == result.OffchainHash
 	return result
+}
+
+// resourceIDFromAuditLog extracts the identity encoded in TABLE:ID resources.
+// The resource path is also the identity used to query and validate the Agent
+// response, so equivalent numeric/string JSON encodings of its ID are the same
+// identity during state comparison.
+func resourceIDFromAuditLog(auditLog *models.AuditLog) string {
+	if auditLog == nil {
+		return ""
+	}
+	parts := strings.SplitN(strings.TrimSpace(auditLog.Resource), ":", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// normalizeResourceIdentityProjection represents a projected primary-key ID
+// as a string only when it matches the ID from TABLE:ID. A different ID remains
+// a discrepancy; this avoids hiding a real cross-record comparison.
+func normalizeResourceIdentityProjection(state map[string]interface{}, resourceID string, fromAgent bool) *Discrepancy {
+	value, exists := state["id"]
+	if !exists || resourceID == "" {
+		return nil
+	}
+
+	identity := formatValueToString(value)
+	if identity != resourceID {
+		inLog, inAgent := identity, resourceID
+		if fromAgent {
+			inLog, inAgent = resourceID, identity
+		}
+		return &Discrepancy{Field: "id", InLog: inLog, InAgent: inAgent}
+	}
+
+	state["id"] = resourceID
+	return nil
 }
 
 func stateComparisonLabel(comparison resourceStateComparison) string {
