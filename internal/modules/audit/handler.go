@@ -924,17 +924,8 @@ func (h *Handler) GetLatestVerificationRun(c *gin.Context) {
 // --- Agent API Handlers ---
 
 func (h *Handler) GetOffchainDataForAgent(c *gin.Context) {
-	clientID := c.GetHeader("X-Client-ID")
-	if clientID == "" {
-		// Fallback to JWT if testing via dashboard token
-		id, ok := h.getClientID(c)
-		if ok {
-			clientID = id
-		}
-	}
-
-	if clientID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan (gunakan header X-Client-ID)"})
+	clientID, ok := h.getClientID(c)
+	if !ok {
 		return
 	}
 

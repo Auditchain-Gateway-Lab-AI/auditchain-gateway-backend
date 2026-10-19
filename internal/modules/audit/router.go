@@ -8,6 +8,7 @@ import (
 
 func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 	agentAPI := routerGroup.Group("/agent")
+	agentAPI.Use(middleware.JWTAuth())
 	{
 		agentAPI.GET("/offchain-data", h.GetOffchainDataForAgent)
 		agentAPI.GET("/offchain-data/:resource", h.GetOffchainDataForAgent)
