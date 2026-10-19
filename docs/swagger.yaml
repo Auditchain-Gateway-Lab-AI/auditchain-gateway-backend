@@ -79,11 +79,33 @@ definitions:
         type: array
       agent_status:
         type: string
+      audit_trail_discrepancies:
+        items:
+          $ref: '#/definitions/agentverifier.Discrepancy'
+        type: array
+      audit_trail_status:
+        type: string
+      client_state_hash:
+        type: string
+      comparison_basis:
+        type: string
       log:
         $ref: '#/definitions/models.AuditLog'
       log_id:
         type: string
       message:
+        type: string
+      offchain_state_hash:
+        type: string
+      proof_status:
+        type: string
+      source_checked_at:
+        type: string
+      source_status:
+        type: string
+      state_comparison:
+        type: string
+      verification_assessment:
         type: string
       verify_status:
         type: string
@@ -91,6 +113,8 @@ definitions:
   audit.RangeSummary:
     properties:
       already_verified:
+        type: integer
+      inconclusive:
         type: integer
       invalid:
         type: integer
@@ -191,7 +215,14 @@ definitions:
       agent_discrepancies: {}
       agent_status:
         type: string
+      audit_trail_discrepancies: {}
+      audit_trail_status:
+        type: string
       blockchain_tx_id:
+        type: string
+      client_state_hash:
+        type: string
+      comparison_basis:
         type: string
       expected_hash:
         type: string
@@ -211,7 +242,17 @@ definitions:
         type: string
       message:
         type: string
+      offchain_state_hash:
+        type: string
+      proof_status:
+        type: string
+      source_checked_at:
+        type: string
       source_status:
+        type: string
+      state_comparison:
+        type: string
+      verification_assessment:
         type: string
     type: object
   audit.VerifyLogResponse:
@@ -863,6 +904,81 @@ definitions:
       target_log_id:
         type: string
     type: object
+  models.TamperIncident:
+    properties:
+      client_id:
+        type: string
+      detected_at:
+        type: string
+      detected_hash:
+        type: string
+      detected_state_hash:
+        type: string
+      discrepancy_summary:
+        type: string
+      expected_hash:
+        type: string
+      id:
+        type: string
+      incident_scope:
+        type: string
+      incident_type:
+        type: string
+      last_confirmed_at:
+        type: string
+      log_id:
+        type: string
+      reference_log_id:
+        type: string
+      resolved_at:
+        type: string
+      resource:
+        type: string
+      source_status:
+        type: string
+      status:
+        type: string
+    type: object
+  recovery.CandidateListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/recovery.CandidateView'
+        type: array
+    type: object
+  recovery.CandidateView:
+    properties:
+      eligible:
+        type: boolean
+      log_id:
+        type: string
+      operation:
+        type: string
+      reason:
+        type: string
+      recovery_source:
+        type: string
+      reference_anchor_id:
+        type: string
+      reference_log_hash:
+        type: string
+      reference_merkle_root:
+        type: string
+      resource:
+        type: string
+      snapshot_checksum:
+        type: string
+      snapshot_object_key:
+        type: string
+      snapshot_plaintext_hash:
+        type: string
+      snapshot_verified_at:
+        type: string
+      snapshot_version_id:
+        type: string
+      source_status:
+        type: string
+    type: object
   recovery.CreateRequestInput:
     properties:
       idempotency_key:
@@ -885,6 +1001,11 @@ definitions:
       error:
         example: Pesan kesalahan
         type: string
+    type: object
+  recovery.EventDetailResponse:
+    properties:
+      data:
+        $ref: '#/definitions/recovery.RecoveryEventView'
     type: object
   recovery.IncidentDetailResponse:
     properties:
@@ -929,6 +1050,198 @@ definitions:
         type: boolean
       tampered_metadata: {}
     type: object
+  recovery.IncidentListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/models.TamperIncident'
+        type: array
+    type: object
+  recovery.PreflightResult:
+    properties:
+      agent_status:
+        type: string
+      anchor_id:
+        type: string
+      client_state_hash:
+        type: string
+      current_hash:
+        type: string
+      current_integrity:
+        type: string
+      desired_state_hash:
+        type: string
+      fabric_root:
+        type: string
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      object_version_id:
+        type: string
+      operation:
+        type: string
+      recoverable:
+        type: boolean
+      recovery_source:
+        type: string
+      reference_anchor_id:
+        type: string
+      reference_log_hash:
+        type: string
+      reference_merkle_root:
+        type: string
+      snapshot_hash:
+        type: string
+      snapshot_preview:
+        $ref: '#/definitions/recovery.SnapshotPreview'
+      source_found:
+        type: boolean
+      source_status:
+        type: string
+      status:
+        type: string
+      trusted_reference_preview:
+        $ref: '#/definitions/recovery.SnapshotPreview'
+    type: object
+  recovery.RecoveryEventPage:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/recovery.RecoveryEventView'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  recovery.RecoveryEventView:
+    properties:
+      after_hash:
+        type: string
+      before_hash:
+        type: string
+      blockchain_timestamp:
+        type: string
+      blockchain_tx_id:
+        type: string
+      cdc_status:
+        type: string
+      client_after_hash:
+        type: string
+      client_before_hash:
+        type: string
+      client_id:
+        type: string
+      event_hash:
+        type: string
+      event_type:
+        type: string
+      executed_at:
+        type: string
+      executed_by:
+        type: string
+      executor_system:
+        type: string
+      failure_code:
+        type: string
+      failure_reason:
+        type: string
+      id:
+        type: string
+      incident_id:
+        type: string
+      integrity_checked_at:
+        type: string
+      integrity_error:
+        type: string
+      integrity_status:
+        type: string
+      legacy:
+        type: boolean
+      merkle_root:
+        type: string
+      operation:
+        type: string
+      pipeline_status:
+        type: string
+      readback_status:
+        type: string
+      reason:
+        type: string
+      recovered_metadata:
+        type: string
+      reference_anchor_id:
+        type: string
+      reference_log_hash:
+        type: string
+      reference_merkle_root:
+        type: string
+      request_id:
+        type: string
+      resource:
+        type: string
+      result_audit_log_id:
+        type: string
+      result_status:
+        type: string
+      selected_log_id:
+        type: string
+      snapshot_checksum:
+        type: string
+      snapshot_last_error:
+        type: string
+      snapshot_object_key:
+        type: string
+      snapshot_plaintext_hash:
+        type: string
+      snapshot_status:
+        type: string
+      snapshot_stored_at:
+        type: string
+      snapshot_verified_at:
+        type: string
+      snapshot_version_id:
+        type: string
+      source_anchor_id:
+        type: string
+      source_expected_merkle_root:
+        type: string
+      source_snapshot_checksum:
+        type: string
+      source_snapshot_object_key:
+        type: string
+      source_snapshot_plaintext_hash:
+        type: string
+      source_snapshot_version_id:
+        type: string
+      source_system:
+        description: |-
+          SourceSystem is the client/source label expected by the dashboard. The
+          persisted model calls it TargetSourceSystem to distinguish it from the
+          component that performed the recovery write.
+        type: string
+      storage_kind:
+        type: string
+      target_action:
+        type: string
+      target_actor:
+        type: string
+      target_authorization_context:
+        type: string
+      target_log_id:
+        type: string
+      target_source_record_id:
+        type: string
+      target_source_system:
+        type: string
+      target_timestamp:
+        type: string
+    type: object
   recovery.RequestDetailResponse:
     properties:
       data:
@@ -940,6 +1253,62 @@ definitions:
         items:
           $ref: '#/definitions/models.RecoveryRequest'
         type: array
+    type: object
+  recovery.SnapshotPreview:
+    properties:
+      action:
+        type: string
+      actor:
+        type: string
+      authorization_context:
+        type: string
+      db_timestamp:
+        type: string
+      metadata: {}
+      resource:
+        type: string
+      source_record_id:
+        type: string
+      source_system:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  recovery.VersionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/recovery.VersionView'
+        type: array
+    type: object
+  recovery.VersionView:
+    properties:
+      action:
+        type: string
+      actor:
+        type: string
+      hash_value:
+        type: string
+      integrity_status:
+        type: string
+      log_id:
+        type: string
+      merkle_root:
+        type: string
+      resource:
+        type: string
+      snapshot_object_key:
+        type: string
+      snapshot_status:
+        type: string
+      snapshot_verified_at:
+        type: string
+      snapshot_version_id:
+        type: string
+      status:
+        type: string
+      timestamp:
+        type: string
     type: object
   report.ErrorResponse:
     properties:
@@ -1289,6 +1658,421 @@ paths:
       summary: Get recent audit logs
       tags:
       - Audit
+  /dashboard/recovery/events:
+    get:
+      description: Mengambil event recovery milik client, diurutkan dari yang terbaru.
+      parameters:
+      - description: Filter hasil recovery
+        in: query
+        name: result_status
+        type: string
+      - description: Filter resource
+        in: query
+        name: resource
+        type: string
+      - default: 1
+        description: Nomor halaman
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Jumlah event per halaman, maksimum 100
+        in: query
+        name: page_size
+        type: integer
+      - default: true
+        description: Sertakan event legacy
+        in: query
+        name: include_legacy
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Halaman event recovery
+          schema:
+            $ref: '#/definitions/recovery.RecoveryEventPage'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar recovery event
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List recovery events
+      tags:
+      - Recovery
+  /dashboard/recovery/events/{id}:
+    get:
+      description: Mengambil detail event recovery milik client pada JWT.
+      parameters:
+      - description: Recovery event ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Detail event recovery
+          schema:
+            $ref: '#/definitions/recovery.EventDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Recovery event tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil recovery event
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get recovery event
+      tags:
+      - Recovery
+  /dashboard/recovery/events/{id}/verify:
+    get:
+      description: Memeriksa hash, Merkle proof, anchor Fabric, dan referensi recovery
+        event.
+      parameters:
+      - description: Recovery event ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status verifikasi event
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Recovery event tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: Evidence belum valid atau belum terverifikasi
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Verify recovery event evidence
+      tags:
+      - Recovery
+  /dashboard/recovery/incidents:
+    get:
+      description: Mengambil incident recovery milik client pada JWT, opsional difilter
+        berdasarkan status.
+      parameters:
+      - description: Status incident, misalnya OPEN atau RESOLVED
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar incident
+          schema:
+            $ref: '#/definitions/recovery.IncidentListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar incident
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List recovery incidents
+      tags:
+      - Recovery
+  /dashboard/recovery/incidents/{id}:
+    get:
+      description: Mengambil detail sebuah incident recovery berdasarkan ID.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Detail Insiden Tamper
+          schema:
+            $ref: '#/definitions/recovery.IncidentDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Tamper incident tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil detail tamper incident
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get tamper incident detail
+      tags:
+      - Recovery
+  /dashboard/recovery/incidents/{id}/candidates:
+    get:
+      description: Mengambil referensi terverifikasi untuk incident CLIENT_SOURCE
+        atau GATEWAY_INTEGRITY.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar kandidat recovery
+          schema:
+            $ref: '#/definitions/recovery.CandidateListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Insiden tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar kandidat
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List trusted client recovery references
+      tags:
+      - Recovery
+  /dashboard/recovery/incidents/{id}/preflight:
+    post:
+      description: Memeriksa referensi PostgreSQL/Fabric dan state live sebelum recovery
+        tanpa melakukan write.
+      parameters:
+      - description: Incident ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Hasil preflight check
+          schema:
+            $ref: '#/definitions/recovery.PreflightResult'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: Konflik atau kondisi tidak valid untuk preflight
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal melakukan preflight
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Preflight check for recovery
+      tags:
+      - Recovery
+  /dashboard/recovery/requests:
+    get:
+      description: Mengambil daftar permintaan (request) recovery yang diajukan.
+      parameters:
+      - description: Filter Status Request
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar recovery request
+          schema:
+            $ref: '#/definitions/recovery.RequestListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil daftar recovery request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List recovery requests
+      tags:
+      - Recovery
+    post:
+      consumes:
+      - application/json
+      description: Membekukan intent recovery sesuai scope incident setelah referensi
+        terverifikasi dan preflight lulus.
+      parameters:
+      - description: Data Request Recovery
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/recovery.CreateRequestInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Recovery request berhasil dibuat
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "400":
+          description: Format request tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: Konflik atau state tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal membuat recovery request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create recovery request
+      tags:
+      - Recovery
+  /dashboard/recovery/requests/{id}:
+    get:
+      description: Mengambil status terbaru request recovery milik client pada JWT.
+      parameters:
+      - description: Recovery request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Detail request recovery
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Recovery request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil detail request
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get recovery request
+      tags:
+      - Recovery
+  /dashboard/recovery/requests/{id}/execute:
+    post:
+      description: 'Mengeksekusi request sesuai scope: memulihkan row client melalui
+        Agent atau metadata audit Gateway yang terverifikasi.'
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Eksekusi recovery dimulai/berhasil
+          schema:
+            $ref: '#/definitions/recovery.RequestDetailResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "404":
+          description: Request tidak ditemukan
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "409":
+          description: State request tidak sesuai
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengeksekusi recovery
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Execute recovery request
+      tags:
+      - Recovery
+  /dashboard/recovery/resources/{resource}/versions:
+    get:
+      description: Mengambil histori event client ter-anchor dari sebuah resource
+        (table).
+      parameters:
+      - description: Resource/Table Name
+        in: path
+        name: resource
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Histori event client ter-anchor
+          schema:
+            $ref: '#/definitions/recovery.VersionListResponse'
+        "401":
+          description: Identitas client tidak valid
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+        "500":
+          description: Gagal mengambil histori recovery
+          schema:
+            $ref: '#/definitions/recovery.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List snapshot versions by resource
+      tags:
+      - Recovery
   /dashboard/stats:
     get:
       description: Mengambil statistik agregat tenant client yang sedang login. Parameter
@@ -1637,246 +2421,6 @@ paths:
       summary: Verify a specific log
       tags:
       - Audit
-  /recovery/incidents/{id}:
-    get:
-      description: Mengambil detail sebuah insiden tamper berdasarkan ID.
-      parameters:
-      - description: Incident ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Detail Insiden Tamper
-          schema:
-            $ref: '#/definitions/recovery.IncidentDetailResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Tamper incident tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil detail tamper incident
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get tamper incident detail
-      tags:
-      - Recovery
-  /recovery/incidents/{id}/candidates:
-    get:
-      description: Mengambil referensi event client yang valid terhadap Merkle proof
-        dan Fabric untuk insiden tertentu.
-      parameters:
-      - description: Incident ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Daftar kandidat recovery
-          schema:
-            additionalProperties: true
-            type: object
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Insiden tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil daftar kandidat
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: List trusted client recovery references
-      tags:
-      - Recovery
-  /recovery/incidents/{id}/preflight:
-    post:
-      description: Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum
-        recovery tanpa melakukan write.
-      parameters:
-      - description: Incident ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Hasil preflight check
-          schema:
-            additionalProperties: true
-            type: object
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "409":
-          description: Konflik atau kondisi tidak valid untuk preflight
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal melakukan preflight
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Preflight check for recovery
-      tags:
-      - Recovery
-  /recovery/requests:
-    get:
-      description: Mengambil daftar permintaan (request) recovery yang diajukan.
-      parameters:
-      - description: Filter Status Request
-        in: query
-        name: status
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Daftar recovery request
-          schema:
-            $ref: '#/definitions/recovery.RequestListResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil daftar recovery request
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: List recovery requests
-      tags:
-      - Recovery
-    post:
-      consumes:
-      - application/json
-      description: Membekukan intent recovery state client melalui Agent setelah preflight
-        Fabric dan state live lulus.
-      parameters:
-      - description: Data Request Recovery
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/recovery.CreateRequestInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Recovery request berhasil dibuat
-          schema:
-            $ref: '#/definitions/recovery.RequestDetailResponse'
-        "400":
-          description: Format request tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "409":
-          description: Konflik atau state tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal membuat recovery request
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Create recovery request
-      tags:
-      - Recovery
-  /recovery/requests/{id}/execute:
-    post:
-      description: Mengeksekusi intent recovery ke row client existing melalui Agent;
-        tidak membuat tabel baru.
-      parameters:
-      - description: Request ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Eksekusi recovery dimulai/berhasil
-          schema:
-            $ref: '#/definitions/recovery.RequestDetailResponse'
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "404":
-          description: Request tidak ditemukan
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "409":
-          description: State request tidak sesuai
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengeksekusi recovery
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Execute recovery request
-      tags:
-      - Recovery
-  /recovery/resources/{resource}/versions:
-    get:
-      description: Mengambil histori event client ter-anchor dari sebuah resource
-        (table).
-      parameters:
-      - description: Resource/Table Name
-        in: path
-        name: resource
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Histori event client ter-anchor
-          schema:
-            additionalProperties: true
-            type: object
-        "401":
-          description: Identitas client tidak valid
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-        "500":
-          description: Gagal mengambil histori recovery
-          schema:
-            $ref: '#/definitions/recovery.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: List snapshot versions by resource
-      tags:
-      - Recovery
   /report/generate:
     post:
       consumes:
@@ -1922,3 +2466,5 @@ securityDefinitions:
     name: Authorization
     type: apiKey
 swagger: "2.0"
+host: localhost:8080
+basePath: /api

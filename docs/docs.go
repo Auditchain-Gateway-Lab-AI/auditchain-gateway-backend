@@ -504,6 +504,647 @@ const docTemplate = `{
                 }
             }
         },
+        "/dashboard/recovery/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil event recovery milik client, diurutkan dari yang terbaru.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List recovery events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter hasil recovery",
+                        "name": "result_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter resource",
+                        "name": "resource",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Nomor halaman",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Jumlah event per halaman, maksimum 100",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Sertakan event legacy",
+                        "name": "include_legacy",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Halaman event recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RecoveryEventPage"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar recovery event",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/events/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail event recovery milik client pada JWT.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Get recovery event",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Recovery event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail event recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.EventDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Recovery event tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil recovery event",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/events/{id}/verify": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memeriksa hash, Merkle proof, anchor Fabric, dan referensi recovery event.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Verify recovery event evidence",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Recovery event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status verifikasi event",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Recovery event tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Evidence belum valid atau belum terverifikasi",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/incidents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil incident recovery milik client pada JWT, opsional difilter berdasarkan status.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List recovery incidents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Status incident, misalnya OPEN atau RESOLVED",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar incident",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.IncidentListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar incident",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/incidents/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail sebuah incident recovery berdasarkan ID.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Get tamper incident detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail Insiden Tamper",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.IncidentDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tamper incident tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil detail tamper incident",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/incidents/{id}/candidates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil referensi terverifikasi untuk incident CLIENT_SOURCE atau GATEWAY_INTEGRITY.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List trusted client recovery references",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar kandidat recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.CandidateListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Insiden tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar kandidat",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/incidents/{id}/preflight": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memeriksa referensi PostgreSQL/Fabric dan state live sebelum recovery tanpa melakukan write.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Preflight check for recovery",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Incident ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Hasil preflight check",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.PreflightResult"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Konflik atau kondisi tidak valid untuk preflight",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal melakukan preflight",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/requests": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List recovery requests",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter Status Request",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daftar recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil daftar recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Membekukan intent recovery sesuai scope incident setelah referensi terverifikasi dan preflight lulus.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Create recovery request",
+                "parameters": [
+                    {
+                        "description": "Data Request Recovery",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/recovery.CreateRequestInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Recovery request berhasil dibuat",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Format request tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Konflik atau state tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal membuat recovery request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/requests/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil status terbaru request recovery milik client pada JWT.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Get recovery request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Recovery request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Detail request recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Recovery request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil detail request",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/requests/{id}/execute": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengeksekusi request sesuai scope: memulihkan row client melalui Agent atau metadata audit Gateway yang terverifikasi.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "Execute recovery request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Eksekusi recovery dimulai/berhasil",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.RequestDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Request tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "State request tidak sesuai",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengeksekusi recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/recovery/resources/{resource}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Recovery"
+                ],
+                "summary": "List snapshot versions by resource",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Resource/Table Name",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Histori event client ter-anchor",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.VersionListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Identitas client tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil histori recovery",
+                        "schema": {
+                            "$ref": "#/definitions/recovery.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/dashboard/stats": {
             "get": {
                 "security": [
@@ -1033,375 +1674,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/recovery/incidents/{id}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil detail sebuah insiden tamper berdasarkan ID.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Get tamper incident detail",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Incident ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Detail Insiden Tamper",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.IncidentDetailResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Tamper incident tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil detail tamper incident",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/incidents/{id}/candidates": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "List trusted client recovery references",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Incident ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Daftar kandidat recovery",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Insiden tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil daftar kandidat",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/incidents/{id}/preflight": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Preflight check for recovery",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Incident ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Hasil preflight check",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Konflik atau kondisi tidak valid untuk preflight",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal melakukan preflight",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/requests": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "List recovery requests",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Filter Status Request",
-                        "name": "status",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Daftar recovery request",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestListResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil daftar recovery request",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Create recovery request",
-                "parameters": [
-                    {
-                        "description": "Data Request Recovery",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/recovery.CreateRequestInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Recovery request berhasil dibuat",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestDetailResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Format request tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Konflik atau state tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal membuat recovery request",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/requests/{id}/execute": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "Execute recovery request",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Request ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Eksekusi recovery dimulai/berhasil",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.RequestDetailResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Request tidak ditemukan",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "State request tidak sesuai",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengeksekusi recovery",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/recovery/resources/{resource}/versions": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Recovery"
-                ],
-                "summary": "List snapshot versions by resource",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Resource/Table Name",
-                        "name": "resource",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Histori event client ter-anchor",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Identitas client tidak valid",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil histori recovery",
-                        "schema": {
-                            "$ref": "#/definitions/recovery.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/report/generate": {
             "post": {
                 "security": [
@@ -1582,6 +1854,21 @@ const docTemplate = `{
                 "agent_status": {
                     "type": "string"
                 },
+                "audit_trail_discrepancies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentverifier.Discrepancy"
+                    }
+                },
+                "audit_trail_status": {
+                    "type": "string"
+                },
+                "client_state_hash": {
+                    "type": "string"
+                },
+                "comparison_basis": {
+                    "type": "string"
+                },
                 "log": {
                     "$ref": "#/definitions/models.AuditLog"
                 },
@@ -1589,6 +1876,24 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                },
+                "offchain_state_hash": {
+                    "type": "string"
+                },
+                "proof_status": {
+                    "type": "string"
+                },
+                "source_checked_at": {
+                    "type": "string"
+                },
+                "source_status": {
+                    "type": "string"
+                },
+                "state_comparison": {
+                    "type": "string"
+                },
+                "verification_assessment": {
                     "type": "string"
                 },
                 "verify_status": {
@@ -1600,6 +1905,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "already_verified": {
+                    "type": "integer"
+                },
+                "inconclusive": {
                     "type": "integer"
                 },
                 "invalid": {
@@ -1752,7 +2060,17 @@ const docTemplate = `{
                 "agent_status": {
                     "type": "string"
                 },
+                "audit_trail_discrepancies": {},
+                "audit_trail_status": {
+                    "type": "string"
+                },
                 "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "client_state_hash": {
+                    "type": "string"
+                },
+                "comparison_basis": {
                     "type": "string"
                 },
                 "expected_hash": {
@@ -1782,7 +2100,22 @@ const docTemplate = `{
                 "message": {
                     "type": "string"
                 },
+                "offchain_state_hash": {
+                    "type": "string"
+                },
+                "proof_status": {
+                    "type": "string"
+                },
+                "source_checked_at": {
+                    "type": "string"
+                },
                 "source_status": {
+                    "type": "string"
+                },
+                "state_comparison": {
+                    "type": "string"
+                },
+                "verification_assessment": {
                     "type": "string"
                 }
             }
@@ -2707,6 +3040,120 @@ const docTemplate = `{
                 }
             }
         },
+        "models.TamperIncident": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "detected_hash": {
+                    "type": "string"
+                },
+                "detected_state_hash": {
+                    "type": "string"
+                },
+                "discrepancy_summary": {
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_scope": {
+                    "type": "string"
+                },
+                "incident_type": {
+                    "type": "string"
+                },
+                "last_confirmed_at": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "reference_log_id": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "source_status": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "recovery.CandidateListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/recovery.CandidateView"
+                    }
+                }
+            }
+        },
+        "recovery.CandidateView": {
+            "type": "object",
+            "properties": {
+                "eligible": {
+                    "type": "boolean"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "recovery_source": {
+                    "type": "string"
+                },
+                "reference_anchor_id": {
+                    "type": "string"
+                },
+                "reference_log_hash": {
+                    "type": "string"
+                },
+                "reference_merkle_root": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "snapshot_checksum": {
+                    "type": "string"
+                },
+                "snapshot_object_key": {
+                    "type": "string"
+                },
+                "snapshot_plaintext_hash": {
+                    "type": "string"
+                },
+                "snapshot_verified_at": {
+                    "type": "string"
+                },
+                "snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_status": {
+                    "type": "string"
+                }
+            }
+        },
         "recovery.CreateRequestInput": {
             "type": "object",
             "required": [
@@ -2737,6 +3184,14 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "Pesan kesalahan"
+                }
+            }
+        },
+        "recovery.EventDetailResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/recovery.RecoveryEventView"
                 }
             }
         },
@@ -2805,6 +3260,291 @@ const docTemplate = `{
                 "tampered_metadata": {}
             }
         },
+        "recovery.IncidentListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TamperIncident"
+                    }
+                }
+            }
+        },
+        "recovery.PreflightResult": {
+            "type": "object",
+            "properties": {
+                "agent_status": {
+                    "type": "string"
+                },
+                "anchor_id": {
+                    "type": "string"
+                },
+                "client_state_hash": {
+                    "type": "string"
+                },
+                "current_hash": {
+                    "type": "string"
+                },
+                "current_integrity": {
+                    "type": "string"
+                },
+                "desired_state_hash": {
+                    "type": "string"
+                },
+                "fabric_root": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "object_version_id": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "recoverable": {
+                    "type": "boolean"
+                },
+                "recovery_source": {
+                    "type": "string"
+                },
+                "reference_anchor_id": {
+                    "type": "string"
+                },
+                "reference_log_hash": {
+                    "type": "string"
+                },
+                "reference_merkle_root": {
+                    "type": "string"
+                },
+                "snapshot_hash": {
+                    "type": "string"
+                },
+                "snapshot_preview": {
+                    "$ref": "#/definitions/recovery.SnapshotPreview"
+                },
+                "source_found": {
+                    "type": "boolean"
+                },
+                "source_status": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "trusted_reference_preview": {
+                    "$ref": "#/definitions/recovery.SnapshotPreview"
+                }
+            }
+        },
+        "recovery.RecoveryEventPage": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/recovery.RecoveryEventView"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "recovery.RecoveryEventView": {
+            "type": "object",
+            "properties": {
+                "after_hash": {
+                    "type": "string"
+                },
+                "before_hash": {
+                    "type": "string"
+                },
+                "blockchain_timestamp": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "cdc_status": {
+                    "type": "string"
+                },
+                "client_after_hash": {
+                    "type": "string"
+                },
+                "client_before_hash": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "event_hash": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "executed_at": {
+                    "type": "string"
+                },
+                "executed_by": {
+                    "type": "string"
+                },
+                "executor_system": {
+                    "type": "string"
+                },
+                "failure_code": {
+                    "type": "string"
+                },
+                "failure_reason": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "integrity_checked_at": {
+                    "type": "string"
+                },
+                "integrity_error": {
+                    "type": "string"
+                },
+                "integrity_status": {
+                    "type": "string"
+                },
+                "legacy": {
+                    "type": "boolean"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "pipeline_status": {
+                    "type": "string"
+                },
+                "readback_status": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "recovered_metadata": {
+                    "type": "string"
+                },
+                "reference_anchor_id": {
+                    "type": "string"
+                },
+                "reference_log_hash": {
+                    "type": "string"
+                },
+                "reference_merkle_root": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "result_audit_log_id": {
+                    "type": "string"
+                },
+                "result_status": {
+                    "type": "string"
+                },
+                "selected_log_id": {
+                    "type": "string"
+                },
+                "snapshot_checksum": {
+                    "type": "string"
+                },
+                "snapshot_last_error": {
+                    "type": "string"
+                },
+                "snapshot_object_key": {
+                    "type": "string"
+                },
+                "snapshot_plaintext_hash": {
+                    "type": "string"
+                },
+                "snapshot_status": {
+                    "type": "string"
+                },
+                "snapshot_stored_at": {
+                    "type": "string"
+                },
+                "snapshot_verified_at": {
+                    "type": "string"
+                },
+                "snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_anchor_id": {
+                    "type": "string"
+                },
+                "source_expected_merkle_root": {
+                    "type": "string"
+                },
+                "source_snapshot_checksum": {
+                    "type": "string"
+                },
+                "source_snapshot_object_key": {
+                    "type": "string"
+                },
+                "source_snapshot_plaintext_hash": {
+                    "type": "string"
+                },
+                "source_snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_system": {
+                    "description": "SourceSystem is the client/source label expected by the dashboard. The\npersisted model calls it TargetSourceSystem to distinguish it from the\ncomponent that performed the recovery write.",
+                    "type": "string"
+                },
+                "storage_kind": {
+                    "type": "string"
+                },
+                "target_action": {
+                    "type": "string"
+                },
+                "target_actor": {
+                    "type": "string"
+                },
+                "target_authorization_context": {
+                    "type": "string"
+                },
+                "target_log_id": {
+                    "type": "string"
+                },
+                "target_source_record_id": {
+                    "type": "string"
+                },
+                "target_source_system": {
+                    "type": "string"
+                },
+                "target_timestamp": {
+                    "type": "string"
+                }
+            }
+        },
         "recovery.RequestDetailResponse": {
             "type": "object",
             "properties": {
@@ -2821,6 +3561,91 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.RecoveryRequest"
                     }
+                }
+            }
+        },
+        "recovery.SnapshotPreview": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor": {
+                    "type": "string"
+                },
+                "authorization_context": {
+                    "type": "string"
+                },
+                "db_timestamp": {
+                    "type": "string"
+                },
+                "metadata": {},
+                "resource": {
+                    "type": "string"
+                },
+                "source_record_id": {
+                    "type": "string"
+                },
+                "source_system": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "recovery.VersionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/recovery.VersionView"
+                    }
+                }
+            }
+        },
+        "recovery.VersionView": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor": {
+                    "type": "string"
+                },
+                "hash_value": {
+                    "type": "string"
+                },
+                "integrity_status": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "snapshot_object_key": {
+                    "type": "string"
+                },
+                "snapshot_status": {
+                    "type": "string"
+                },
+                "snapshot_verified_at": {
+                    "type": "string"
+                },
+                "snapshot_version_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
                 }
             }
         },
@@ -2872,8 +3697,8 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "",
-	BasePath:         "",
+	Host:             "localhost:8080",
+	BasePath:         "/api",
 	Schemes:          []string{},
 	Title:            "AuditChain Gateway API",
 	Description:      "API Enterprise untuk sistem audit log berbasis Blockchain dan Merkle Tree.",

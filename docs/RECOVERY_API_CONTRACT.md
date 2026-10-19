@@ -100,6 +100,13 @@ hash readback, dan mencatat recovery event baru untuk pipeline Merkle/Fabric.
 Jika source event tidak ditemukan, referensi tidak cocok, atau salah satu bukti
 gagal diverifikasi, request ditolak tanpa mengubah audit log.
 
+Recovery `GATEWAY_INTEGRITY` mengembalikan request langsung ke `SUCCEEDED`
+setelah metadata audit dipulihkan dan hash readback cocok. Recovery ini tidak
+menunggu CDC karena tidak menulis row operasional client; event evidencenya
+tetap harus melewati hashing, Merkle, dan anchor Fabric. Recovery `CLIENT_SOURCE`
+berbeda: setelah Agent menulis row client, request berstatus
+`APPLIED_AWAITING_CDC` sampai event CDC dan bukti recovery terverifikasi.
+
 Agent membutuhkan akses baca ke tabel sejarah sumber. Default nama tabel adalah
 `AUDIT_TRAIL`; atur `AGENT_AUDIT_TRAIL_TABLE` dan, jika perlu,
 `AGENT_AUDIT_TRAIL_SCHEMA` pada Agent. `source_record_id` wajib terisi pada

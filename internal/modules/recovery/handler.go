@@ -26,6 +26,14 @@ type IncidentListResponse struct {
 	Data []models.TamperIncident `json:"data"`
 }
 
+type CandidateListResponse struct {
+	Data []CandidateView `json:"data"`
+}
+
+type VersionListResponse struct {
+	Data []VersionView `json:"data"`
+}
+
 type IncidentDetailResponse struct {
 	Data IncidentDetailView `json:"data"`
 }
@@ -36,6 +44,10 @@ type RequestListResponse struct {
 
 type RequestDetailResponse struct {
 	Data models.RecoveryRequest `json:"data"`
+}
+
+type EventDetailResponse struct {
+	Data RecoveryEventView `json:"data"`
 }
 
 func (h *Handler) clientID(c *gin.Context) (string, bool) {
@@ -75,6 +87,16 @@ func (h *Handler) clientOperator(c *gin.Context) bool {
 	return true
 }
 
+// @Summary List recovery incidents
+// @Description Mengambil incident recovery milik client pada JWT, opsional difilter berdasarkan status.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param status query string false "Status incident, misalnya OPEN atau RESOLVED"
+// @Success 200 {object} IncidentListResponse "Daftar incident"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar incident"
+// @Router /dashboard/recovery/incidents [get]
 func (h *Handler) ListIncidents(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -89,7 +111,7 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 }
 
 // @Summary Get tamper incident detail
-// @Description Mengambil detail sebuah insiden tamper berdasarkan ID.
+// @Description Mengambil detail sebuah incident recovery berdasarkan ID.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
@@ -98,7 +120,7 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 404 {object} ErrorResponse "Tamper incident tidak ditemukan"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil detail tamper incident"
-// @Router /recovery/incidents/{id} [get]
+// @Router /dashboard/recovery/incidents/{id} [get]
 func (h *Handler) GetIncident(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -117,16 +139,16 @@ func (h *Handler) GetIncident(c *gin.Context) {
 }
 
 // @Summary List trusted client recovery references
-// @Description Mengambil referensi event client yang valid terhadap Merkle proof dan Fabric untuk insiden tertentu.
+// @Description Mengambil referensi terverifikasi untuk incident CLIENT_SOURCE atau GATEWAY_INTEGRITY.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Incident ID"
-// @Success 200 {object} map[string]interface{} "Daftar kandidat recovery"
+// @Success 200 {object} CandidateListResponse "Daftar kandidat recovery"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 404 {object} ErrorResponse "Insiden tidak ditemukan"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil daftar kandidat"
-// @Router /recovery/incidents/{id}/candidates [get]
+// @Router /dashboard/recovery/incidents/{id}/candidates [get]
 func (h *Handler) ListCandidates(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -141,16 +163,16 @@ func (h *Handler) ListCandidates(c *gin.Context) {
 }
 
 // @Summary Preflight check for recovery
-// @Description Memeriksa referensi PostgreSQL/Fabric dan state live Agent sebelum recovery tanpa melakukan write.
+// @Description Memeriksa referensi PostgreSQL/Fabric dan state live sebelum recovery tanpa melakukan write.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Incident ID"
-// @Success 200 {object} map[string]interface{} "Hasil preflight check"
+// @Success 200 {object} PreflightResult "Hasil preflight check"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 409 {object} ErrorResponse "Konflik atau kondisi tidak valid untuk preflight"
 // @Failure 500 {object} ErrorResponse "Gagal melakukan preflight"
-// @Router /recovery/incidents/{id}/preflight [post]
+// @Router /dashboard/recovery/incidents/{id}/preflight [post]
 func (h *Handler) Preflight(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -170,10 +192,10 @@ func (h *Handler) Preflight(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param resource path string true "Resource/Table Name"
-// @Success 200 {object} map[string]interface{} "Histori event client ter-anchor"
+// @Success 200 {object} VersionListResponse "Histori event client ter-anchor"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil histori recovery"
-// @Router /recovery/resources/{resource}/versions [get]
+// @Router /dashboard/recovery/resources/{resource}/versions [get]
 func (h *Handler) ListVersions(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -196,7 +218,7 @@ func (h *Handler) ListVersions(c *gin.Context) {
 // @Success 200 {object} RequestListResponse "Daftar recovery request"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil daftar recovery request"
-// @Router /recovery/requests [get]
+// @Router /dashboard/recovery/requests [get]
 func (h *Handler) ListRequests(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -210,6 +232,20 @@ func (h *Handler) ListRequests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": requests})
 }
 
+// @Summary List recovery events
+// @Description Mengambil event recovery milik client, diurutkan dari yang terbaru.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param result_status query string false "Filter hasil recovery"
+// @Param resource query string false "Filter resource"
+// @Param page query int false "Nomor halaman" default(1)
+// @Param page_size query int false "Jumlah event per halaman, maksimum 100" default(20)
+// @Param include_legacy query bool false "Sertakan event legacy" default(true)
+// @Success 200 {object} RecoveryEventPage "Halaman event recovery"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil daftar recovery event"
+// @Router /dashboard/recovery/events [get]
 func (h *Handler) ListEvents(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -226,6 +262,17 @@ func (h *Handler) ListEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Get recovery event
+// @Description Mengambil detail event recovery milik client pada JWT.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Recovery event ID"
+// @Success 200 {object} EventDetailResponse "Detail event recovery"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Recovery event tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil recovery event"
+// @Router /dashboard/recovery/events/{id} [get]
 func (h *Handler) GetEvent(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -243,6 +290,17 @@ func (h *Handler) GetEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": event})
 }
 
+// @Summary Verify recovery event evidence
+// @Description Memeriksa hash, Merkle proof, anchor Fabric, dan referensi recovery event.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Recovery event ID"
+// @Success 200 {object} map[string]interface{} "Status verifikasi event"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Recovery event tidak ditemukan"
+// @Failure 409 {object} map[string]interface{} "Evidence belum valid atau belum terverifikasi"
+// @Router /dashboard/recovery/events/{id}/verify [get]
 func (h *Handler) VerifyEvent(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -260,6 +318,17 @@ func (h *Handler) VerifyEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Get recovery request
+// @Description Mengambil status terbaru request recovery milik client pada JWT.
+// @Tags Recovery
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Recovery request ID"
+// @Success 200 {object} RequestDetailResponse "Detail request recovery"
+// @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
+// @Failure 404 {object} ErrorResponse "Recovery request tidak ditemukan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil detail request"
+// @Router /dashboard/recovery/requests/{id} [get]
 func (h *Handler) GetRequest(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -278,7 +347,7 @@ func (h *Handler) GetRequest(c *gin.Context) {
 }
 
 // @Summary Create recovery request
-// @Description Membekukan intent recovery state client melalui Agent setelah preflight Fabric dan state live lulus.
+// @Description Membekukan intent recovery sesuai scope incident setelah referensi terverifikasi dan preflight lulus.
 // @Tags Recovery
 // @Accept json
 // @Produce json
@@ -289,7 +358,7 @@ func (h *Handler) GetRequest(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 409 {object} ErrorResponse "Konflik atau state tidak valid"
 // @Failure 500 {object} ErrorResponse "Gagal membuat recovery request"
-// @Router /recovery/requests [post]
+// @Router /dashboard/recovery/requests [post]
 func (h *Handler) CreateRequest(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
@@ -338,7 +407,7 @@ func (h *Handler) Reject(c *gin.Context) {
 }
 
 // @Summary Execute recovery request
-// @Description Mengeksekusi intent recovery ke row client existing melalui Agent; tidak membuat tabel baru.
+// @Description Mengeksekusi request sesuai scope: memulihkan row client melalui Agent atau metadata audit Gateway yang terverifikasi.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
@@ -348,7 +417,7 @@ func (h *Handler) Reject(c *gin.Context) {
 // @Failure 404 {object} ErrorResponse "Request tidak ditemukan"
 // @Failure 409 {object} ErrorResponse "State request tidak sesuai"
 // @Failure 500 {object} ErrorResponse "Gagal mengeksekusi recovery"
-// @Router /recovery/requests/{id}/execute [post]
+// @Router /dashboard/recovery/requests/{id}/execute [post]
 func (h *Handler) Execute(c *gin.Context) {
 	clientID, ok := h.clientID(c)
 	if !ok {
