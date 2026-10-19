@@ -13,6 +13,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		agentAPI.GET("/offchain-data", h.GetOffchainDataForAgent)
 		agentAPI.GET("/offchain-data/:resource", h.GetOffchainDataForAgent)
 		agentAPI.POST("/verify-merkle-root", h.VerifyMerkleRootForAgent)
+		agentAPI.POST("/audit-report", h.SubmitAgentAuditReport)
 	}
 
 	dashAPI := routerGroup.Group("/dashboard")

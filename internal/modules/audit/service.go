@@ -138,6 +138,7 @@ type Service interface {
 	VerifyInternalLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error)
+	ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error
 }
 
 type auditService struct {
@@ -2393,4 +2394,192 @@ func (s *auditService) enrichRecoveryStatuses(clientID string, items []ResourceL
 		items[index].RecoveryExecutedAt = request.ExecutedAt
 	}
 	return nil
+}
+
+
+type AgentAuditReportRequest struct {
+	RunID              string                `json:"run_id"`
+	From               time.Time             `json:"from"`
+	To                 time.Time             `json:"to"`
+	TotalLogs          int                   `json:"total_logs"`
+	AuditedLogs        int                   `json:"audited_logs"`
+	HistoricalSkipped  int                   `json:"historical_skipped"`
+	DataValid          int                   `json:"data_valid"`
+	DataTampered       int                   `json:"data_tampered"`
+	DataNotFound       int                   `json:"data_not_found"`
+	DataError          int                   `json:"data_error"`
+	BlockchainValid    int                   `json:"blockchain_valid"`
+	BlockchainTampered int                   `json:"blockchain_tampered"`
+	BlockchainPending  int                   `json:"blockchain_pending"`
+	BlockchainSkipped  int                   `json:"blockchain_skipped"`
+	BlockchainError    int                   `json:"blockchain_error"`
+	AutoRecoveredCount int                   `json:"auto_recovered_count"`
+	Duration           string                `json:"duration"`
+	Results            []AgentAuditLogResult `json:"results"`
+}
+
+type AgentAuditLogResult struct {
+	LogID            string `json:"log_id"`
+	Resource         string `json:"resource"`
+	Action           string `json:"action"`
+	DataStatus       string `json:"data_status"`
+	BlockchainStatus string `json:"blockchain_status"`
+	AutoRecovered    bool   `json:"auto_recovered,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
+func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error {
+	if s.db == nil {
+		return errors.New("database not available")
+	}
+	if clientID == "" {
+		return errors.New("client_id cannot be empty")
+	}
+
+	runID := strings.TrimSpace(req.RunID)
+	if runID == "" {
+		runID = uuid.New().String()
+	}
+
+	now := time.Now().UTC()
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var stat models.ClientDashboardStats
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("client_id = ?", clientID).First(&stat).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				stat = models.ClientDashboardStats{
+					ClientID: clientID,
+				}
+				if err := tx.Create(&stat).Error; err != nil {
+					return fmt.Errorf("create client stats: %w", err)
+				}
+			} else {
+				return fmt.Errorf("find client stats: %w", err)
+			}
+		}
+
+		var tableResults map[string]rangeTableSummary
+		if err := json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults); err != nil || tableResults == nil {
+			tableResults = make(map[string]rangeTableSummary)
+		}
+
+		totalValid := int64(0)
+		totalTampered := int64(0)
+		totalPending := int64(0)
+
+		if len(req.Results) > 0 {
+			for _, item := range req.Results {
+				tableName := strings.TrimSpace(strings.SplitN(item.Resource, ":", 2)[0])
+				if tableName == "" {
+					tableName = "UNKNOWN"
+				}
+
+				table := tableResults[tableName]
+				table.Total++
+
+				isDataValid := strings.ToUpper(item.DataStatus) == "VALID"
+				isChainValid := strings.ToUpper(item.BlockchainStatus) == "VALID" || strings.ToUpper(item.BlockchainStatus) == "SKIPPED"
+				isTampered := strings.ToUpper(item.DataStatus) == "TAMPERED" || strings.ToUpper(item.BlockchainStatus) == "TAMPERED"
+				isPending := strings.ToUpper(item.BlockchainStatus) == "PENDING"
+
+				if isDataValid && isChainValid {
+					totalValid++
+					table.Valid++
+				} else if isTampered {
+					totalTampered++
+					table.Invalid++
+				} else if isPending {
+					totalPending++
+					table.Pending++
+				} else {
+					table.Unavailable++
+				}
+
+				tableResults[tableName] = table
+			}
+		} else {
+			totalValid = int64(req.DataValid)
+			totalTampered = int64(req.DataTampered + req.BlockchainTampered)
+			totalPending = int64(req.BlockchainPending)
+		}
+
+		newJSON, _ := json.Marshal(tableResults)
+		auditedCount := int64(req.AuditedLogs)
+		if auditedCount == 0 && (totalValid > 0 || totalTampered > 0 || totalPending > 0) {
+			auditedCount = totalValid + totalTampered + totalPending
+		}
+
+		newTotalVerifications := stat.TotalVerifications + auditedCount
+		newTotalValid := stat.TotalValid + totalValid
+		newTotalTampered := stat.TotalTampered + totalTampered
+		newIntegrityScore := float64(0)
+		if newTotalVerifications > 0 {
+			newIntegrityScore = float64(newTotalValid) / float64(newTotalVerifications) * 100
+		}
+
+		updates := map[string]interface{}{
+			"last_verified_at":            now,
+			"last_verified_table":         "MULTIPLE (Agent Audit)",
+			"total_verifications":         newTotalVerifications,
+			"total_rows_verified":         gorm.Expr("total_rows_verified + ?", auditedCount),
+			"total_valid":                 newTotalValid,
+			"total_tampered":              newTotalTampered,
+			"total_verify_pending":        stat.TotalVerifyPending + totalPending,
+			"integrity_score":             newIntegrityScore,
+			"table_verify_results":        string(newJSON),
+			"last_integrity_check_at":     now,
+			"last_integrity_check_source": "agent",
+			"last_integrity_check_run_id": runID,
+			"last_integrity_check_logs":   auditedCount,
+		}
+		if req.AutoRecoveredCount > 0 {
+			updates["total_recoveries"] = gorm.Expr("total_recoveries + ?", req.AutoRecoveredCount)
+		}
+		if totalTampered > 0 {
+			updates["total_tamper_incidents"] = gorm.Expr("total_tamper_incidents + ?", totalTampered)
+			unrecovered := totalTampered - int64(req.AutoRecoveredCount)
+			if unrecovered > 0 {
+				updates["open_tamper_incidents"] = gorm.Expr("open_tamper_incidents + ?", unrecovered)
+			}
+		}
+
+		if err := tx.Model(&stat).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update client stats: %w", err)
+		}
+
+		fromTime := req.From
+		toTime := req.To
+		if fromTime.IsZero() {
+			fromTime = now.Add(-24 * time.Hour)
+		}
+		if toTime.IsZero() {
+			toTime = now
+		}
+
+		vRun := models.VerificationRun{
+			ID:              runID,
+			ClientID:        clientID,
+			RequestedBy:     "agent",
+			FromTime:        fromTime,
+			ToTime:          toTime,
+			Status:          models.VerificationRunCompleted,
+			BatchSize:       int(auditedCount),
+			TotalItems:      int64(req.TotalLogs),
+			ProcessedItems:  auditedCount,
+			TotalValid:      totalValid,
+			TotalInvalid:    totalTampered,
+			TotalPending:    totalPending,
+			AlreadyVerified: int64(req.HistoricalSkipped),
+			VerifiedNow:     auditedCount,
+			StartedAt:       &fromTime,
+			CompletedAt:     &now,
+		}
+		if err := tx.Create(&vRun).Error; err != nil {
+			log.Printf("[AgentAuditReport] Warning: gagal menyimpan verification_run: %v", err)
+		}
+
+		return nil
+	})
 }
