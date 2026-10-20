@@ -333,9 +333,10 @@ func (s *auditService) VerifyInternalLogRange(from, to time.Time, clientID, requ
 }
 
 // VerifyClientLogRange intentionally uses the same all-log verification
-// contract as the gateway dashboard. The client portal only renders Summary;
-// it must not silently change the meaning of a date-range verification to
-// "latest resource per table".
+// contract as the gateway dashboard. A user-triggered range verification
+// rechecks every log in the selected range, including rows with cached results.
+// The client portal only renders Summary; it must not silently change the
+// meaning of a date-range verification to "latest resource per table".
 func (s *auditService) VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error) {
 	return s.verifyLogRange(from, to, clientID, requestID)
 }
@@ -371,7 +372,7 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 		return nil, err
 	}
 
-	summary, results := s.verifyRangeItems(logs, clientID, requestID, models.IntegritySourceManualRange, "")
+	summary, results := s.verifyRangeItems(logs, clientID, requestID, models.IntegritySourceManualRange, "", true)
 	return &RangeVerificationResult{
 		Range: RangeInfo{
 			From: formatPgTimestamp(from),
@@ -382,10 +383,10 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 	}, nil
 }
 
-// verifyRangeBatch is used by the background verifier. It deliberately shares
-// the per-log cache and stats update path with the synchronous endpoint, but
-// reads only one bounded page at a time so a large range never becomes one
-// oversized HTTP request or one unbounded in-memory slice.
+// verifyRangeBatch is used by the background verifier. User-requested runs
+// recheck cached rows, while scheduled runs may reuse them. It reads only one
+// bounded page at a time so a large range never becomes one oversized HTTP
+// request or one unbounded in-memory slice.
 func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error) {
 	s.rangeVerificationMu.Lock()
 	defer s.rangeVerificationMu.Unlock()
@@ -397,18 +398,19 @@ func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID,
 		return RangeSummary{}, 0, err
 	}
 
-	summary, _ := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID)
+	forceRecheck := integritySource == models.IntegritySourceBackgroundRun
+	summary, _ := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID, forceRecheck)
 	return summary, len(logs), nil
 }
 
-func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID, integritySource, runID string) (RangeSummary, []RangeItemResult) {
+func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool) (RangeSummary, []RangeItemResult) {
 	result := &RangeVerificationResult{
 		Results: make([]RangeItemResult, 0, len(logs)),
 	}
 	newlyVerified := make([]RangeItemResult, 0, len(logs))
 
 	for _, auditLog := range logs {
-		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID, integritySource, runID)
+		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID, integritySource, runID, forceRecheck)
 		if verifiedNow {
 			result.Summary.VerifiedNow++
 			newlyVerified = append(newlyVerified, item)
@@ -420,9 +422,9 @@ func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, reques
 		result.Results = append(result.Results, item)
 	}
 
-	// Only newly processed log IDs contribute to cumulative dashboard stats.
-	// Replaying the same date range therefore returns the same summary without
-	// inflating total_verifications, total_valid, or total_tampered.
+	// Rows that are actually rechecked contribute to cumulative dashboard stats.
+	// Scheduled batches may reuse cached results, while manual range requests
+	// deliberately record each fresh verification attempt.
 	s.updateRangeDashboardStats(clientID, newlyVerified)
 	if len(newlyVerified) > 0 {
 		s.recordLatestIntegrityCheck(clientID, integritySource, runID, int64(len(newlyVerified)))
@@ -431,13 +433,13 @@ func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, reques
 	return result.Summary, result.Results
 }
 
-func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID, integritySource, runID string) (RangeItemResult, bool) {
+func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool) (RangeItemResult, bool) {
 	item := RangeItemResult{
 		LogID: auditLog.LogID,
 		Log:   auditLog,
 	}
 
-	if hasCachedIntegrity(&auditLog) {
+	if !forceRecheck && hasCachedIntegrity(&auditLog) {
 		item.VerifyStatus, item.Message = cachedRangeStatus(auditLog.IntegrityStatus)
 		item.VerificationAssessment = cachedRangeAssessment(auditLog.IntegrityStatus)
 		return item, false
@@ -2395,7 +2397,6 @@ func (s *auditService) enrichRecoveryStatuses(clientID string, items []ResourceL
 	}
 	return nil
 }
-
 
 type AgentAuditReportRequest struct {
 	RunID              string                `json:"run_id"`
