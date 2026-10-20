@@ -33,12 +33,12 @@ func TestSubmitAgentAuditReport_Success(t *testing.T) {
 
 	now := time.Now().UTC()
 	reqPayload := AgentAuditReportRequest{
-		RunID:       "run-abc-xyz",
-		From:        now.Add(-24 * time.Hour),
-		To:          now,
-		TotalLogs:   10,
-		AuditedLogs: 5,
-		DataValid:   4,
+		RunID:        "run-abc-xyz",
+		From:         now.Add(-24 * time.Hour),
+		To:           now,
+		TotalLogs:    10,
+		AuditedLogs:  5,
+		DataValid:    4,
 		DataTampered: 1,
 		Results: []AgentAuditLogResult{
 			{
