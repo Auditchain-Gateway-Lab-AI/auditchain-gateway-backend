@@ -16,16 +16,17 @@ type DashboardTrendResponse struct {
 }
 
 type DashboardTrendPointResponse struct {
-	BucketStart time.Time `json:"bucket_start"`
-	TotalLogs   int64     `json:"total_logs"`
-	Valid       int64     `json:"valid"`
-	Tampered    int64     `json:"tampered"`
-	Pending     int64     `json:"pending"`
-	Unavailable int64     `json:"unavailable"`
-	NotChecked  int64     `json:"not_checked"`
-	Insert      int64     `json:"insert"`
-	Update      int64     `json:"update"`
-	Delete      int64     `json:"delete"`
+	BucketStart    time.Time `json:"bucket_start"`
+	TotalLogs      int64     `json:"total_logs"`
+	Valid          int64     `json:"valid"`
+	Tampered       int64     `json:"tampered"`
+	SourceTampered int64     `json:"source_tampered"`
+	Pending        int64     `json:"pending"`
+	Unavailable    int64     `json:"unavailable"`
+	NotChecked     int64     `json:"not_checked"`
+	Insert         int64     `json:"insert"`
+	Update         int64     `json:"update"`
+	Delete         int64     `json:"delete"`
 }
 
 type dashboardTrendWindow struct {
@@ -50,16 +51,17 @@ func parseDashboardTrendRange(value string) (dashboardTrendWindow, bool) {
 }
 
 type dashboardTrendAggregate struct {
-	BucketIndex int   `gorm:"column:bucket_index"`
-	TotalLogs   int64 `gorm:"column:total_logs"`
-	Valid       int64 `gorm:"column:valid"`
-	Tampered    int64 `gorm:"column:tampered"`
-	Pending     int64 `gorm:"column:pending"`
-	Unavailable int64 `gorm:"column:unavailable"`
-	NotChecked  int64 `gorm:"column:not_checked"`
-	Insert      int64 `gorm:"column:insert_count"`
-	Update      int64 `gorm:"column:update_count"`
-	Delete      int64 `gorm:"column:delete_count"`
+	BucketIndex    int   `gorm:"column:bucket_index"`
+	TotalLogs      int64 `gorm:"column:total_logs"`
+	Valid          int64 `gorm:"column:valid"`
+	Tampered       int64 `gorm:"column:tampered"`
+	SourceTampered int64 `gorm:"column:source_tampered"`
+	Pending        int64 `gorm:"column:pending"`
+	Unavailable    int64 `gorm:"column:unavailable"`
+	NotChecked     int64 `gorm:"column:not_checked"`
+	Insert         int64 `gorm:"column:insert_count"`
+	Update         int64 `gorm:"column:update_count"`
+	Delete         int64 `gorm:"column:delete_count"`
 }
 
 func loadDashboardTrend(db *gorm.DB, clientID string, window dashboardTrendWindow, to time.Time) (*DashboardTrendResponse, error) {
@@ -74,6 +76,7 @@ func loadDashboardTrend(db *gorm.DB, clientID string, window dashboardTrendWindo
 			COUNT(*) AS total_logs,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'VALID') AS valid,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'TAMPERED') AS tampered,
+			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(source_integrity_status, ''))) = 'TAMPERED') AS source_tampered,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'PENDING') AS pending,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) IN ('UNREACHABLE', 'UNAVAILABLE', 'AGENT_ERROR', 'FABRIC_ERROR')) AS unavailable,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) IN ('', 'NOT_CHECKED')) AS not_checked,
@@ -105,16 +108,17 @@ func buildDashboardTrendResponse(window dashboardTrendWindow, from, to time.Time
 			continue
 		}
 		points[aggregate.BucketIndex] = DashboardTrendPointResponse{
-			BucketStart: points[aggregate.BucketIndex].BucketStart,
-			TotalLogs:   aggregate.TotalLogs,
-			Valid:       aggregate.Valid,
-			Tampered:    aggregate.Tampered,
-			Pending:     aggregate.Pending,
-			Unavailable: aggregate.Unavailable,
-			NotChecked:  aggregate.NotChecked,
-			Insert:      aggregate.Insert,
-			Update:      aggregate.Update,
-			Delete:      aggregate.Delete,
+			BucketStart:    points[aggregate.BucketIndex].BucketStart,
+			TotalLogs:      aggregate.TotalLogs,
+			Valid:          aggregate.Valid,
+			Tampered:       aggregate.Tampered,
+			SourceTampered: aggregate.SourceTampered,
+			Pending:        aggregate.Pending,
+			Unavailable:    aggregate.Unavailable,
+			NotChecked:     aggregate.NotChecked,
+			Insert:         aggregate.Insert,
+			Update:         aggregate.Update,
+			Delete:         aggregate.Delete,
 		}
 	}
 

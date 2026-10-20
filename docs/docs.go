@@ -371,6 +371,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/dashboard/agent/audit-run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Run Agent integrity audit",
+                "parameters": [
+                    {
+                        "description": "Audit time range",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/audit.agentAuditRunInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "422": {
+                        "description": "Range exceeds the synchronous 100-log limit",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/dashboard/inventory": {
             "get": {
                 "security": [
@@ -2160,6 +2207,21 @@ const docTemplate = `{
                 }
             }
         },
+        "audit.agentAuditRunInput": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -2567,6 +2629,9 @@ const docTemplate = `{
                 "pending": {
                     "type": "integer"
                 },
+                "source_tampered": {
+                    "type": "integer"
+                },
                 "tampered": {
                     "type": "integer"
                 },
@@ -2788,6 +2853,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_integrity_checked_at": {
+                    "type": "string"
+                },
+                "source_integrity_error": {
+                    "type": "string"
+                },
+                "source_integrity_status": {
                     "type": "string"
                 },
                 "source_record_id": {
@@ -3697,8 +3771,8 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
-	BasePath:         "/api",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
 	Title:            "AuditChain Gateway API",
 	Description:      "API Enterprise untuk sistem audit log berbasis Blockchain dan Merkle Tree.",

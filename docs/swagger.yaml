@@ -282,6 +282,16 @@ definitions:
       sync_limit:
         type: integer
     type: object
+  audit.agentAuditRunInput:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+    required:
+    - from
+    - to
+    type: object
   auth.AuthRequest:
     properties:
       password:
@@ -564,6 +574,8 @@ definitions:
         type: integer
       pending:
         type: integer
+      source_tampered:
+        type: integer
       tampered:
         type: integer
       total_logs:
@@ -722,6 +734,12 @@ definitions:
       snapshot_verified_at:
         type: string
       snapshot_version_id:
+        type: string
+      source_integrity_checked_at:
+        type: string
+      source_integrity_error:
+        type: string
+      source_integrity_status:
         type: string
       source_record_id:
         description: |-
@@ -1573,6 +1591,37 @@ paths:
       summary: Get client detail
       tags:
       - Client
+  /dashboard/agent/audit-run:
+    post:
+      consumes:
+      - application/json
+      description: Runs a tenant-scoped Agent audit for a range of at most one hour
+        and up to 100 Gateway logs.
+      parameters:
+      - description: Audit time range
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/audit.agentAuditRunInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "422":
+          description: Range exceeds the synchronous 100-log limit
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Run Agent integrity audit
+      tags:
+      - Dashboard
   /dashboard/inventory:
     get:
       description: Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.
@@ -2466,5 +2515,3 @@ securityDefinitions:
     name: Authorization
     type: apiKey
 swagger: "2.0"
-host: localhost:8080
-basePath: /api

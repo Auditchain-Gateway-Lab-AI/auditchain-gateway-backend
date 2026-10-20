@@ -736,6 +736,9 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	}
 	if result != nil {
 		s.persistIntegrityStatus(result.LogID, clientID, status, models.IntegritySourceManualSingleLog, "", err)
+		if result.SourceStatus != "" {
+			s.persistSourceIntegrityStatus(result.LogID, clientID, result.SourceStatus, err)
+		}
 		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceManualSingleLog, "", 1)
 		if err == nil && result.IncidentType != "" {
 			auditLog, lookupErr := s.repo.GetLogByID(result.LogID, clientID)
@@ -954,6 +957,35 @@ func (s *auditService) persistIntegrityStatus(logID, clientID, status, integrity
 			"integrity_error":      message,
 			"integrity_source":     integritySource,
 			"integrity_run_id":     runID,
+		}).Error
+}
+
+func (s *auditService) persistSourceIntegrityStatus(logID, clientID, sourceStatus string, verificationErr error) {
+	if s.db == nil || logID == "" || clientID == "" || sourceStatus == "" {
+		return
+	}
+	status := models.IntegrityStatusNotChecked
+	switch strings.ToUpper(strings.TrimSpace(sourceStatus)) {
+	case models.SourceStatusMatched:
+		status = models.IntegrityStatusValid
+	case models.SourceStatusMismatch, models.SourceStatusMissing, models.SourceStatusUnexpectedPresent:
+		status = models.IntegrityStatusTampered
+	case models.SourceStatusUnreachable:
+		status = models.IntegrityStatusUnreachable
+	case models.SourceStatusNotComparable:
+		status = models.IntegrityStatusNotChecked
+	}
+	now := time.Now().UTC()
+	message := ""
+	if verificationErr != nil {
+		message = verificationErr.Error()
+	}
+	_ = s.db.Model(&models.AuditLog{}).
+		Where("log_id = ? AND client_id = ?", logID, clientID).
+		Updates(map[string]interface{}{
+			"source_integrity_status":     status,
+			"source_integrity_checked_at": now,
+			"source_integrity_error":      message,
 		}).Error
 }
 
@@ -2441,10 +2473,39 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 	if runID == "" {
 		runID = uuid.New().String()
 	}
+	var existingRun models.VerificationRun
+	if err := s.db.Where("id = ? AND client_id = ?", runID, clientID).First(&existingRun).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("check duplicate Agent audit run: %w", err)
+	}
+
+	// Agent results are evidence for a recheck, not sufficient authorization to
+	// create a recovery incident. Re-run Gateway/Fabric/Agent verification only
+	// for rows the Agent reports as anomalous; its existing verifier records
+	// client-source and Gateway-integrity findings in separate scopes.
+	verificationErrors := make(map[string]error)
+	for _, item := range req.Results {
+		dataStatus := strings.ToUpper(strings.TrimSpace(item.DataStatus))
+		chainStatus := strings.ToUpper(strings.TrimSpace(item.BlockchainStatus))
+		if strings.TrimSpace(item.LogID) == "" || (dataStatus != "TAMPERED" && dataStatus != "NOT_FOUND" && chainStatus != "TAMPERED") {
+			continue
+		}
+		if _, verifyErr := s.VerifyLogIntegrity(item.LogID, clientID); verifyErr != nil {
+			verificationErrors[item.LogID] = verifyErr
+			log.Printf("[AgentAuditReport] Gateway recheck inconclusive client=%s log=%s: %v", clientID, item.LogID, verifyErr)
+		}
+	}
 
 	now := time.Now().UTC()
+	transactionErr := s.db.Transaction(func(tx *gorm.DB) error {
+		var duplicate models.VerificationRun
+		if err := tx.Where("id = ? AND client_id = ?", runID, clientID).First(&duplicate).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("check duplicate Agent audit run: %w", err)
+		}
 
-	return s.db.Transaction(func(tx *gorm.DB) error {
 		var stat models.ClientDashboardStats
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("client_id = ?", clientID).First(&stat).Error
@@ -2472,6 +2533,53 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 
 		if len(req.Results) > 0 {
 			for _, item := range req.Results {
+				if strings.TrimSpace(item.LogID) != "" {
+					status := models.IntegrityStatusUnreachable
+					sourceStatus := ""
+					dataStatus := strings.ToUpper(strings.TrimSpace(item.DataStatus))
+					chainStatus := strings.ToUpper(strings.TrimSpace(item.BlockchainStatus))
+					needsRecheck := dataStatus == "TAMPERED" || dataStatus == "NOT_FOUND" || chainStatus == "TAMPERED"
+					if needsRecheck {
+						var current models.AuditLog
+						if err := tx.Where("log_id = ? AND client_id = ?", item.LogID, clientID).First(&current).Error; err == nil {
+							status = strings.ToUpper(strings.TrimSpace(current.IntegrityStatus))
+							if status == "" || status == models.IntegrityStatusNotChecked {
+								if verificationErrors[item.LogID] != nil {
+									status = models.IntegrityStatusUnreachable
+								} else {
+									status = models.IntegrityStatusUnreachable
+								}
+							}
+							sourceStatus = strings.ToUpper(strings.TrimSpace(current.SourceIntegrityStatus))
+							if sourceStatus == "" {
+								sourceStatus = models.IntegrityStatusNotChecked
+							}
+						}
+					} else if dataStatus == "VALID" && (chainStatus == "VALID" || chainStatus == "SKIPPED") {
+						status = models.IntegrityStatusValid
+						sourceStatus = models.IntegrityStatusValid
+					} else if chainStatus == "PENDING" || dataStatus == "PENDING" {
+						status = models.IntegrityStatusPending
+					} else if dataStatus == "ERROR" || chainStatus == "ERROR" {
+						status = models.IntegrityStatusUnreachable
+					}
+					updates := map[string]interface{}{
+						"integrity_status": status, "integrity_checked_at": now,
+						"integrity_error": "", "integrity_source": models.IntegritySourceAgentAudit,
+						"integrity_run_id": runID,
+					}
+					if sourceStatus != "" {
+						updates["source_integrity_status"] = sourceStatus
+						updates["source_integrity_checked_at"] = now
+					}
+					if verificationErrors[item.LogID] != nil {
+						updates["integrity_error"] = "Gateway recheck did not complete"
+					}
+					if err := tx.Model(&models.AuditLog{}).Where("log_id = ? AND client_id = ?", item.LogID, clientID).Updates(updates).Error; err != nil {
+						return fmt.Errorf("update Agent audit log status: %w", err)
+					}
+				}
+
 				tableName := strings.TrimSpace(strings.SplitN(item.Resource, ":", 2)[0])
 				if tableName == "" {
 					tableName = "UNKNOWN"
@@ -2480,10 +2588,10 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 				table := tableResults[tableName]
 				table.Total++
 
-				isDataValid := strings.ToUpper(item.DataStatus) == "VALID"
-				isChainValid := strings.ToUpper(item.BlockchainStatus) == "VALID" || strings.ToUpper(item.BlockchainStatus) == "SKIPPED"
-				isTampered := strings.ToUpper(item.DataStatus) == "TAMPERED" || strings.ToUpper(item.BlockchainStatus) == "TAMPERED"
-				isPending := strings.ToUpper(item.BlockchainStatus) == "PENDING"
+				isDataValid := strings.EqualFold(item.DataStatus, "VALID")
+				isChainValid := strings.EqualFold(item.BlockchainStatus, "VALID") || strings.EqualFold(item.BlockchainStatus, "SKIPPED")
+				isTampered := strings.EqualFold(item.DataStatus, "TAMPERED") || strings.EqualFold(item.DataStatus, "NOT_FOUND") || strings.EqualFold(item.BlockchainStatus, "TAMPERED")
+				isPending := strings.EqualFold(item.BlockchainStatus, "PENDING")
 
 				if isDataValid && isChainValid {
 					totalValid++
@@ -2520,6 +2628,27 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 			newIntegrityScore = float64(newTotalValid) / float64(newTotalVerifications) * 100
 		}
 
+		fromTime := req.From
+		toTime := req.To
+		if fromTime.IsZero() {
+			fromTime = now.Add(-24 * time.Hour)
+		}
+		if toTime.IsZero() {
+			toTime = now
+		}
+
+		vRun := models.VerificationRun{
+			ID: runID, ClientID: clientID, RequestedBy: "agent",
+			FromTime: fromTime, ToTime: toTime, Status: models.VerificationRunCompleted,
+			BatchSize: int(auditedCount), TotalItems: int64(req.TotalLogs), ProcessedItems: auditedCount,
+			TotalValid: totalValid, TotalInvalid: totalTampered, TotalPending: totalPending,
+			AlreadyVerified: int64(req.HistoricalSkipped), VerifiedNow: auditedCount,
+			StartedAt: &fromTime, CompletedAt: &now,
+		}
+		if err := tx.Create(&vRun).Error; err != nil {
+			return fmt.Errorf("create Agent verification run: %w", err)
+		}
+
 		updates := map[string]interface{}{
 			"last_verified_at":            now,
 			"last_verified_table":         "MULTIPLE (Agent Audit)",
@@ -2550,37 +2679,17 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 			return fmt.Errorf("update client stats: %w", err)
 		}
 
-		fromTime := req.From
-		toTime := req.To
-		if fromTime.IsZero() {
-			fromTime = now.Add(-24 * time.Hour)
-		}
-		if toTime.IsZero() {
-			toTime = now
-		}
-
-		vRun := models.VerificationRun{
-			ID:              runID,
-			ClientID:        clientID,
-			RequestedBy:     "agent",
-			FromTime:        fromTime,
-			ToTime:          toTime,
-			Status:          models.VerificationRunCompleted,
-			BatchSize:       int(auditedCount),
-			TotalItems:      int64(req.TotalLogs),
-			ProcessedItems:  auditedCount,
-			TotalValid:      totalValid,
-			TotalInvalid:    totalTampered,
-			TotalPending:    totalPending,
-			AlreadyVerified: int64(req.HistoricalSkipped),
-			VerifiedNow:     auditedCount,
-			StartedAt:       &fromTime,
-			CompletedAt:     &now,
-		}
-		if err := tx.Create(&vRun).Error; err != nil {
-			log.Printf("[AgentAuditReport] Warning: gagal menyimpan verification_run: %v", err)
-		}
-
 		return nil
 	})
+	if transactionErr != nil {
+		// The asynchronous callback and the synchronous Portal request can race.
+		// A winner commits the unique run and all counters in one transaction;
+		// a duplicate loser is an idempotent success.
+		var committed models.VerificationRun
+		if err := s.db.Where("id = ? AND client_id = ?", runID, clientID).First(&committed).Error; err == nil {
+			return nil
+		}
+		return transactionErr
+	}
+	return nil
 }

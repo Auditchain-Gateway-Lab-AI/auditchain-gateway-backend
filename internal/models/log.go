@@ -15,6 +15,7 @@ const (
 	IntegritySourceScheduledRun    = "SCHEDULED_VERIFY_RUN"
 	IntegritySourceManualSingleLog = "MANUAL_SINGLE_LOG"
 	IntegritySourceRecovery        = "RECOVERY"
+	IntegritySourceAgentAudit      = "AGENT_AUDIT"
 )
 
 // AuditLog merepresentasikan struktur metadata log transaksi
@@ -59,11 +60,14 @@ type AuditLog struct {
 
 	// Integrity verification is an operational cache and is never part of the
 	// canonical hash formula. Empty provenance means the result predates tracking.
-	IntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"integrity_status"`
-	IntegrityCheckedAt *time.Time `gorm:"index" json:"integrity_checked_at,omitempty"`
-	IntegrityError     string     `gorm:"type:text" json:"integrity_error,omitempty"`
-	IntegritySource    string     `gorm:"type:varchar(40);default:''" json:"integrity_source,omitempty"`
-	IntegrityRunID     string     `gorm:"type:varchar(36);default:''" json:"integrity_run_id,omitempty"`
+	IntegrityStatus          string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"integrity_status"`
+	IntegrityCheckedAt       *time.Time `gorm:"index" json:"integrity_checked_at,omitempty"`
+	IntegrityError           string     `gorm:"type:text" json:"integrity_error,omitempty"`
+	IntegritySource          string     `gorm:"type:varchar(40);default:''" json:"integrity_source,omitempty"`
+	IntegrityRunID           string     `gorm:"type:varchar(36);default:''" json:"integrity_run_id,omitempty"`
+	SourceIntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"source_integrity_status"`
+	SourceIntegrityCheckedAt *time.Time `gorm:"index" json:"source_integrity_checked_at,omitempty"`
+	SourceIntegrityError     string     `gorm:"type:text" json:"source_integrity_error,omitempty"`
 }
 
 type MerkleMetadata struct {
