@@ -149,7 +149,7 @@ type RecoveryRequest struct {
 	ApprovedAt         *time.Time `json:"approved_at,omitempty"`
 	ExecutedAt         *time.Time `json:"executed_at,omitempty"`
 	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
-	RecoveryEventID    string     `gorm:"type:varchar(36);uniqueIndex" json:"recovery_event_id,omitempty"`
+	RecoveryEventID    *string    `gorm:"type:varchar(36);uniqueIndex" json:"recovery_event_id,omitempty"`
 }
 
 // RecoveryEvent is the immutable, tenant-scoped evidence of one execution

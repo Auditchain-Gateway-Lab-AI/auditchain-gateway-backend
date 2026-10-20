@@ -70,6 +70,21 @@ func TestRecoveryEvidenceRedactsSensitiveMetadata(t *testing.T) {
 	}
 }
 
+func TestRedactedMetadataPreviewUnwrapsJSONBStringAndMasksSecrets(t *testing.T) {
+	value, err := redactedMetadataPreview(`"{\"ID\":1019,\"NAMA\":\"tampered\",\"password\":\"secret\"}"`)
+	if err != nil {
+		t.Fatalf("redactedMetadataPreview() error = %v", err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	want := `{"ID":1019,"NAMA":"tampered","password":"***REDACTED***"}`
+	if string(encoded) != want {
+		t.Fatalf("redacted metadata preview = %s, want %s", encoded, want)
+	}
+}
+
 func TestRecoveryRequestDoesNotSerializeDesiredState(t *testing.T) {
 	encoded, err := json.Marshal(models.RecoveryRequest{ID: "request-1", DesiredState: `{"password":"secret"}`})
 	if err != nil {

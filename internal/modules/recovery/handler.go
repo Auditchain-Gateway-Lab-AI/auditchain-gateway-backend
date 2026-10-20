@@ -23,7 +23,13 @@ type ErrorResponse struct {
 }
 
 type IncidentListResponse struct {
-	Data []models.TamperIncident `json:"data"`
+	Data        []models.TamperIncident `json:"data"`
+	Page        int                     `json:"page"`
+	PageSize    int                     `json:"page_size"`
+	TotalItems  int64                   `json:"total_items"`
+	TotalPages  int                     `json:"total_pages"`
+	OpenCount   int64                   `json:"open_count"`
+	ActiveCount int64                   `json:"active_count"`
 }
 
 type CandidateListResponse struct {
@@ -88,11 +94,17 @@ func (h *Handler) clientOperator(c *gin.Context) bool {
 }
 
 // @Summary List recovery incidents
-// @Description Mengambil incident recovery milik client pada JWT, opsional difilter berdasarkan status.
+// @Description Mengambil incident recovery milik client pada JWT. Kirim page/page_size untuk daftar berpaginasi; permintaan lama tanpa parameter itu tetap mengembalikan seluruh daftar.
 // @Tags Recovery
 // @Produce json
 // @Security BearerAuth
 // @Param status query string false "Status incident, misalnya OPEN atau RESOLVED"
+// @Param recovery_status query string false "Filter status operasi recovery, misalnya ACTIVE_RECOVERY"
+// @Param scope query string false "Scope incident, CLIENT_SOURCE atau GATEWAY_INTEGRITY"
+// @Param search query string false "Pencarian ID log, resource, atau jenis incident"
+// @Param sort query string false "Urutan: newest, oldest, atau resource"
+// @Param page query int false "Nomor halaman" default(1)
+// @Param page_size query int false "Jumlah incident per halaman, maksimum 100" default(50)
 // @Success 200 {object} IncidentListResponse "Daftar incident"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil daftar incident"
@@ -102,12 +114,23 @@ func (h *Handler) ListIncidents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	incidents, err := h.Service.ListIncidents(c.Request.Context(), clientID, IncidentFilter{Status: c.Query("status")})
+	paginationRequested := c.Query("page") != "" || c.Query("page_size") != ""
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	incidents, err := h.Service.ListIncidents(c.Request.Context(), clientID, IncidentFilter{
+		Status: c.Query("status"), RecoveryStatus: c.Query("recovery_status"),
+		Scope: c.Query("scope"), Search: c.Query("search"), Sort: c.Query("sort"),
+		Page: page, PageSize: pageSize, Unpaged: !paginationRequested,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar tamper incident."})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": incidents})
+	if paginationRequested {
+		c.JSON(http.StatusOK, incidents)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": incidents.Data})
 }
 
 // @Summary Get tamper incident detail

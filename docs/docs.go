@@ -79,11 +79,6 @@ const docTemplate = `{
         },
         "/auth/me": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
                 "consumes": [
                     "application/json"
@@ -114,14 +109,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                }
-            },
-            "put": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "put": {
                 "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
                 "consumes": [
                     "application/json"
@@ -175,7 +170,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/auth/register": {
@@ -238,11 +238,6 @@ const docTemplate = `{
         },
         "/client": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
                 "produces": [
                     "application/json"
@@ -267,14 +262,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
                 "consumes": [
                     "application/json"
@@ -316,16 +311,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/client/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/client/{id}": {
+            "get": {
                 "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
                 "produces": [
                     "application/json"
@@ -368,16 +363,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/agent/audit-run": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/agent/audit-run": {
+            "post": {
                 "description": "Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.",
                 "consumes": [
                     "application/json"
@@ -415,16 +410,16 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/inventory": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/inventory": {
+            "get": {
                 "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
                 "produces": [
                     "application/json"
@@ -455,16 +450,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/logs": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/logs": {
+            "get": {
                 "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
                 "produces": [
                     "application/json"
@@ -548,16 +543,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/events": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/events": {
+            "get": {
                 "description": "Mengambil event recovery milik client, diurutkan dari yang terbaru.",
                 "produces": [
                     "application/json"
@@ -620,16 +615,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/events/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/events/{id}": {
+            "get": {
                 "description": "Mengambil detail event recovery milik client pada JWT.",
                 "produces": [
                     "application/json"
@@ -672,16 +667,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/events/{id}/verify": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/events/{id}/verify": {
+            "get": {
                 "description": "Memeriksa hash, Merkle proof, anchor Fabric, dan referensi recovery event.",
                 "produces": [
                     "application/json"
@@ -726,17 +721,17 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/incidents": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
-                "description": "Mengambil incident recovery milik client pada JWT, opsional difilter berdasarkan status.",
+                ]
+            }
+        },
+        "/dashboard/recovery/incidents": {
+            "get": {
+                "description": "Mengambil incident recovery milik client pada JWT. Kirim page/page_size untuk daftar berpaginasi; permintaan lama tanpa parameter itu tetap mengembalikan seluruh daftar.",
                 "produces": [
                     "application/json"
                 ],
@@ -749,6 +744,44 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Status incident, misalnya OPEN atau RESOLVED",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter status operasi recovery, misalnya ACTIVE_RECOVERY",
+                        "name": "recovery_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Scope incident, CLIENT_SOURCE atau GATEWAY_INTEGRITY",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Pencarian ID log, resource, atau jenis incident",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Urutan: newest, oldest, atau resource",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Nomor halaman",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Jumlah incident per halaman, maksimum 100",
+                        "name": "page_size",
                         "in": "query"
                     }
                 ],
@@ -771,16 +804,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/incidents/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/incidents/{id}": {
+            "get": {
                 "description": "Mengambil detail sebuah incident recovery berdasarkan ID.",
                 "produces": [
                     "application/json"
@@ -823,16 +856,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/incidents/{id}/candidates": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/incidents/{id}/candidates": {
+            "get": {
                 "description": "Mengambil referensi terverifikasi untuk incident CLIENT_SOURCE atau GATEWAY_INTEGRITY.",
                 "produces": [
                     "application/json"
@@ -875,16 +908,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/incidents/{id}/preflight": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/incidents/{id}/preflight": {
+            "post": {
                 "description": "Memeriksa referensi PostgreSQL/Fabric dan state live sebelum recovery tanpa melakukan write.",
                 "produces": [
                     "application/json"
@@ -927,16 +960,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/requests": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/requests": {
+            "get": {
                 "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
                 "produces": [
                     "application/json"
@@ -972,14 +1005,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Membekukan intent recovery sesuai scope incident setelah referensi terverifikasi dan preflight lulus.",
                 "consumes": [
                     "application/json"
@@ -1033,16 +1066,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/requests/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/requests/{id}": {
+            "get": {
                 "description": "Mengambil status terbaru request recovery milik client pada JWT.",
                 "produces": [
                     "application/json"
@@ -1085,16 +1118,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/requests/{id}/execute": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/requests/{id}/execute": {
+            "post": {
                 "description": "Mengeksekusi request sesuai scope: memulihkan row client melalui Agent atau metadata audit Gateway yang terverifikasi.",
                 "produces": [
                     "application/json"
@@ -1143,16 +1176,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/recovery/resources/{resource}/versions": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/recovery/resources/{resource}/versions": {
+            "get": {
                 "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
                 "produces": [
                     "application/json"
@@ -1189,16 +1222,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/stats": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/stats": {
+            "get": {
                 "description": "Mengambil statistik agregat tenant client yang sedang login. Parameter trend_range opsional menambahkan bucket agregat dari audit_logs tanpa mengirim row log.",
                 "produces": [
                     "application/json"
@@ -1246,16 +1279,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verification-runs": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verification-runs": {
+            "post": {
                 "description": "Membuat job verifikasi range yang diproses backend secara bertahap. Ukuran batch membatasi pekerjaan per iterasi, bukan total log dalam range.",
                 "consumes": [
                     "application/json"
@@ -1309,16 +1342,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verification-runs/latest": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verification-runs/latest": {
+            "get": {
                 "description": "Mengambil verification run terakhir untuk tenant yang sedang login. Jika belum ada run, data bernilai null.",
                 "produces": [
                     "application/json"
@@ -1348,16 +1381,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verification-runs/{id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verification-runs/{id}": {
+            "get": {
                 "description": "Mengambil progress dan summary verification run yang hanya boleh diakses oleh tenant pada token.",
                 "produces": [
                     "application/json"
@@ -1400,16 +1433,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify-range": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verify-range": {
+            "get": {
                 "description": "Compatibility alias for the gateway dashboard. New clients should use /dashboard/verify-range/internal.",
                 "produces": [
                     "application/json"
@@ -1465,16 +1498,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify-range/client": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verify-range/client": {
+            "get": {
                 "description": "Memverifikasi seluruh audit log dalam rentang waktu dengan kontrak yang sama seperti gateway dashboard. Client Portal hanya menerima summary tanpa daftar row log.",
                 "produces": [
                     "application/json"
@@ -1530,16 +1563,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify-range/estimate": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verify-range/estimate": {
+            "get": {
                 "description": "Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi sinkron dijalankan.",
                 "produces": [
                     "application/json"
@@ -1589,16 +1622,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify-range/internal": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verify-range/internal": {
+            "get": {
                 "description": "Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.",
                 "produces": [
                     "application/json"
@@ -1654,16 +1687,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/dashboard/verify/{log_id}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/dashboard/verify/{log_id}": {
+            "get": {
                 "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
                 "produces": [
                     "application/json"
@@ -1718,16 +1751,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.IncidentPersistenceErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/report/generate": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/report/generate": {
+            "post": {
                 "description": "Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.",
                 "consumes": [
                     "application/json"
@@ -1776,7 +1809,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         }
     },
@@ -3337,11 +3375,29 @@ const docTemplate = `{
         "recovery.IncidentListResponse": {
             "type": "object",
             "properties": {
+                "active_count": {
+                    "type": "integer"
+                },
                 "data": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.TamperIncident"
                     }
+                },
+                "open_count": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
                 }
             }
         },
@@ -3362,6 +3418,10 @@ const docTemplate = `{
                 },
                 "current_integrity": {
                     "type": "string"
+                },
+                "current_state_preview": {
+                    "description": "CurrentStatePreview is the redacted source row as read during preflight.",
+                    "type": "object"
                 },
                 "desired_state_hash": {
                     "type": "string"
@@ -3413,6 +3473,10 @@ const docTemplate = `{
                 },
                 "trusted_reference_preview": {
                     "$ref": "#/definitions/recovery.SnapshotPreview"
+                },
+                "trusted_state_preview": {
+                    "description": "TrustedStatePreview is the redacted row or metadata reconstructed from the verified audit reference.",
+                    "type": "object"
                 }
             }
         },

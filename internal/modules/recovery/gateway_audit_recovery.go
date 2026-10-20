@@ -308,6 +308,10 @@ func (s *Service) preflightGatewayAuditTrail(ctx context.Context, clientID, inci
 	if err != nil {
 		return nil, fmt.Errorf("reference_metadata_invalid: %w", err)
 	}
+	currentMetadata, err := redactedMetadataPreview(data.Log.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("current_metadata_preview_invalid: %w", err)
+	}
 	return &PreflightResult{
 		Status: "VALID", Recoverable: true, LogID: data.Log.LogID,
 		RecoverySource: gatewayAuditRecoverySource, CurrentHash: data.CurrentHash,
@@ -315,6 +319,7 @@ func (s *Service) preflightGatewayAuditTrail(ctx context.Context, clientID, inci
 		MerkleRoot: data.Reference.MerkleRoot, AnchorID: data.Reference.AnchorID,
 		ReferenceLogHash: data.Reference.LeafHash, ReferenceMerkleRoot: data.Reference.MerkleRoot,
 		ReferenceAnchorID: data.Reference.AnchorID, FabricRoot: data.Reference.FabricRoot,
+		CurrentStatePreview: currentMetadata, TrustedStatePreview: metadata,
 		TrustedReferencePreview: &SnapshotPreview{
 			Actor: data.TrustedLog.Actor, Action: data.TrustedLog.Action,
 			Resource: data.TrustedLog.Resource, Timestamp: data.TrustedLog.Timestamp,
@@ -498,7 +503,7 @@ func (s *Service) failGatewayAuditRequest(ctx context.Context, request *models.R
 			"status":         models.RecoveryStatusFailedVerification,
 			"failure_reason": message, "executed_by": executorID,
 		}
-		if strings.TrimSpace(request.RecoveryEventID) == "" {
+		if request.RecoveryEventID == nil || strings.TrimSpace(*request.RecoveryEventID) == "" {
 			var target models.AuditLog
 			_ = tx.Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error
 			now := time.Now().UTC()
