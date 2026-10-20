@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,16 @@ import (
 type rangeRepositoryStub struct {
 	AuditRepository
 	logs []models.AuditLog
+}
+
+func (r *rangeRepositoryStub) GetLogByID(logID, clientID string) (*models.AuditLog, error) {
+	for _, row := range r.logs {
+		if row.LogID == logID && row.ClientID == clientID {
+			logCopy := row
+			return &logCopy, nil
+		}
+	}
+	return nil, errors.New("log_not_found")
 }
 
 func (r *rangeRepositoryStub) CountLogsByTimeRange(time.Time, time.Time, string) (int64, error) {
@@ -31,21 +42,17 @@ func (r *rangeRepositoryStub) GetLogsByTimeRangePage(_ time.Time, _ time.Time, _
 	return r.logs[offset:end], nil
 }
 
-func TestVerifyLogRangeUsesEveryLogAndCachedResults(t *testing.T) {
+func TestManualVerifyLogRangeRechecksCachedRows(t *testing.T) {
 	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
 	repo := &rangeRepositoryStub{logs: []models.AuditLog{
 		{
-			LogID:              "log-1",
+			LogID:              "log-1019",
 			ClientID:           "client-1",
-			Resource:           "RUANGAN:283",
+			Action:             "INSERT",
+			Resource:           "RUANGAN:1019",
+			Metadata:           `{"ID":1019,"NAMA":"tampered"}`,
+			HashValue:          "hash-before-metadata-change",
 			IntegrityStatus:    models.IntegrityStatusValid,
-			IntegrityCheckedAt: &checkedAt,
-		},
-		{
-			LogID:              "log-2",
-			ClientID:           "client-1",
-			Resource:           "RUANGAN:283",
-			IntegrityStatus:    models.IntegrityStatusTampered,
 			IntegrityCheckedAt: &checkedAt,
 		},
 	}}
@@ -55,19 +62,14 @@ func TestVerifyLogRangeUsesEveryLogAndCachedResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first range verification returned error: %v", err)
 	}
-	if first.Summary.Total != 2 || first.Summary.Valid != 1 || first.Summary.Invalid != 1 {
+	if first.Summary.Total != 1 || first.Summary.Valid != 0 || first.Summary.Invalid != 1 {
 		t.Fatalf("unexpected first summary: %+v", first.Summary)
 	}
-	if first.Summary.AlreadyVerified != 2 || first.Summary.VerifiedNow != 0 {
-		t.Fatalf("expected both logs to use cached results: %+v", first.Summary)
+	if first.Summary.AlreadyVerified != 0 || first.Summary.VerifiedNow != 1 {
+		t.Fatalf("expected the manual range to recheck its cached log: %+v", first.Summary)
 	}
-
-	second, err := service.verifyLogRange(time.Time{}, time.Time{}, "client-1", "test-2")
-	if err != nil {
-		t.Fatalf("replayed range verification returned error: %v", err)
-	}
-	if second.Summary != first.Summary {
-		t.Fatalf("replayed range changed summary: first=%+v second=%+v", first.Summary, second.Summary)
+	if len(first.Results) != 1 || first.Results[0].VerifyStatus != "failed_local" {
+		t.Fatalf("manual range result = %+v, want fresh failed_local result", first.Results)
 	}
 }
 
@@ -121,6 +123,37 @@ func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
 	}
 	if summary.Total != 1 || summary.Pending != 1 || summary.AlreadyVerified != 1 || summary.VerifiedNow != 0 {
 		t.Fatalf("unexpected batch summary: %+v", summary)
+	}
+}
+
+func TestUserRequestedBackgroundVerifyBatchRechecksCachedRows(t *testing.T) {
+	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
+	repo := &rangeRepositoryStub{logs: []models.AuditLog{
+		{
+			LogID:              "log-1019",
+			ClientID:           "client-1",
+			Action:             "INSERT",
+			Resource:           "RUANGAN:1019",
+			Metadata:           `{"ID":1019,"NAMA":"tampered"}`,
+			HashValue:          "hash-before-metadata-change",
+			IntegrityStatus:    models.IntegrityStatusValid,
+			IntegrityCheckedAt: &checkedAt,
+		},
+	}}
+
+	service := &auditService{repo: repo}
+	summary, loaded, err := service.VerifyRangeBatch(
+		time.Time{}, time.Time{}, "client-1", "manual-run", "run-1",
+		models.IntegritySourceBackgroundRun, 10, 0,
+	)
+	if err != nil {
+		t.Fatalf("manual background verification returned error: %v", err)
+	}
+	if loaded != 1 {
+		t.Fatalf("loaded = %d, want 1", loaded)
+	}
+	if summary.Total != 1 || summary.Valid != 0 || summary.Invalid != 1 || summary.AlreadyVerified != 0 || summary.VerifiedNow != 1 {
+		t.Fatalf("user-requested background run did not recheck cached log: %+v", summary)
 	}
 }
 
