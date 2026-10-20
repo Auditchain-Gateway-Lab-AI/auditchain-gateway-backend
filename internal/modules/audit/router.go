@@ -31,6 +31,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashAPI.GET("/verify-range/internal", h.VerifyInternalLogRange)
 		dashAPI.GET("/verify-range/client", h.VerifyClientLogRange)
 		dashAPI.POST("/verification-runs", h.CreateVerificationRun)
+		dashAPI.POST("/agent/audit-run", h.RunAgentAudit)
 		dashAPI.GET("/verification-runs/latest", h.GetLatestVerificationRun)
 		dashAPI.GET("/verification-runs/:id", h.GetVerificationRun)
 		// Compatibility route for older gateway-dashboard bundles. New clients

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/middleware"
 	"go-blockchain-api/internal/models"
 
@@ -18,6 +20,9 @@ import (
 type Handler struct {
 	Service          Service
 	VerificationJobs *VerificationJobService
+	AgentAuditRunner interface {
+		RunAudit(context.Context, string, time.Time, time.Time) (*agentverifier.AuditRunReport, error)
+	}
 }
 
 const (
@@ -31,6 +36,116 @@ func NewHandler(service Service) *Handler {
 
 func NewHandlerWithVerificationJobs(service Service, jobs *VerificationJobService) *Handler {
 	return &Handler{Service: service, VerificationJobs: jobs}
+}
+
+func (h *Handler) SetAgentAuditRunner(runner interface {
+	RunAudit(context.Context, string, time.Time, time.Time) (*agentverifier.AuditRunReport, error)
+}) {
+	h.AgentAuditRunner = runner
+}
+
+type agentAuditRunInput struct {
+	From string `json:"from" binding:"required"`
+	To   string `json:"to" binding:"required"`
+}
+
+// RunAgentAudit runs the tenant's configured Agent audit and returns only its
+// aggregate summary. Per-log rows and client payloads remain server-side.
+// @Summary Run Agent integrity audit
+// @Description Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.
+// @Tags Dashboard
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body agentAuditRunInput true "Audit time range"
+// @Success 200 {object} map[string]interface{}
+// @Failure 422 {object} map[string]interface{} "Range exceeds the synchronous 100-log limit"
+// @Router /dashboard/agent/audit-run [post]
+func (h *Handler) RunAgentAudit(c *gin.Context) {
+	clientIDValue, exists := c.Get("client_id")
+	clientID, ok := clientIDValue.(string)
+	if !exists || !ok || strings.TrimSpace(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Identitas client tidak ditemukan pada token."})
+		return
+	}
+	if h.AgentAuditRunner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent audit belum dikonfigurasi."})
+		return
+	}
+	var input agentAuditRunInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Body wajib memuat from dan to dalam format RFC3339."})
+		return
+	}
+	from, err := parseTimeRobust(strings.TrimSpace(input.From))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format from tidak valid. Gunakan RFC3339."})
+		return
+	}
+	to, err := parseTimeRobust(strings.TrimSpace(input.To))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format to tidak valid. Gunakan RFC3339."})
+		return
+	}
+	if !to.After(from) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "to harus setelah from."})
+		return
+	}
+	if to.Sub(from) > time.Hour {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Rentang Agent audit maksimal satu jam.", "code": "audit_range_too_large"})
+		return
+	}
+	if from.After(time.Now().Add(time.Minute)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Rentang audit tidak boleh berada di masa depan."})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 70*time.Second)
+	defer cancel()
+	report, err := h.AgentAuditRunner.RunAudit(ctx, clientID, from.UTC(), to.UTC())
+	if err != nil {
+		var limitErr *agentverifier.AuditRangeLimitError
+		if errors.As(err, &limitErr) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"error": "Rentang memuat terlalu banyak log untuk audit sinkron. Persempit rentang waktunya.",
+				"code":  "audit_log_limit_exceeded", "estimated_logs": limitErr.EstimatedLogs, "sync_limit": limitErr.Limit,
+			})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Agent audit gagal dijalankan.", "code": "agent_audit_failed"})
+		return
+	}
+
+	request := AgentAuditReportRequest{
+		RunID: report.RunID, From: report.From, To: report.To,
+		TotalLogs: report.TotalLogs, AuditedLogs: report.AuditedLogs, HistoricalSkipped: report.HistoricalSkipped,
+		DataValid: report.DataValid, DataTampered: report.DataTampered, DataNotFound: report.DataNotFound, DataError: report.DataError,
+		BlockchainValid: report.BlockchainValid, BlockchainTampered: report.BlockchainTampered,
+		BlockchainPending: report.BlockchainPending, BlockchainSkipped: report.BlockchainSkipped,
+		BlockchainError: report.BlockchainError, AutoRecoveredCount: report.AutoRecoveredCount, Duration: report.Duration,
+		Results: make([]AgentAuditLogResult, 0, len(report.Results)),
+	}
+	for _, item := range report.Results {
+		request.Results = append(request.Results, AgentAuditLogResult{
+			LogID: item.LogID, Resource: item.Resource, Action: item.Action,
+			DataStatus: item.DataStatus, BlockchainStatus: item.BlockchainStatus,
+			AutoRecovered: item.AutoRecovered,
+		})
+	}
+	if err := h.Service.ProcessAgentAuditReport(clientID, request); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Hasil Agent audit gagal disimpan di Gateway.", "code": "agent_audit_persist_failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"run_id": report.RunID, "from": report.From, "to": report.To,
+		"total_logs": report.TotalLogs, "audited_logs": report.AuditedLogs,
+		"historical_skipped": report.HistoricalSkipped, "data_valid": report.DataValid,
+		"data_tampered": report.DataTampered, "data_not_found": report.DataNotFound,
+		"data_error": report.DataError, "blockchain_valid": report.BlockchainValid,
+		"blockchain_tampered": report.BlockchainTampered, "blockchain_pending": report.BlockchainPending,
+		"blockchain_error": report.BlockchainError, "duration": report.Duration,
+	}})
 }
 
 func normalizeAuditLogPageSize(raw string) int {

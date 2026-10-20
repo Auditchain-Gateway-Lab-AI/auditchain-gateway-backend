@@ -410,6 +410,7 @@ func main() {
 	verificationScheduler := audit.NewVerificationScheduler(db, verificationJobs, verificationSchedulerConfig)
 	go verificationScheduler.Run(ctx)
 	auditHandler := audit.NewHandlerWithVerificationJobs(auditService, verificationJobs)
+	auditHandler.SetAgentAuditRunner(agentService)
 	if tamperScannerEnabled() {
 		scannerConfig, configErr := loadTamperScannerConfig(recoveryCutoff)
 		if configErr != nil {

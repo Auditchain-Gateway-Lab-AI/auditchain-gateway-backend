@@ -42,15 +42,16 @@ func TestBuildDashboardTrendResponseIncludesEmptyBucketsAndAggregates(t *testing
 	bucketDuration := time.Hour
 	aggregates := []dashboardTrendAggregate{
 		{
-			BucketIndex: 2,
-			TotalLogs:   12,
-			Valid:       9,
-			Tampered:    1,
-			Pending:     1,
-			Unavailable: 1,
-			Insert:      4,
-			Update:      5,
-			Delete:      3,
+			BucketIndex:    2,
+			TotalLogs:      12,
+			Valid:          9,
+			Tampered:       1,
+			SourceTampered: 2,
+			Pending:        1,
+			Unavailable:    1,
+			Insert:         4,
+			Update:         5,
+			Delete:         3,
 		},
 	}
 
@@ -64,6 +65,9 @@ func TestBuildDashboardTrendResponseIncludesEmptyBucketsAndAggregates(t *testing
 	point := got.Points[2]
 	if point.TotalLogs != 12 || point.Valid != 9 || point.Tampered != 1 || point.Pending != 1 || point.Unavailable != 1 {
 		t.Fatalf("integrity aggregates = %#v, want the supplied counts", point)
+	}
+	if point.SourceTampered != 2 {
+		t.Fatalf("source tampered = %d, want 2", point.SourceTampered)
 	}
 	if point.Insert != 4 || point.Update != 5 || point.Delete != 3 {
 		t.Fatalf("activity aggregates = %#v, want insert=4 update=5 delete=3", point)

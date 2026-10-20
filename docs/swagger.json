@@ -10,8 +10,6 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
-    "basePath": "/api",
     "paths": {
         "/auth/login": {
             "post": {
@@ -360,6 +358,53 @@
                         "description": "Gagal mengambil data klien",
                         "schema": {
                             "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/agent/audit-run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Run Agent integrity audit",
+                "parameters": [
+                    {
+                        "description": "Audit time range",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/audit.agentAuditRunInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "422": {
+                        "description": "Range exceeds the synchronous 100-log limit",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -2154,6 +2199,21 @@
                 }
             }
         },
+        "audit.agentAuditRunInput": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
         "auth.AuthRequest": {
             "type": "object",
             "required": [
@@ -2561,6 +2621,9 @@
                 "pending": {
                     "type": "integer"
                 },
+                "source_tampered": {
+                    "type": "integer"
+                },
                 "tampered": {
                     "type": "integer"
                 },
@@ -2782,6 +2845,15 @@
                     "type": "string"
                 },
                 "snapshot_version_id": {
+                    "type": "string"
+                },
+                "source_integrity_checked_at": {
+                    "type": "string"
+                },
+                "source_integrity_error": {
+                    "type": "string"
+                },
+                "source_integrity_status": {
                     "type": "string"
                 },
                 "source_record_id": {
