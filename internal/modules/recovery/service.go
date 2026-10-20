@@ -37,7 +37,24 @@ type Service struct {
 }
 
 type IncidentFilter struct {
-	Status string
+	Status         string
+	RecoveryStatus string
+	Scope          string
+	Search         string
+	Sort           string
+	Page           int
+	PageSize       int
+	Unpaged        bool
+}
+
+type IncidentPage struct {
+	Data        []models.TamperIncident `json:"data"`
+	Page        int                     `json:"page"`
+	PageSize    int                     `json:"page_size"`
+	TotalItems  int64                   `json:"total_items"`
+	TotalPages  int                     `json:"total_pages"`
+	OpenCount   int64                   `json:"open_count"`
+	ActiveCount int64                   `json:"active_count"`
 }
 
 // IncidentDetailView keeps the encrypted evidence private while exposing the
@@ -107,16 +124,20 @@ type PreflightResult struct {
 	ObjectVersionID         string           `json:"object_version_id"`
 	SnapshotPreview         SnapshotPreview  `json:"snapshot_preview"`
 	TrustedReferencePreview *SnapshotPreview `json:"trusted_reference_preview,omitempty"`
-	Operation               string           `json:"operation,omitempty"`
-	ReferenceLogHash        string           `json:"reference_log_hash,omitempty"`
-	ReferenceMerkleRoot     string           `json:"reference_merkle_root,omitempty"`
-	ReferenceAnchorID       string           `json:"reference_anchor_id,omitempty"`
-	FabricRoot              string           `json:"fabric_root,omitempty"`
-	ClientStateHash         string           `json:"client_state_hash,omitempty"`
-	DesiredStateHash        string           `json:"desired_state_hash,omitempty"`
-	SourceStatus            string           `json:"source_status,omitempty"`
-	AgentStatus             string           `json:"agent_status,omitempty"`
-	SourceFound             bool             `json:"source_found,omitempty"`
+	// CurrentStatePreview is the redacted source row as read during preflight.
+	CurrentStatePreview interface{} `json:"current_state_preview,omitempty" swaggertype:"object"`
+	// TrustedStatePreview is the redacted row or metadata reconstructed from the verified audit reference.
+	TrustedStatePreview interface{} `json:"trusted_state_preview,omitempty" swaggertype:"object"`
+	Operation           string      `json:"operation,omitempty"`
+	ReferenceLogHash    string      `json:"reference_log_hash,omitempty"`
+	ReferenceMerkleRoot string      `json:"reference_merkle_root,omitempty"`
+	ReferenceAnchorID   string      `json:"reference_anchor_id,omitempty"`
+	FabricRoot          string      `json:"fabric_root,omitempty"`
+	ClientStateHash     string      `json:"client_state_hash,omitempty"`
+	DesiredStateHash    string      `json:"desired_state_hash,omitempty"`
+	SourceStatus        string      `json:"source_status,omitempty"`
+	AgentStatus         string      `json:"agent_status,omitempty"`
+	SourceFound         bool        `json:"source_found,omitempty"`
 }
 
 type CreateRequestInput struct {
@@ -201,16 +222,101 @@ func recoveryEventHasTrustedLineage(event *models.RecoveryEvent) bool {
 		strings.TrimSpace(event.SourceExpectedMerkleRoot) != ""
 }
 
-func (s *Service) ListIncidents(ctx context.Context, clientID string, filter IncidentFilter) ([]models.TamperIncident, error) {
-	query := s.db.WithContext(ctx).Where("client_id = ?", clientID).Order("detected_at DESC")
-	if strings.TrimSpace(filter.Status) != "" {
-		query = query.Where("status = ?", strings.ToUpper(strings.TrimSpace(filter.Status)))
+func (s *Service) ListIncidents(ctx context.Context, clientID string, filter IncidentFilter) (*IncidentPage, error) {
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if filter.Unpaged {
+		pageSize = 0
+	} else {
+		if pageSize < 1 {
+			pageSize = 50
+		}
+		if pageSize > 100 {
+			pageSize = 100
+		}
+	}
+	activeStatuses := []string{
+		models.RecoveryStatusPendingExecution,
+		models.RecoveryStatusExecuting,
+		models.RecoveryStatusAppliedAwaitingCDC,
+	}
+	activeIncidentSQL := `EXISTS (
+		SELECT 1 FROM recovery_requests rr
+		WHERE rr.client_id = tamper_incidents.client_id
+		  AND rr.incident_id = tamper_incidents.id
+		  AND rr.status IN ?
+	)`
+
+	base := s.db.WithContext(ctx).Model(&models.TamperIncident{}).Where("client_id = ?", clientID)
+	var openCount, activeCount int64
+	if err := base.Where("status = ?", models.IncidentStatusOpen).Count(&openCount).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.TamperIncident{}).
+		Where("client_id = ? AND status = ?", clientID, models.IncidentStatusOpen).
+		Where(activeIncidentSQL, activeStatuses).Count(&activeCount).Error; err != nil {
+		return nil, err
+	}
+
+	query := s.db.WithContext(ctx).Model(&models.TamperIncident{}).Where("client_id = ?", clientID)
+	if status := strings.ToUpper(strings.TrimSpace(filter.Status)); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if recoveryStatus := strings.ToUpper(strings.TrimSpace(filter.RecoveryStatus)); recoveryStatus == "ACTIVE_RECOVERY" {
+		query = query.Where(activeIncidentSQL, activeStatuses)
+	}
+	if scope := strings.ToUpper(strings.TrimSpace(filter.Scope)); scope != "" && scope != "ALL" {
+		query = query.Where("incident_scope = ?", scope)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		searchRunes := []rune(search)
+		if len(searchRunes) > 120 {
+			search = string(searchRunes[:120])
+		}
+		pattern := "%" + search + "%"
+		query = query.Where(`(
+			id ILIKE ? OR log_id ILIKE ? OR reference_log_id ILIKE ? OR
+			resource ILIKE ? OR incident_type ILIKE ? OR source_status ILIKE ?
+		)`, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+
+	var totalItems int64
+	if err := query.Count(&totalItems).Error; err != nil {
+		return nil, err
+	}
+	totalPages := 1
+	if pageSize > 0 {
+		totalPages = int((totalItems + int64(pageSize) - 1) / int64(pageSize))
+	}
+	if totalPages == 0 {
+		page = 1
+	} else if page > totalPages {
+		page = totalPages
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.Sort)) {
+	case "oldest":
+		query = query.Order("detected_at ASC").Order("id ASC")
+	case "resource":
+		query = query.Order("resource ASC").Order("detected_at DESC")
+	default:
+		query = query.Order("detected_at DESC").Order("id DESC")
 	}
 	var incidents []models.TamperIncident
+	if pageSize > 0 {
+		query = query.Offset((page - 1) * pageSize).Limit(pageSize)
+	} else {
+		page = 1
+	}
 	if err := query.Find(&incidents).Error; err != nil {
 		return nil, err
 	}
-	return incidents, nil
+	return &IncidentPage{
+		Data: incidents, Page: page, PageSize: pageSize, TotalItems: totalItems,
+		TotalPages: totalPages, OpenCount: openCount, ActiveCount: activeCount,
+	}, nil
 }
 
 func (s *Service) GetIncident(ctx context.Context, clientID, incidentID string) (*models.TamperIncident, error) {
@@ -284,6 +390,24 @@ func decryptTamperedMetadata(cipher *snapshotstore.Cipher, encrypted []byte) (in
 		return nil, err
 	}
 	return safe, nil
+}
+
+// redactedMetadataPreview accepts the JSONB string representation used by
+// AuditLog.Metadata and applies the same recursive redaction policy used for
+// trusted and live client state before returning it to the tenant UI.
+func redactedMetadataPreview(raw string) (interface{}, error) {
+	encoded := []byte(strings.TrimSpace(raw))
+	if len(encoded) == 0 || string(encoded) == "null" {
+		return nil, nil
+	}
+	var nested string
+	if err := json.Unmarshal(encoded, &nested); err == nil {
+		if strings.TrimSpace(nested) == "" {
+			return nil, nil
+		}
+		encoded = []byte(nested)
+	}
+	return redaction.Value(encoded)
 }
 
 func (s *Service) ListRequests(ctx context.Context, clientID, status string) ([]models.RecoveryRequest, error) {

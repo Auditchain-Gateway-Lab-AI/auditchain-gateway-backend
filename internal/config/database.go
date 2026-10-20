@@ -132,6 +132,10 @@ func ensureDirectRecoverySchema(db *gorm.DB) error {
 			`UPDATE tamper_incidents SET incident_scope = 'GATEWAY_INTEGRITY' WHERE incident_scope IS NULL OR incident_scope = ''`,
 			`ALTER TABLE recovery_requests ALTER COLUMN cdc_status SET DEFAULT 'PENDING'`,
 			`UPDATE recovery_requests SET cdc_status = 'PENDING' WHERE cdc_status IS NULL OR cdc_status = ''`,
+			// Requests do not have a RecoveryEvent until an execution has been recorded.
+			// NULL preserves the unique index while allowing any number of pending requests.
+			`ALTER TABLE recovery_requests ALTER COLUMN recovery_event_id DROP NOT NULL`,
+			`UPDATE recovery_requests SET recovery_event_id = NULL WHERE recovery_event_id = ''`,
 			`ALTER TABLE recovery_events ALTER COLUMN cdc_status SET DEFAULT 'PENDING'`,
 			`UPDATE recovery_events SET cdc_status = 'PENDING' WHERE cdc_status IS NULL OR cdc_status = ''`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_recovery_active_resource

@@ -1070,10 +1070,22 @@ definitions:
     type: object
   recovery.IncidentListResponse:
     properties:
+      active_count:
+        type: integer
       data:
         items:
           $ref: '#/definitions/models.TamperIncident'
         type: array
+      open_count:
+        type: integer
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
     type: object
   recovery.PreflightResult:
     properties:
@@ -1087,6 +1099,10 @@ definitions:
         type: string
       current_integrity:
         type: string
+      current_state_preview:
+        description: CurrentStatePreview is the redacted source row as read during
+          preflight.
+        type: object
       desired_state_hash:
         type: string
       fabric_root:
@@ -1121,6 +1137,10 @@ definitions:
         type: string
       trusted_reference_preview:
         $ref: '#/definitions/recovery.SnapshotPreview'
+      trusted_state_preview:
+        description: TrustedStatePreview is the redacted row or metadata reconstructed
+          from the verified audit reference.
+        type: object
     type: object
   recovery.RecoveryEventPage:
     properties:
@@ -1825,13 +1845,40 @@ paths:
       - Recovery
   /dashboard/recovery/incidents:
     get:
-      description: Mengambil incident recovery milik client pada JWT, opsional difilter
-        berdasarkan status.
+      description: Mengambil incident recovery milik client pada JWT. Kirim page/page_size
+        untuk daftar berpaginasi; permintaan lama tanpa parameter itu tetap mengembalikan
+        seluruh daftar.
       parameters:
       - description: Status incident, misalnya OPEN atau RESOLVED
         in: query
         name: status
         type: string
+      - description: Filter status operasi recovery, misalnya ACTIVE_RECOVERY
+        in: query
+        name: recovery_status
+        type: string
+      - description: Scope incident, CLIENT_SOURCE atau GATEWAY_INTEGRITY
+        in: query
+        name: scope
+        type: string
+      - description: Pencarian ID log, resource, atau jenis incident
+        in: query
+        name: search
+        type: string
+      - description: 'Urutan: newest, oldest, atau resource'
+        in: query
+        name: sort
+        type: string
+      - default: 1
+        description: Nomor halaman
+        in: query
+        name: page
+        type: integer
+      - default: 50
+        description: Jumlah incident per halaman, maksimum 100
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:

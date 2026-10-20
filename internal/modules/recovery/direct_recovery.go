@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -317,6 +318,21 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	if err != nil {
 		return nil, fmt.Errorf("reference_metadata_invalid: %w", err)
 	}
+	trustedState, err := redaction.Value(data.DesiredRaw)
+	if err != nil {
+		return nil, fmt.Errorf("reference_metadata_invalid: %w", err)
+	}
+	var currentState interface{}
+	if data.Client != nil && data.Client.Found {
+		currentRaw, marshalErr := json.Marshal(data.Client.Data)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("client_state_preview_invalid: %w", marshalErr)
+		}
+		currentState, err = redaction.Value(currentRaw)
+		if err != nil {
+			return nil, fmt.Errorf("client_state_preview_invalid: %w", err)
+		}
+	}
 	return &PreflightResult{
 		Status: status, Recoverable: recoverable, LogID: data.Log.LogID,
 		RecoverySource: "CLIENT_AUDIT_CHAIN",
@@ -328,6 +344,7 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 		FabricRoot: data.Reference.FabricRoot, ClientStateHash: data.ClientHash,
 		DesiredStateHash: data.DesiredHash, SourceStatus: data.SourceStatus,
 		AgentStatus: data.AgentStatus, SourceFound: data.Client != nil && data.Client.Found,
+		CurrentStatePreview: currentState, TrustedStatePreview: trustedState,
 		SnapshotPreview: SnapshotPreview{
 			Actor: data.Log.Actor, Action: data.Log.Action, Resource: data.Log.Resource,
 			Timestamp: data.Log.Timestamp, DBTimestamp: data.Log.DBTimestamp,
@@ -598,7 +615,10 @@ func (s *Service) markDirectCDCConfirmed(ctx context.Context, request *models.Re
 			return err
 		}
 		var event models.RecoveryEvent
-		if err := tx.Where("id = ? AND request_id = ?", current.RecoveryEventID, current.ID).First(&event).Error; err != nil {
+		if current.RecoveryEventID == nil || strings.TrimSpace(*current.RecoveryEventID) == "" {
+			return errors.New("recovery_event_missing")
+		}
+		if err := tx.Where("id = ? AND request_id = ?", *current.RecoveryEventID, current.ID).First(&event).Error; err != nil {
 			return err
 		}
 		event.ResultStatus = models.RecoveryResultSucceeded
@@ -666,7 +686,10 @@ func (s *Service) markDirectCDCTimeout(ctx context.Context, request *models.Reco
 			return err
 		}
 		var event models.RecoveryEvent
-		if err := tx.Where("id = ? AND request_id = ?", current.RecoveryEventID, current.ID).First(&event).Error; err != nil {
+		if current.RecoveryEventID == nil || strings.TrimSpace(*current.RecoveryEventID) == "" {
+			return errors.New("recovery_event_missing")
+		}
+		if err := tx.Where("id = ? AND request_id = ?", *current.RecoveryEventID, current.ID).First(&event).Error; err != nil {
 			return err
 		}
 		event.ResultStatus = models.RecoveryResultCDCTimeout
@@ -749,7 +772,7 @@ func (s *Service) failDirectRequest(ctx context.Context, request *models.Recover
 		updates := map[string]interface{}{
 			"status": requestStatus, "failure_reason": message, "executed_by": executorID,
 		}
-		if strings.TrimSpace(request.RecoveryEventID) == "" {
+		if request.RecoveryEventID == nil || strings.TrimSpace(*request.RecoveryEventID) == "" {
 			var target models.AuditLog
 			_ = tx.Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error
 			now := time.Now().UTC()
