@@ -80,6 +80,10 @@ func ConnectDB() *gorm.DB {
 	if err := ensureVerificationRunSchema(db); err != nil {
 		log.Fatalf("Gagal menyiapkan schema verification run: %v", err)
 	}
+	if err := db.Exec(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_logs_latest_resource
+		ON audit_logs (client_id, resource, timestamp DESC, db_timestamp DESC, log_id DESC)`).Error; err != nil {
+		log.Fatalf("Gagal menyiapkan index audit resource terbaru: %v", err)
+	}
 
 	log.Println("✅ Database terhubung dan schema telah di-migrate.")
 	if err := db.Exec("ALTER TABLE users ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {

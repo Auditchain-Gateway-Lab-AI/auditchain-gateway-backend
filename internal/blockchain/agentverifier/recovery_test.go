@@ -12,6 +12,25 @@ import (
 	"go-blockchain-api/internal/models"
 )
 
+func TestFetchRecoveryCapabilityUsesWriteTokenWithoutWriting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/recover/capabilities" || r.URL.Query().Get("table") != "RUANGAN" {
+			t.Fatalf("unexpected capability request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer write-token" {
+			t.Fatalf("capability used wrong token")
+		}
+		_, _ = w.Write([]byte(`{"enabled":true,"allowed":true}`))
+	}))
+	defer server.Close()
+	capability, err := fetchRecoveryCapability(context.Background(), &models.AgentConfig{
+		AgentURL: server.URL, VerifyToken: "read-token", RecoveryToken: "write-token", TimeoutSeconds: 2,
+	}, "RUANGAN", nil)
+	if err != nil || capability == nil || !capability.Enabled || !capability.Allowed {
+		t.Fatalf("capability = %#v, err = %v", capability, err)
+	}
+}
+
 func TestExecuteRecoveryRequestUsesWriteTokenAndContract(t *testing.T) {
 	var seenAuth string
 	var seenPath string

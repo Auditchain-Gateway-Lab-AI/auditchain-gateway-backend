@@ -263,6 +263,30 @@ func loadVerificationSchedulerConfig() (audit.VerificationSchedulerConfig, error
 	}, nil
 }
 
+func startRecoveryReconciler(ctx context.Context, service *recovery.Service) {
+	if service == nil {
+		return
+	}
+	go func() {
+		reconcile := func() {
+			if err := service.ReconcilePendingCDC(ctx, 100); err != nil && ctx.Err() == nil {
+				log.Printf("[RecoveryCDC] reconciliation failed: %v", err)
+			}
+		}
+		reconcile()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				reconcile()
+			}
+		}
+	}()
+}
+
 func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain.FabricService, snapshotBuilder snapshotstore.OutboxBuilder, recoveryCutoff *time.Time, recoveryService *recovery.Service, snapshotRequired bool) {
 	hashEngine := &hasher.Engine{DB: db}
 	aggEngine := &aggregator.Engine{DB: db, RecoveryCutoff: recoveryCutoff, SnapshotRequired: &snapshotRequired}
@@ -281,11 +305,6 @@ func startPipelineWorker(ctx context.Context, db *gorm.DB, fabricSvc *blockchain
 			case <-ticker.C:
 				if err := hashEngine.ProcessPendingLogs(); err != nil {
 					log.Printf("❌ [Hasher] Error: %v\n", err)
-				}
-				if recoveryService != nil {
-					if err := recoveryService.ReconcilePendingCDC(ctx, 100); err != nil {
-						log.Printf("⚠️ [RecoveryCDC] Rekonsiliasi CDC selesai dengan status non-valid: %v\n", err)
-					}
 				}
 				if err := aggEngine.ProcessBatch(10); err != nil {
 					log.Printf("❌ [Aggregator] Error: %v\n", err)
@@ -397,10 +416,37 @@ func main() {
 	agentService := agentverifier.NewService(db)
 	recoveryService.SetAgentVerifier(agentService)
 
+	startRecoveryReconciler(ctx, recoveryService)
 	startPipelineWorker(ctx, db, fabricSvc, snapshotBuilder, recoveryCutoff, recoveryService, effectiveSnapshotRequired)
 
 	auditRepo := audit.NewAuditRepository(db)
 	auditService := audit.NewService(auditRepo, fabricSvc, db)
+	sourceSweepEnabled := true
+	if raw := strings.TrimSpace(os.Getenv("SOURCE_SWEEP_ENABLED")); raw != "" {
+		value, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			log.Fatal("SOURCE_SWEEP_ENABLED harus berupa true atau false")
+		}
+		sourceSweepEnabled = value
+	}
+	if sourceSweepEnabled {
+		interval, recent, backfill := 300, 100, 25
+		for name, target := range map[string]*int{
+			"SOURCE_SWEEP_INTERVAL_SECONDS":    &interval,
+			"SOURCE_SWEEP_RECENT_BATCH_SIZE":   &recent,
+			"SOURCE_SWEEP_BACKFILL_BATCH_SIZE": &backfill,
+		} {
+			if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+				value, parseErr := strconv.Atoi(raw)
+				if parseErr != nil || value <= 0 {
+					log.Fatalf("%s harus berupa bilangan bulat positif", name)
+				}
+				*target = value
+			}
+		}
+		go audit.NewSourceSweep(db, auditService, time.Duration(interval)*time.Second, recent, backfill).Run(ctx)
+		log.Printf("[SourceSweep] active; interval=%ds recent=%d backfill=%d", interval, recent, backfill)
+	}
 	verificationJobs := audit.NewVerificationJobService(db, auditService)
 	go verificationJobs.Run(ctx)
 	verificationSchedulerConfig, schedulerConfigErr := loadVerificationSchedulerConfig()

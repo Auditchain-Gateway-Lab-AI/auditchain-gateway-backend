@@ -398,7 +398,7 @@ func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID,
 		return RangeSummary{}, 0, err
 	}
 
-	forceRecheck := integritySource == models.IntegritySourceBackgroundRun
+	forceRecheck := integritySource == models.IntegritySourceBackgroundRun || integritySource == models.IntegritySourceScheduledRun
 	summary, _ := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID, forceRecheck)
 	return summary, len(logs), nil
 }
@@ -459,7 +459,7 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 		}
 		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, err)
 	} else {
-		item.VerifyStatus = verifyResult.Status
+		item.VerifyStatus = rangeResultStatus(verifyResult)
 		item.Message = verifyResult.Message
 		item.VerificationAssessment = verifyResult.Assessment
 		item.ProofStatus = verifyResult.ProofStatus
@@ -475,6 +475,9 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 		item.AuditTrailDiscrepancies = verifyResult.AuditTrailDiffs
 		persistedStatus = integrityStatusFromVerificationResult(verifyResult)
 		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, nil)
+		if verifyResult.SourceStatus != "" {
+			s.persistSourceIntegrityStatus(auditLog.LogID, clientID, verifyResult.SourceStatus, nil)
+		}
 	}
 
 	item.Log.IntegrityStatus = persistedStatus
@@ -540,6 +543,25 @@ func integrityStatusFromVerificationResult(result *VerificationResult) string {
 		return models.IntegrityStatusTampered
 	default:
 		return models.IntegrityStatusUnreachable
+	}
+}
+
+func rangeResultStatus(result *VerificationResult) string {
+	if result == nil || result.Status != "success" {
+		if result == nil {
+			return "inconclusive"
+		}
+		return result.Status
+	}
+	if shouldRecordClientSourceIncident(result.ProofStatus, result.SourceStatus) {
+		return "failed_source"
+	}
+	switch result.SourceStatus {
+	case models.SourceStatusMismatch, models.SourceStatusMissing, models.SourceStatusUnexpectedPresent,
+		models.SourceStatusUnreachable, models.SourceStatusNotComparable:
+		return "inconclusive"
+	default:
+		return result.Status
 	}
 }
 

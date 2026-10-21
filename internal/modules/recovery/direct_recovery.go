@@ -304,6 +304,7 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	if data.SourceStatus == models.SourceStatusUnreachable {
 		return nil, errors.New("client_source_unreachable")
 	}
+	executionReady, executionBlocker := s.directRecoveryCapability(ctx, clientID, data.Log.Resource)
 	recoverable := !s.directSourceMatches(data)
 	status := "VALID"
 	if !recoverable {
@@ -335,6 +336,7 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	}
 	return &PreflightResult{
 		Status: status, Recoverable: recoverable, LogID: data.Log.LogID,
+		ExecutionReady: &executionReady, ExecutionBlocker: executionBlocker,
 		RecoverySource: "CLIENT_AUDIT_CHAIN",
 		CurrentHash:    localHash, CurrentIntegrity: currentIntegrity,
 		SnapshotHash: data.Reference.LeafHash, MerkleRoot: data.Reference.MerkleRoot,
@@ -354,10 +356,30 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	}, nil
 }
 
+func (s *Service) directRecoveryCapability(ctx context.Context, clientID, resource string) (bool, string) {
+	if s.agent == nil {
+		return false, "agent_recovery_client_unavailable"
+	}
+	capability, err := s.agent.CheckRecoveryCapability(ctx, clientID, resource)
+	if err != nil {
+		return false, failureCode(err)
+	}
+	if !capability.Enabled {
+		return false, "recovery_disabled"
+	}
+	if !capability.Allowed {
+		return false, "table_not_allowed"
+	}
+	return true, ""
+}
+
 func (s *Service) createDirectRequest(ctx context.Context, clientID, userID string, input CreateRequestInput) (*models.RecoveryRequest, error) {
 	data, err := s.loadDirectRecoveryData(ctx, clientID, input.IncidentID)
 	if err != nil {
 		return nil, err
+	}
+	if ready, blocker := s.directRecoveryCapability(ctx, clientID, data.Log.Resource); !ready {
+		return nil, errors.New(blocker)
 	}
 	var active models.RecoveryRequest
 	if err := s.db.WithContext(ctx).
@@ -532,7 +554,13 @@ func (s *Service) reconcileStuckDirectExecutions(ctx context.Context, limit int,
 		return err
 	}
 	for i := range requests {
-		_, _ = s.failDirectRequest(ctx, &requests[i], requests[i].ExecutedBy, errors.New("execution_timeout_unknown"))
+		updated, err := s.failDirectRequest(ctx, &requests[i], requests[i].ExecutedBy, errors.New("execution_timeout_unknown"))
+		if updated == nil || updated.Status == models.RecoveryStatusExecuting {
+			if err == nil {
+				err = errors.New("request remained executing")
+			}
+			return fmt.Errorf("reconcile stuck recovery %s: %w", requests[i].ID, err)
+		}
 	}
 	return nil
 }
@@ -768,24 +796,39 @@ func (s *Service) failDirectRequest(ctx context.Context, request *models.Recover
 	message := sanitizeFailure(failure)
 	code := failureCode(failure)
 	requestStatus, resultStatus := directFailureStatuses(code)
-	_ = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// The Agent call can time out or the browser can disconnect after EXECUTING
+	// was committed. Persist the outcome with a fresh bounded context so the
+	// request does not stay active forever merely because its HTTP context died.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	err := s.db.WithContext(persistCtx).Transaction(func(tx *gorm.DB) error {
+		var current models.RecoveryRequest
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND client_id = ?", request.ID, request.ClientID).First(&current).Error; err != nil {
+			return err
+		}
+		if current.Status != models.RecoveryStatusExecuting {
+			return nil
+		}
 		updates := map[string]interface{}{
 			"status": requestStatus, "failure_reason": message, "executed_by": executorID,
 		}
-		if request.RecoveryEventID == nil || strings.TrimSpace(*request.RecoveryEventID) == "" {
+		if current.RecoveryEventID == nil || strings.TrimSpace(*current.RecoveryEventID) == "" {
 			var target models.AuditLog
-			_ = tx.Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error
+			if err := tx.Where("log_id = ? AND client_id = ?", current.TargetLogID, current.ClientID).First(&target).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			now := time.Now().UTC()
 			event := models.RecoveryEvent{
-				ID: uuid.NewString(), ClientID: request.ClientID, RequestID: request.ID,
-				IncidentID: request.IncidentID, TargetLogID: request.TargetLogID, SelectedLogID: request.SelectedLogID,
+				ID: uuid.NewString(), ClientID: current.ClientID, RequestID: current.ID,
+				IncidentID: current.IncidentID, TargetLogID: current.TargetLogID, SelectedLogID: current.SelectedLogID,
 				EventType: models.RecoveryEventTypeExecution, ResultStatus: resultStatus,
-				Operation: request.Operation, Resource: request.Resource, TargetActor: target.Actor,
+				Operation: current.Operation, Resource: current.Resource, TargetActor: target.Actor,
 				TargetAction: target.Action, SourceSystem: target.SourceSystem, TargetSourceSystem: target.SourceSystem,
 				TargetAuthorization: target.AuthorizationContext, TargetSourceRecordID: target.SourceRecordID,
-				ExecutorSystem: "AuditChain Gateway", ExecutedBy: executorID, Reason: request.Reason,
-				BeforeHash: request.ClientBeforeHash, ReferenceLogHash: request.ReferenceLogHash,
-				ReferenceMerkleRoot: request.ReferenceMerkleRoot, ReferenceAnchorID: request.ReferenceAnchorID,
+				ExecutorSystem: "AuditChain Gateway", ExecutedBy: executorID, Reason: current.Reason,
+				BeforeHash: current.ClientBeforeHash, ReferenceLogHash: current.ReferenceLogHash,
+				ReferenceMerkleRoot: current.ReferenceMerkleRoot, ReferenceAnchorID: current.ReferenceAnchorID,
 				FailureCode: code, FailureReason: message, ExecutedAt: now,
 				PipelineStatus: models.RecoveryPipelineHashed, SnapshotStatus: models.SnapshotStatusLegacyMissing,
 				IntegrityStatus: models.IntegrityStatusNotChecked, ReadbackStatus: models.SourceStatusNotComparable,
@@ -796,13 +839,22 @@ func (s *Service) failDirectRequest(ctx context.Context, request *models.Recover
 				event.TargetTimestamp = &timestamp
 			}
 			event.EventHash = hasher.GenerateRecoveryEventHash(&event)
-			if err := tx.Create(&event).Error; err == nil {
-				updates["recovery_event_id"] = event.ID
+			if err := tx.Create(&event).Error; err != nil {
+				return err
 			}
+			updates["recovery_event_id"] = event.ID
 		}
-		return tx.Model(&models.RecoveryRequest{}).Where("id = ? AND client_id = ?", request.ID, request.ClientID).Updates(updates).Error
+		return tx.Model(&current).Updates(updates).Error
 	})
-	_ = s.db.WithContext(ctx).First(request, "id = ? AND client_id = ?", request.ID, request.ClientID).Error
+	if err != nil {
+		return request, fmt.Errorf("%s: persist recovery failure: %w", code, err)
+	}
+	if err := s.db.WithContext(persistCtx).First(request, "id = ? AND client_id = ?", request.ID, request.ClientID).Error; err != nil {
+		return request, fmt.Errorf("%s: reload recovery request: %w", code, err)
+	}
+	if request.Status != requestStatus {
+		return request, nil
+	}
 	return request, fmt.Errorf("%s", code)
 }
 

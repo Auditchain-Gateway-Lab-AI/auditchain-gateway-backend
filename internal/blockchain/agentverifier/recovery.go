@@ -127,6 +127,68 @@ type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+type RecoveryCapability struct {
+	Enabled bool   `json:"enabled"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason"`
+}
+
+// CheckRecoveryCapability uses the tenant's separate write token and makes a
+// read-only request. A successful /readyz or /verify call does not imply that
+// the Agent has enabled and allowlisted the write path.
+func (s *Service) CheckRecoveryCapability(ctx context.Context, clientID, resource string) (*RecoveryCapability, error) {
+	cfg, err := s.loadAgentConfig(clientID)
+	if err != nil || cfg == nil || !cfg.IsActive || strings.TrimSpace(cfg.AgentURL) == "" {
+		return nil, errors.New("agent_not_configured")
+	}
+	if strings.TrimSpace(cfg.RecoveryToken) == "" {
+		return nil, errors.New("agent_recovery_token_missing")
+	}
+	table, _, err := splitResource(resource)
+	if err != nil {
+		return nil, err
+	}
+	return fetchRecoveryCapability(ctx, cfg, table, nil)
+}
+
+func fetchRecoveryCapability(ctx context.Context, cfg *models.AgentConfig, table string, transport httpDoer) (*RecoveryCapability, error) {
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	requestURL := strings.TrimRight(cfg.AgentURL, "/") + "/recover/capabilities?table=" + url.QueryEscape(table)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("agent_recovery_capability_request_invalid: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.RecoveryToken)
+	if transport == nil {
+		transport = &http.Client{Timeout: timeout}
+	}
+	resp, err := transport.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("agent_recovery_unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errors.New("agent_recovery_capability_unavailable")
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("invalid_recovery_token")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("recovery_disabled")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent_recovery_capability_status_%d", resp.StatusCode)
+	}
+	var capability RecoveryCapability
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&capability); err != nil {
+		return nil, fmt.Errorf("agent_recovery_capability_invalid: %w", err)
+	}
+	return &capability, nil
+}
+
 func executeRecoveryRequest(ctx context.Context, cfg *models.AgentConfig, command RecoveryCommand, table, recordID string, transport httpDoer) (*RecoveryResult, error) {
 	if cfg == nil {
 		return nil, errors.New("agent_not_configured")
@@ -136,8 +198,10 @@ func executeRecoveryRequest(ctx context.Context, cfg *models.AgentConfig, comman
 		return nil, fmt.Errorf("agent_recovery_payload_invalid: %w", err)
 	}
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 5 * time.Second
+	if timeout < 30*time.Second {
+		// Source verification defaults to five seconds, but a policy-limited
+		// write plus readback can use the Agent's full command window.
+		timeout = 30 * time.Second
 	}
 	requestURL := fmt.Sprintf("%s/recover/%s/%s", strings.TrimRight(cfg.AgentURL, "/"), url.PathEscape(table), url.PathEscape(recordID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, strings.NewReader(string(body)))

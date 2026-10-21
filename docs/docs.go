@@ -3426,6 +3426,12 @@ const docTemplate = `{
                 "desired_state_hash": {
                     "type": "string"
                 },
+                "execution_blocker": {
+                    "type": "string"
+                },
+                "execution_ready": {
+                    "type": "boolean"
+                },
                 "fabric_root": {
                     "type": "string"
                 },
