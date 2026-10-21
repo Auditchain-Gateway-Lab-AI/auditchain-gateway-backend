@@ -330,3 +330,107 @@ func HashResourceState(clientID, resource string, state map[string]interface{}) 
 	hash, _, err := canonicalstate.HashJSON(clientID, resource, raw)
 	return hash, err
 }
+
+
+// ClientRecoverPayload is the request body sent directly to the agent's POST /recover.
+type ClientRecoverPayload struct {
+	Resource string                 `json:"resource"`
+	Table    string                 `json:"table"`
+	ID       string                 `json:"id"`
+	Data     map[string]interface{} `json:"data"`
+}
+
+// ClientRecoverResponse is the response returned by the agent's POST /recover.
+type ClientRecoverResponse struct {
+	Status           string    `json:"status"`
+	Table            string    `json:"table"`
+	ID               string    `json:"id"`
+	Operation        string    `json:"operation"`
+	RecoveredColumns []string  `json:"recovered_columns"`
+	Timestamp        time.Time `json:"timestamp"`
+	Message          string    `json:"message,omitempty"`
+	Error            string    `json:"error,omitempty"`
+}
+
+// DirectRecoverClientRow connects to the tenant's Agent at POST /recover to restore a row
+// using clean operational data.
+func (s *Service) DirectRecoverClientRow(ctx context.Context, clientID, resource, table, recordID string, cleanData map[string]interface{}) (*ClientRecoverResponse, error) {
+	cfg, err := s.loadAgentConfig(clientID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("agent_not_configured")
+		}
+		return nil, fmt.Errorf("agent_config_load_failed: %w", err)
+	}
+	if !cfg.IsActive || strings.TrimSpace(cfg.AgentURL) == "" {
+		return nil, errors.New("agent_not_configured")
+	}
+
+	payload := ClientRecoverPayload{
+		Resource: resource,
+		Table:    table,
+		ID:       recordID,
+		Data:     cleanData,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal recover payload: %w", err)
+	}
+
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	if timeout < 30*time.Second {
+		timeout = 30 * time.Second
+	}
+
+	requestURL := fmt.Sprintf("%s/recover", strings.TrimRight(cfg.AgentURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("create recover request: %w", err)
+	}
+
+	token := strings.TrimSpace(cfg.RecoveryToken)
+	if token == "" {
+		token = strings.TrimSpace(cfg.VerifyToken)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call agent recover: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read agent recover response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(respBytes, &errResp)
+		msg := errResp.Message
+		if msg == "" {
+			msg = errResp.Error
+		}
+		if msg == "" {
+			msg = string(respBytes)
+		}
+		return nil, fmt.Errorf("agent error (status %d): %s", resp.StatusCode, msg)
+	}
+
+	var recResp ClientRecoverResponse
+	if err := json.Unmarshal(respBytes, &recResp); err != nil {
+		return nil, fmt.Errorf("parse agent recover response: %w", err)
+	}
+
+	return &recResp, nil
+}
