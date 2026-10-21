@@ -31,6 +31,45 @@ func TestFetchRecoveryCapabilityUsesWriteTokenWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestFetchRecoveryCapabilityChecksOperationAndStatePolicy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("table") != "RUANGAN" || query.Get("operation") != "UPSERT" || query.Get("source_found") != "true" {
+			t.Fatalf("unexpected capability query: %s", r.URL.RawQuery)
+		}
+		if strings.Join(query["field"], ",") != "id,nama" || strings.Join(query["changed_field"], ",") != "nama" {
+			t.Fatalf("unexpected state fields: %#v", query)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"enabled":true,"allowed":true,"operation_allowed":true}`))
+	}))
+	defer server.Close()
+
+	allowed := true
+	capability, err := fetchRecoveryCapabilityForOperation(context.Background(), &models.AgentConfig{
+		AgentURL: server.URL, RecoveryToken: "write-token", TimeoutSeconds: 2,
+	}, "RUANGAN", &RecoveryCapabilityInput{
+		Operation: "UPSERT", SourceFound: true,
+		Fields: []string{"id", "nama"}, ChangedFields: []string{"nama"},
+	}, nil)
+	if err != nil || capability == nil || capability.OperationAllowed == nil || *capability.OperationAllowed != allowed {
+		t.Fatalf("operation capability = %#v, err = %v", capability, err)
+	}
+}
+
+func TestFetchRecoveryCapabilityFailsClosedForOlderAgentResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"enabled":true,"allowed":true}`))
+	}))
+	defer server.Close()
+	capability, err := fetchRecoveryCapabilityForOperation(context.Background(), &models.AgentConfig{
+		AgentURL: server.URL, RecoveryToken: "write-token", TimeoutSeconds: 2,
+	}, "RUANGAN", &RecoveryCapabilityInput{Operation: "UPSERT", SourceFound: true, Fields: []string{"id", "nama"}}, nil)
+	if err != nil || capability == nil || capability.OperationAllowed != nil {
+		t.Fatalf("older capability response = %#v, err = %v", capability, err)
+	}
+}
+
 func TestExecuteRecoveryRequestUsesWriteTokenAndContract(t *testing.T) {
 	var seenAuth string
 	var seenPath string

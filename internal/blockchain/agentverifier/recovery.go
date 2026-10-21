@@ -128,15 +128,23 @@ type httpDoer interface {
 }
 
 type RecoveryCapability struct {
-	Enabled bool   `json:"enabled"`
-	Allowed bool   `json:"allowed"`
-	Reason  string `json:"reason"`
+	Enabled          bool   `json:"enabled"`
+	Allowed          bool   `json:"allowed"`
+	OperationAllowed *bool  `json:"operation_allowed,omitempty"`
+	Reason           string `json:"reason"`
+}
+
+type RecoveryCapabilityInput struct {
+	Operation     string
+	SourceFound   bool
+	Fields        []string
+	ChangedFields []string
 }
 
 // CheckRecoveryCapability uses the tenant's separate write token and makes a
 // read-only request. A successful /readyz or /verify call does not imply that
 // the Agent has enabled and allowlisted the write path.
-func (s *Service) CheckRecoveryCapability(ctx context.Context, clientID, resource string) (*RecoveryCapability, error) {
+func (s *Service) CheckRecoveryCapability(ctx context.Context, clientID, resource string, inputs ...RecoveryCapabilityInput) (*RecoveryCapability, error) {
 	cfg, err := s.loadAgentConfig(clientID)
 	if err != nil || cfg == nil || !cfg.IsActive || strings.TrimSpace(cfg.AgentURL) == "" {
 		return nil, errors.New("agent_not_configured")
@@ -148,15 +156,33 @@ func (s *Service) CheckRecoveryCapability(ctx context.Context, clientID, resourc
 	if err != nil {
 		return nil, err
 	}
-	return fetchRecoveryCapability(ctx, cfg, table, nil)
+	if len(inputs) == 0 {
+		return fetchRecoveryCapability(ctx, cfg, table, nil)
+	}
+	return fetchRecoveryCapabilityForOperation(ctx, cfg, table, &inputs[0], nil)
 }
 
 func fetchRecoveryCapability(ctx context.Context, cfg *models.AgentConfig, table string, transport httpDoer) (*RecoveryCapability, error) {
+	return fetchRecoveryCapabilityForOperation(ctx, cfg, table, nil, transport)
+}
+
+func fetchRecoveryCapabilityForOperation(ctx context.Context, cfg *models.AgentConfig, table string, input *RecoveryCapabilityInput, transport httpDoer) (*RecoveryCapability, error) {
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	requestURL := strings.TrimRight(cfg.AgentURL, "/") + "/recover/capabilities?table=" + url.QueryEscape(table)
+	query := url.Values{"table": []string{table}}
+	if input != nil {
+		query.Set("operation", input.Operation)
+		query.Set("source_found", fmt.Sprint(input.SourceFound))
+		for _, field := range input.Fields {
+			query.Add("field", field)
+		}
+		for _, field := range input.ChangedFields {
+			query.Add("changed_field", field)
+		}
+	}
+	requestURL := strings.TrimRight(cfg.AgentURL, "/") + "/recover/capabilities?" + query.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent_recovery_capability_request_invalid: %w", err)

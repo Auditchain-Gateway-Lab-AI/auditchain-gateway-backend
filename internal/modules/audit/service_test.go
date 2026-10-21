@@ -199,7 +199,7 @@ func TestVerificationAssessmentSeparatesProofAndSourceResults(t *testing.T) {
 	}
 }
 
-func TestShouldRecordClientSourceIncidentRequiresNonLegacyProof(t *testing.T) {
+func TestShouldRecordClientSourceIncidentRequiresFullyVerifiedProof(t *testing.T) {
 	tests := []struct {
 		name        string
 		proofStatus string
@@ -208,6 +208,9 @@ func TestShouldRecordClientSourceIncidentRequiresNonLegacyProof(t *testing.T) {
 	}{
 		{name: "complete proof and divergence", proofStatus: "VERIFIED", source: models.SourceStatusMismatch, want: true},
 		{name: "legacy proof does not attribute divergence", proofStatus: "LEGACY_LIMITED", source: models.SourceStatusMismatch, want: false},
+		{name: "failed proof does not create a client incident", proofStatus: "FAILED_MERKLE_PROOF", source: models.SourceStatusMismatch, want: false},
+		{name: "pending proof does not create a client incident", proofStatus: "PENDING", source: models.SourceStatusMissing, want: false},
+		{name: "unavailable Fabric does not create a client incident", proofStatus: "UNAVAILABLE_FABRIC", source: models.SourceStatusMismatch, want: false},
 		{name: "matched source has no incident", proofStatus: "VERIFIED", source: models.SourceStatusMatched, want: false},
 	}
 	for _, tt := range tests {

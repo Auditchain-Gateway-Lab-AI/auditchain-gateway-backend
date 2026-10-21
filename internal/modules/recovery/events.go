@@ -356,6 +356,24 @@ func (s *Service) verifyDirectEvent(ctx context.Context, event *models.RecoveryE
 		}
 		return s.updateEventIntegrity(ctx, event, models.IntegrityStatusTampered, err.Error(), false)
 	}
+	if event.CDCStatus == models.CDCStatusConfirmed {
+		var cdcLog models.AuditLog
+		if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ? AND resource = ?", event.ResultAuditLogID, event.ClientID, event.Resource).First(&cdcLog).Error; err != nil {
+			return s.updateEventIntegrity(ctx, event, models.IntegrityStatusPending, "cdc_result_unavailable", false)
+		}
+		var cdcProofs []models.MerkleProof
+		if err := s.db.WithContext(ctx).Where("transaction_hash = ? AND merkle_root = ?", cdcLog.HashValue, cdcLog.MerkleRoot).Order("tree_level ASC").Find(&cdcProofs).Error; err != nil {
+			return s.updateEventIntegrity(ctx, event, models.IntegrityStatusUnreachable, "cdc_result_proof_unavailable", false)
+		}
+		if err := validateDirectCDCResult(event, &cdcLog, cdcProofs, s.fabric); err != nil {
+			status := models.IntegrityStatusPending
+			code := failureCode(err)
+			if code == "cdc_result_mismatch" || code == "reference_local_hash_mismatch" || code == "reference_merkle_proof_mismatch" || code == "reference_fabric_root_mismatch" {
+				status = models.IntegrityStatusTampered
+			}
+			return s.updateEventIntegrity(ctx, event, status, "cdc_result: "+err.Error(), false)
+		}
+	}
 	result, err := s.updateEventIntegrity(ctx, event, models.IntegrityStatusValid, "", true)
 	if err != nil {
 		return result, err
@@ -384,6 +402,7 @@ func (s *Service) VerifyReadyEvents(ctx context.Context, limit int) error {
 		Where("pipeline_status = ? AND integrity_status IN ?", models.RecoveryPipelineAnchored, []string{
 			models.IntegrityStatusNotChecked,
 			models.IntegrityStatusPending,
+			models.IntegrityStatusUnreachable,
 		}).
 		Where("merkle_root <> '' AND ((snapshot_status = ? AND snapshot_object_key <> '' AND snapshot_version_id <> '') OR (source_snapshot_object_key = '' AND operation <> '' AND cdc_status IN ?))", models.SnapshotStatusVerified, []string{
 			models.CDCStatusConfirmed,

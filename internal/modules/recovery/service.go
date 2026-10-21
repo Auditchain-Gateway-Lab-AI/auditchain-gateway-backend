@@ -474,6 +474,28 @@ func (s *Service) ListVersions(ctx context.Context, clientID, resource string) (
 }
 
 func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID string) ([]CandidateView, error) {
+	var scopeIncident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&scopeIncident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	if err := validateClientRecoveryScope(scopeIncident.IncidentScope); err != nil {
+		if serviceErrorCode(err, "gateway_integrity_read_only") {
+			return []CandidateView{{
+				LogID: scopeIncident.ReferenceLogID, Resource: scopeIncident.Resource,
+				Eligible: false, Reason: "gateway_integrity_read_only",
+			}}, nil
+		}
+		return nil, err
+	}
+	if !s.directRecoveryEnabled() {
+		return []CandidateView{{
+			LogID: scopeIncident.ReferenceLogID, Resource: scopeIncident.Resource,
+			Eligible: false, Reason: "agent_direct_recovery_required",
+		}}, nil
+	}
 	if s.directRecoveryEnabled() {
 		var directIncident models.TamperIncident
 		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&directIncident).Error; err != nil {
@@ -539,6 +561,19 @@ func (s *Service) ListCandidates(ctx context.Context, clientID, incidentID strin
 }
 
 func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*PreflightResult, error) {
+	var scopeIncident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&scopeIncident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	if err := validateClientRecoveryScope(scopeIncident.IncidentScope); err != nil {
+		return nil, err
+	}
+	if !s.directRecoveryEnabled() {
+		return nil, errors.New("agent_direct_recovery_required")
+	}
 	if s.directRecoveryEnabled() {
 		var directIncident models.TamperIncident
 		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", incidentID, clientID).First(&directIncident).Error; err != nil {
@@ -632,6 +667,19 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, input CreateRequestInput) (*models.RecoveryRequest, error) {
 	if strings.TrimSpace(input.Reason) == "" || strings.TrimSpace(input.IdempotencyKey) == "" {
 		return nil, errors.New("invalid_request")
+	}
+	var scopeIncident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", input.IncidentID, clientID).First(&scopeIncident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	if err := validateClientRecoveryScope(scopeIncident.IncidentScope); err != nil {
+		return nil, err
+	}
+	if !s.directRecoveryEnabled() {
+		return nil, errors.New("agent_direct_recovery_required")
 	}
 	var existing models.RecoveryRequest
 	if err := s.db.WithContext(ctx).Where("idempotency_key = ? AND client_id = ?", input.IdempotencyKey, clientID).First(&existing).Error; err == nil {
@@ -800,6 +848,26 @@ func (s *Service) transitionRequest(ctx context.Context, clientID, requestID, ac
 }
 
 func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID string) (*models.RecoveryRequest, error) {
+	var scopeRequest models.RecoveryRequest
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", requestID, clientID).First(&scopeRequest).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("request_not_found")
+		}
+		return nil, err
+	}
+	var scopeIncident models.TamperIncident
+	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", scopeRequest.IncidentID, clientID).First(&scopeIncident).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("incident_not_found")
+		}
+		return nil, err
+	}
+	if err := validateClientRecoveryScope(scopeIncident.IncidentScope); err != nil {
+		return nil, err
+	}
+	if !s.directRecoveryEnabled() {
+		return nil, errors.New("agent_direct_recovery_required")
+	}
 	if s.directRecoveryEnabled() {
 		var directRequest models.RecoveryRequest
 		if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", requestID, clientID).First(&directRequest).Error; err != nil {
@@ -858,6 +926,20 @@ func (s *Service) Execute(ctx context.Context, clientID, requestID, executorID s
 	}
 	_ = s.db.WithContext(ctx).First(&request, "id = ? AND client_id = ?", request.ID, clientID).Error
 	return &request, nil
+}
+
+// validateClientRecoveryScope keeps the Client Portal write workflow limited
+// to operational client rows. Gateway integrity findings remain visible for
+// investigation, but they cannot authorize a write to Gateway audit metadata.
+func validateClientRecoveryScope(scope string) error {
+	switch strings.ToUpper(strings.TrimSpace(scope)) {
+	case models.RecoveryScopeClientSource:
+		return nil
+	case models.RecoveryScopeGatewayIntegrity:
+		return errors.New("gateway_integrity_read_only")
+	default:
+		return errors.New("client_source_incident_required")
+	}
 }
 
 // isClientExecutableStatus accepts the new client-operated state and the two

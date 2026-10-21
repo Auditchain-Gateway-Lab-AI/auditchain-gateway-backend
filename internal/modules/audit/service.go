@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go-blockchain-api/internal/auditreference"
 	"go-blockchain-api/internal/blockchain"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
@@ -1692,7 +1693,10 @@ func sourceStatusFromAgentStatus(status string) string {
 }
 
 func shouldRecordClientSourceIncident(proofStatus, sourceStatus string) bool {
-	return proofStatus != "LEGACY_LIMITED" && isClientSourceIncidentStatus(sourceStatus)
+	// A live row difference is actionable only when its client event is a
+	// fully verified reference. A failed, pending, unavailable, or legacy proof
+	// must not create a client recovery incident from an untrusted baseline.
+	return strings.EqualFold(strings.TrimSpace(proofStatus), "VERIFIED") && isClientSourceIncidentStatus(sourceStatus)
 }
 
 func verificationAssessment(proofStatus, sourceStatus, agentStatus, auditTrailStatus string) string {
@@ -2378,12 +2382,7 @@ func isRecoveryAction(action string) bool {
 // returns the newest client-originated event. Gateway RECOVERY events do not
 // replace the client event used for live source verification.
 func latestClientEventIndex(logs []models.AuditLog) int {
-	for i := len(logs) - 1; i >= 0; i-- {
-		if !isRecoveryAction(logs[i].Action) {
-			return i
-		}
-	}
-	return -1
+	return auditreference.LatestClientEventIndex(logs)
 }
 
 func recoveryRequestIDFromAuthorizationContext(authorizationContext string) string {

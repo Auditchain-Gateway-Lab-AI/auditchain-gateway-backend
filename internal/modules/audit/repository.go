@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"go-blockchain-api/internal/auditreference"
 	"go-blockchain-api/internal/models"
 
 	"gorm.io/gorm"
@@ -128,14 +129,7 @@ func (r *auditRepoImpl) GetLatestLogByResource(resource, clientID string) (*mode
 // GetLatestClientLogByResource ignores internal RECOVERY events because only
 // client-originated events can be compared with the live database via Agent.
 func (r *auditRepoImpl) GetLatestClientLogByResource(resource, clientID string) (*models.AuditLog, error) {
-	var log models.AuditLog
-	err := r.db.Where(
-		"resource = ? AND client_id = ? AND COALESCE(UPPER(TRIM(action)), '') <> ?",
-		resource,
-		clientID,
-		"RECOVERY",
-	).Order("timestamp desc, db_timestamp desc nulls last, log_id desc").First(&log).Error
-	return &log, err
+	return auditreference.LatestClientEvent(r.db, clientID, resource)
 }
 
 func (r *auditRepoImpl) GetClientDBEngine(clientID string) (string, error) {

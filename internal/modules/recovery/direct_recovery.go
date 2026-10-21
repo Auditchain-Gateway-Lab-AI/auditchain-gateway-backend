@@ -1,11 +1,13 @@
 package recovery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go-blockchain-api/internal/auditreference"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/engine/hasher"
 	"go-blockchain-api/internal/models"
@@ -127,13 +130,8 @@ func (s *Service) loadDirectReference(ctx context.Context, clientID, incidentID 
 	if strings.EqualFold(strings.TrimSpace(logRow.Action), "RECOVERY") {
 		return models.TamperIncident{}, models.AuditLog{}, nil, "", errors.New("recovery_reference_must_be_client_event")
 	}
-	var latest models.AuditLog
-	if err := s.db.WithContext(ctx).
-		Where("client_id = ? AND resource = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", clientID, logRow.Resource).
-		Order("COALESCE(db_timestamp, timestamp) DESC, timestamp DESC, log_id DESC").First(&latest).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return models.TamperIncident{}, models.AuditLog{}, nil, "", errors.New("reference_latest_client_event_missing")
-		}
+	latest, err := s.latestDirectClientEvent(ctx, clientID, logRow.Resource)
+	if err != nil {
 		return models.TamperIncident{}, models.AuditLog{}, nil, "", err
 	}
 	if latest.LogID != logRow.LogID {
@@ -148,6 +146,17 @@ func (s *Service) loadDirectReference(ctx context.Context, clientID, incidentID 
 		return models.TamperIncident{}, models.AuditLog{}, nil, "", err
 	}
 	return incident, logRow, reference, operation, nil
+}
+
+func (s *Service) latestDirectClientEvent(ctx context.Context, clientID, resource string) (*models.AuditLog, error) {
+	latest, err := auditreference.LatestClientEvent(s.db.WithContext(ctx), clientID, resource)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("reference_latest_client_event_missing")
+		}
+		return nil, err
+	}
+	return latest, nil
 }
 
 func (s *Service) loadTrustedReference(ctx context.Context, logRow *models.AuditLog) (*TrustedReference, error) {
@@ -246,7 +255,31 @@ func directDesiredState(logRow *models.AuditLog, operation string) (map[string]i
 	if err != nil {
 		return nil, nil, fmt.Errorf("reference_metadata_invalid: %w", err)
 	}
+	if hasRedactedStateValue(object) {
+		return nil, nil, errors.New("reference_payload_redacted")
+	}
 	return object, canonical, nil
+}
+
+func hasRedactedStateValue(value interface{}) bool {
+	switch item := value.(type) {
+	case string:
+		masked := strings.ToUpper(strings.TrimSpace(item))
+		return masked == "[REDACTED]" || masked == redaction.Mask
+	case map[string]interface{}:
+		for _, nested := range item {
+			if hasRedactedStateValue(nested) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, nested := range item {
+			if hasRedactedStateValue(nested) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Service) directSourceMatches(data *directRecoveryData) bool {
@@ -280,7 +313,7 @@ func (s *Service) listDirectVersions(ctx context.Context, clientID, resource str
 	var logs []models.AuditLog
 	if err := s.db.WithContext(ctx).
 		Where("client_id = ? AND resource = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY' AND status = ?", clientID, resource, "ANCHORED").
-		Order("timestamp ASC").Find(&logs).Error; err != nil {
+		Order("timestamp ASC, db_timestamp ASC NULLS FIRST, log_id ASC").Find(&logs).Error; err != nil {
 		return nil, err
 	}
 	versions := make([]VersionView, 0, len(logs))
@@ -304,7 +337,7 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	if data.SourceStatus == models.SourceStatusUnreachable {
 		return nil, errors.New("client_source_unreachable")
 	}
-	executionReady, executionBlocker := s.directRecoveryCapability(ctx, clientID, data.Log.Resource)
+	executionReady, executionBlocker := s.directRecoveryCapability(ctx, clientID, data)
 	recoverable := !s.directSourceMatches(data)
 	status := "VALID"
 	if !recoverable {
@@ -356,21 +389,93 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	}, nil
 }
 
-func (s *Service) directRecoveryCapability(ctx context.Context, clientID, resource string) (bool, string) {
+func (s *Service) directRecoveryCapability(ctx context.Context, clientID string, data *directRecoveryData) (bool, string) {
 	if s.agent == nil {
 		return false, "agent_recovery_client_unavailable"
 	}
-	capability, err := s.agent.CheckRecoveryCapability(ctx, clientID, resource)
+	if data == nil {
+		return false, "agent_recovery_capability_invalid"
+	}
+	fields := make([]string, 0, len(data.Desired))
+	for field := range data.Desired {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	changedFields := directChangedStateFields(data.Client, data.Desired)
+	capabilityInput := agentverifier.RecoveryCapabilityInput{
+		Operation: data.Operation, SourceFound: data.Client != nil && data.Client.Found,
+		Fields: fields, ChangedFields: changedFields,
+	}
+	capability, err := s.agent.CheckRecoveryCapability(ctx, clientID, data.Log.Resource, capabilityInput)
 	if err != nil {
 		return false, failureCode(err)
 	}
 	if !capability.Enabled {
+		if strings.TrimSpace(capability.Reason) != "" {
+			return false, capability.Reason
+		}
 		return false, "recovery_disabled"
 	}
 	if !capability.Allowed {
+		if strings.TrimSpace(capability.Reason) != "" {
+			return false, capability.Reason
+		}
 		return false, "table_not_allowed"
 	}
+	if capability.OperationAllowed == nil {
+		return false, "agent_recovery_capability_unavailable"
+	}
+	if !*capability.OperationAllowed {
+		if strings.TrimSpace(capability.Reason) != "" {
+			return false, capability.Reason
+		}
+		return false, "recovery_operation_not_allowed"
+	}
 	return true, ""
+}
+
+func directChangedStateFields(client *agentverifier.ResourceRecord, desired map[string]interface{}) []string {
+	if len(desired) == 0 {
+		return nil
+	}
+	var current map[string]interface{}
+	if client != nil && client.Found {
+		current = client.Data
+	}
+	changed := make([]string, 0)
+	for field, expected := range desired {
+		var actual interface{}
+		found := false
+		for currentField, value := range current {
+			if strings.EqualFold(strings.TrimSpace(currentField), strings.TrimSpace(field)) {
+				actual = value
+				found = true
+				break
+			}
+		}
+		if !found || !sameCanonicalStateValue(actual, expected) {
+			changed = append(changed, field)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+func sameCanonicalStateValue(left, right interface{}) bool {
+	leftRaw, err := json.Marshal(left)
+	if err != nil {
+		return false
+	}
+	rightRaw, err := json.Marshal(right)
+	if err != nil {
+		return false
+	}
+	leftCanonical, err := canonicalstate.CanonicalizeJSON(leftRaw)
+	if err != nil {
+		return false
+	}
+	rightCanonical, err := canonicalstate.CanonicalizeJSON(rightRaw)
+	return err == nil && bytes.Equal(leftCanonical, rightCanonical)
 }
 
 func (s *Service) createDirectRequest(ctx context.Context, clientID, userID string, input CreateRequestInput) (*models.RecoveryRequest, error) {
@@ -378,7 +483,7 @@ func (s *Service) createDirectRequest(ctx context.Context, clientID, userID stri
 	if err != nil {
 		return nil, err
 	}
-	if ready, blocker := s.directRecoveryCapability(ctx, clientID, data.Log.Resource); !ready {
+	if ready, blocker := s.directRecoveryCapability(ctx, clientID, data); !ready {
 		return nil, errors.New(blocker)
 	}
 	var active models.RecoveryRequest
@@ -444,9 +549,10 @@ func (s *Service) executeDirect(ctx context.Context, clientID, requestID, execut
 		if request.Status != models.RecoveryStatusPendingExecution {
 			return errors.New("invalid_request_state")
 		}
+		startedAt := time.Now().UTC()
 		return tx.Model(&request).Updates(map[string]interface{}{
 			"status": models.RecoveryStatusExecuting, "executed_by": executorID,
-			"execution_started_at": time.Now().UTC(),
+			"execution_started_at": startedAt,
 		}).Error
 	}); err != nil {
 		return nil, err
@@ -465,11 +571,30 @@ func (s *Service) executeDirect(ctx context.Context, clientID, requestID, execut
 	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", request.TargetLogID, clientID).First(&logRow).Error; err != nil {
 		return s.failDirectRequest(ctx, &request, executorID, err)
 	}
+	latest, err := s.latestDirectClientEvent(ctx, clientID, request.Resource)
+	if err != nil {
+		return s.failDirectRequest(ctx, &request, executorID, err)
+	}
+	if latest.LogID != logRow.LogID {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New("reference_not_latest_client_event"))
+	}
 	reference, err := s.loadTrustedReference(ctx, &logRow)
 	if err != nil {
 		return s.failDirectRequest(ctx, &request, executorID, err)
 	}
 	if request.ReferenceLogHash != reference.LeafHash || request.ReferenceMerkleRoot != reference.MerkleRoot || request.ReferenceAnchorID != reference.AnchorID {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New("reference_changed"))
+	}
+	operation, err := directOperation(logRow.Action)
+	if err != nil || operation != request.Operation {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New("reference_changed"))
+	}
+	referenceState, _, err := directDesiredState(&logRow, operation)
+	if err != nil {
+		return s.failDirectRequest(ctx, &request, executorID, err)
+	}
+	referenceStateHash, err := agentverifier.HashResourceState(clientID, request.Resource, referenceState)
+	if err != nil || referenceStateHash != request.DesiredStateHash {
 		return s.failDirectRequest(ctx, &request, executorID, errors.New("reference_changed"))
 	}
 	desired, desiredRaw, err := parseStoredDesiredState(request.DesiredState, request.Operation)
@@ -480,12 +605,16 @@ func (s *Service) executeDirect(ctx context.Context, clientID, requestID, execut
 	if err != nil || desiredHash != request.DesiredStateHash {
 		return s.failDirectRequest(ctx, &request, executorID, errors.New("desired_state_hash_mismatch"))
 	}
-	_, clientHash, sourceStatus, err := s.readDirectClient(ctx, clientID, request.Resource)
+	clientRecord, clientHash, sourceStatus, err := s.readDirectClient(ctx, clientID, request.Resource)
 	if err != nil {
 		return s.failDirectRequest(ctx, &request, executorID, err)
 	}
 	if clientHash != request.ClientBeforeHash {
 		return s.failDirectRequest(ctx, &request, executorID, errors.New("source_state_changed"))
+	}
+	capabilityData := &directRecoveryData{Log: logRow, Operation: operation, Desired: desired, Client: clientRecord}
+	if ready, blocker := s.directRecoveryCapability(ctx, clientID, capabilityData); !ready {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New(blocker))
 	}
 	command := agentverifier.RecoveryCommand{
 		ClientID: clientID, RequestID: request.ID, IdempotencyKey: request.AgentCommandID,
@@ -574,13 +703,14 @@ func (s *Service) reconcileDirectRequest(ctx context.Context, request *models.Re
 	if err := s.db.WithContext(ctx).Where("log_id = ? AND client_id = ?", request.TargetLogID, request.ClientID).First(&target).Error; err != nil {
 		return err
 	}
-	if request.AgentAppliedAt == nil {
+	windowStart := directCDCWindowStart(request)
+	if windowStart == nil {
 		return errors.New("cdc_start_time_missing")
 	}
 	var candidate models.AuditLog
 	query := s.db.WithContext(ctx).
 		Where("client_id = ? AND resource = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", request.ClientID, request.Resource).
-		Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", request.AgentAppliedAt)
+		Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", windowStart)
 	// The upper bound prevents a delayed reconciliation run from claiming a
 	// later, unrelated client mutation as proof of this recovery. If the
 	// deadline has passed, include events through the deadline before marking
@@ -597,14 +727,16 @@ func (s *Service) reconcileDirectRequest(ctx context.Context, request *models.Re
 		query = query.Where("UPPER(TRIM(action)) IN ?", []string{"INSERT", "UPDATE"})
 	}
 	var logs []models.AuditLog
-	if err := query.Order("db_timestamp ASC").Limit(20).Find(&logs).Error; err != nil {
+	if err := query.Order("db_timestamp ASC").Find(&logs).Error; err != nil {
 		return err
 	}
-	for i := range logs {
-		if directCDCMatches(request, &logs[i]) {
-			candidate = logs[i]
-			break
-		}
+	var ambiguous bool
+	candidatePtr, ambiguous := selectDirectCDCMatch(request, logs)
+	if ambiguous {
+		return s.markDirectCDCConflict(ctx, request, now)
+	}
+	if candidatePtr != nil {
+		candidate = *candidatePtr
 	}
 	if candidate.LogID == "" {
 		if request.CDCDeadlineAt != nil && now.After(request.CDCDeadlineAt.UTC()) {
@@ -613,6 +745,35 @@ func (s *Service) reconcileDirectRequest(ctx context.Context, request *models.Re
 		return nil
 	}
 	return s.markDirectCDCConfirmed(ctx, request, &candidate)
+}
+
+func directCDCWindowStart(request *models.RecoveryRequest) *time.Time {
+	if request == nil {
+		return nil
+	}
+	if request.ExecutionStartedAt != nil {
+		startedAt := request.ExecutionStartedAt.UTC()
+		return &startedAt
+	}
+	if request.AgentAppliedAt != nil {
+		appliedAt := request.AgentAppliedAt.UTC()
+		return &appliedAt
+	}
+	return nil
+}
+
+func selectDirectCDCMatch(request *models.RecoveryRequest, logs []models.AuditLog) (*models.AuditLog, bool) {
+	var matched *models.AuditLog
+	for index := range logs {
+		if !directCDCMatches(request, &logs[index]) {
+			continue
+		}
+		if matched != nil {
+			return nil, true
+		}
+		matched = &logs[index]
+	}
+	return matched, false
 }
 
 func directCDCMatches(request *models.RecoveryRequest, logRow *models.AuditLog) bool {
@@ -631,6 +792,24 @@ func directCDCMatches(request *models.RecoveryRequest, logRow *models.AuditLog) 
 	}
 	hash, err := agentverifier.HashResourceState(request.ClientID, request.Resource, object)
 	return err == nil && hash == request.DesiredStateHash
+}
+
+// Correlation alone does not prove the resulting client event. Finalization
+// also requires its payload, Merkle proof and Fabric anchor to be trustworthy.
+func validateDirectCDCResult(event *models.RecoveryEvent, row *models.AuditLog, proofs []models.MerkleProof, fabric FabricReader) error {
+	if event == nil || row == nil || row.LogID == "" || row.LogID != event.ResultAuditLogID || row.LogID == event.TargetLogID || row.ClientID != event.ClientID || row.Resource != event.Resource {
+		return errors.New("cdc_result_mismatch")
+	}
+	action := strings.ToUpper(strings.TrimSpace(row.Action))
+	if (event.Operation == models.RecoveryOperationUpsert && action != "INSERT" && action != "UPDATE") || (event.Operation == models.RecoveryOperationDelete && action != "DELETE") || (event.Operation != models.RecoveryOperationUpsert && event.Operation != models.RecoveryOperationDelete) {
+		return errors.New("cdc_result_mismatch")
+	}
+	request := &models.RecoveryRequest{ClientID: event.ClientID, Resource: event.Resource, Operation: event.Operation, DesiredStateHash: event.ClientAfterHash}
+	if !directCDCMatches(request, row) {
+		return errors.New("cdc_result_mismatch")
+	}
+	_, err := ValidateTrustedReference(row, proofs, fabric)
+	return err
 }
 
 func (s *Service) markDirectCDCConfirmed(ctx context.Context, request *models.RecoveryRequest, candidate *models.AuditLog) error {
@@ -735,6 +914,43 @@ func (s *Service) markDirectCDCTimeout(ctx context.Context, request *models.Reco
 		return tx.Model(&current).Updates(map[string]interface{}{
 			"status": models.RecoveryStatusAppliedCDCTimeout, "cdc_status": models.CDCStatusTimeout,
 			"failure_reason": event.FailureReason,
+		}).Error
+	})
+}
+
+func (s *Service) markDirectCDCConflict(ctx context.Context, request *models.RecoveryRequest, now time.Time) error {
+	const failureCode = "cdc_event_ambiguous"
+	const failureReason = "multiple client CDC events match the recovery result; manual review is required"
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current models.RecoveryRequest
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ? AND cdc_status = ?", request.ID, models.RecoveryStatusAppliedAwaitingCDC, models.CDCStatusPending).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if current.RecoveryEventID == nil || strings.TrimSpace(*current.RecoveryEventID) == "" {
+			return errors.New("recovery_event_missing")
+		}
+		var event models.RecoveryEvent
+		if err := tx.Where("id = ? AND request_id = ?", *current.RecoveryEventID, current.ID).First(&event).Error; err != nil {
+			return err
+		}
+		event.ResultStatus = models.RecoveryResultVerification
+		event.CDCStatus = models.CDCStatusConflict
+		event.FailureCode = failureCode
+		event.FailureReason = failureReason
+		event.EventHash = hasher.GenerateRecoveryEventHash(&event)
+		if err := tx.Model(&event).Updates(map[string]interface{}{
+			"result_status": event.ResultStatus, "cdc_status": event.CDCStatus,
+			"failure_code": event.FailureCode, "failure_reason": event.FailureReason,
+			"event_hash": event.EventHash,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&current).Updates(map[string]interface{}{
+			"status": models.RecoveryStatusFailedVerification, "cdc_status": models.CDCStatusConflict,
+			"failure_reason": failureReason, "executed_at": now,
 		}).Error
 	})
 }
@@ -880,6 +1096,19 @@ func directFailureStatuses(code string) (requestStatus, eventStatus string) {
 		code == "desired_state_hash_mismatch" ||
 		code == "client_state_hash_failed" ||
 		code == "recovery_operation_unsupported" ||
+		code == "recovery_operation_not_allowed" ||
+		code == "operation_not_allowed" ||
+		code == "payload_incomplete" ||
+		code == "payload_invalid" ||
+		code == "column_not_allowed" ||
+		code == "column_not_updateable" ||
+		code == "column_not_insertable" ||
+		code == "table_not_allowed" ||
+		code == "recovery_disabled" ||
+		code == "agent_not_configured" ||
+		code == "agent_recovery_token_missing" ||
+		code == "agent_recovery_capability_unavailable" ||
+		code == "agent_recovery_capability_invalid" ||
 		code == "request_execution_state_changed" ||
 		strings.HasPrefix(code, "reference_") ||
 		strings.HasPrefix(code, "fabric_")
