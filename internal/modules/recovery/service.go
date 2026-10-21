@@ -114,6 +114,8 @@ type SnapshotPreview struct {
 type PreflightResult struct {
 	Status                  string           `json:"status"`
 	Recoverable             bool             `json:"recoverable"`
+	ExecutionReady          *bool            `json:"execution_ready,omitempty"`
+	ExecutionBlocker        string           `json:"execution_blocker,omitempty"`
 	LogID                   string           `json:"log_id"`
 	RecoverySource          string           `json:"recovery_source,omitempty"`
 	CurrentHash             string           `json:"current_hash"`

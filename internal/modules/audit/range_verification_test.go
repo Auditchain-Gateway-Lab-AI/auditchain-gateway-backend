@@ -106,11 +106,22 @@ func TestAddRangeSummaryKeepsInconclusiveSeparateFromInvalid(t *testing.T) {
 	}
 }
 
-func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
+func TestRangeResultStatusCountsVerifiedSourceTamperAsInvalid(t *testing.T) {
+	result := &VerificationResult{Status: "success", ProofStatus: "VERIFIED", SourceStatus: models.SourceStatusMismatch}
+	if got := rangeResultStatus(result); got != "failed_source" {
+		t.Fatalf("verified source mismatch = %q, want failed_source", got)
+	}
+	result.ProofStatus = "LEGACY_LIMITED"
+	if got := rangeResultStatus(result); got != "inconclusive" {
+		t.Fatalf("legacy proof mismatch = %q, want inconclusive", got)
+	}
+}
+
+func TestScheduledVerifyRangeBatchRechecksCachedRows(t *testing.T) {
 	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
 	repo := &rangeRepositoryStub{logs: []models.AuditLog{
 		{LogID: "log-1", ClientID: "client-1", IntegrityStatus: models.IntegrityStatusValid, IntegrityCheckedAt: &checkedAt},
-		{LogID: "log-2", ClientID: "client-1", IntegrityStatus: models.IntegrityStatusPending, IntegrityCheckedAt: &checkedAt},
+		{LogID: "log-2", ClientID: "client-1", Action: "INSERT", Resource: "RUANGAN:1019", Metadata: `{"ID":1019,"NAMA":"tampered"}`, HashValue: "original-hash", IntegrityStatus: models.IntegrityStatusValid, IntegrityCheckedAt: &checkedAt},
 	}}
 
 	service := &auditService{repo: repo}
@@ -121,7 +132,7 @@ func TestVerifyRangeBatchUsesBoundedPageAndCachedSummary(t *testing.T) {
 	if loaded != 1 {
 		t.Fatalf("loaded = %d, want 1", loaded)
 	}
-	if summary.Total != 1 || summary.Pending != 1 || summary.AlreadyVerified != 1 || summary.VerifiedNow != 0 {
+	if summary.Total != 1 || summary.Invalid != 1 || summary.AlreadyVerified != 0 || summary.VerifiedNow != 1 {
 		t.Fatalf("unexpected batch summary: %+v", summary)
 	}
 }
