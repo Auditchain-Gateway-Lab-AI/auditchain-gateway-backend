@@ -207,6 +207,7 @@ func TestShouldRecordClientSourceIncidentRequiresFullyVerifiedProof(t *testing.T
 		want        bool
 	}{
 		{name: "complete proof and divergence", proofStatus: "VERIFIED", source: models.SourceStatusMismatch, want: true},
+		{name: "resource proof spelling and divergence", proofStatus: "VERIFIED_MERKLE_PROOF", source: models.SourceStatusMismatch, want: true},
 		{name: "legacy proof does not attribute divergence", proofStatus: "LEGACY_LIMITED", source: models.SourceStatusMismatch, want: false},
 		{name: "failed proof does not create a client incident", proofStatus: "FAILED_MERKLE_PROOF", source: models.SourceStatusMismatch, want: false},
 		{name: "pending proof does not create a client incident", proofStatus: "PENDING", source: models.SourceStatusMissing, want: false},

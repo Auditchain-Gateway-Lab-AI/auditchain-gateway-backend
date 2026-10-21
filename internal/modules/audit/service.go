@@ -1589,7 +1589,7 @@ func (s *auditService) classifyIntegrityDetailed(auditLog models.AuditLog) (stri
 		return "tampered", "FAILED_MERKLE_PROOF"
 	}
 
-	return "valid", "VERIFIED_MERKLE_PROOF"
+	return "valid", "VERIFIED"
 }
 
 // recordTamperIncident membuat satu incident aktif per log dan jenis deteksi.
@@ -1696,7 +1696,12 @@ func shouldRecordClientSourceIncident(proofStatus, sourceStatus string) bool {
 	// A live row difference is actionable only when its client event is a
 	// fully verified reference. A failed, pending, unavailable, or legacy proof
 	// must not create a client recovery incident from an untrusted baseline.
-	return strings.EqualFold(strings.TrimSpace(proofStatus), "VERIFIED") && isClientSourceIncidentStatus(sourceStatus)
+	switch strings.ToUpper(strings.TrimSpace(proofStatus)) {
+	case "VERIFIED", "VERIFIED_MERKLE_PROOF":
+		return isClientSourceIncidentStatus(sourceStatus)
+	default:
+		return false
+	}
 }
 
 func verificationAssessment(proofStatus, sourceStatus, agentStatus, auditTrailStatus string) string {
