@@ -1,4 +1,25 @@
 definitions:
+  agentverifier.ClientRecoverResponse:
+    properties:
+      error:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+      operation:
+        type: string
+      recovered_columns:
+        items:
+          type: string
+        type: array
+      status:
+        type: string
+      table:
+        type: string
+      timestamp:
+        type: string
+    type: object
   agentverifier.Discrepancy:
     properties:
       field:
@@ -15,6 +36,43 @@ definitions:
       summary:
         $ref: '#/definitions/audit.RangeSummary'
     type: object
+  audit.ClientTamperListResponse:
+    properties:
+      page:
+        type: integer
+      page_size:
+        type: integer
+      records:
+        items:
+          $ref: '#/definitions/models.ClientDataTamperRecord'
+        type: array
+      summary:
+        $ref: '#/definitions/audit.ClientTamperSummaryCounts'
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  audit.ClientTamperRecoverResponse:
+    properties:
+      message:
+        type: string
+      record:
+        $ref: '#/definitions/models.ClientDataTamperRecord'
+      result:
+        $ref: '#/definitions/agentverifier.ClientRecoverResponse'
+    type: object
+  audit.ClientTamperSummaryCounts:
+    properties:
+      dismissed_count:
+        type: integer
+      open_count:
+        type: integer
+      recovered_count:
+        type: integer
+      total_count:
+        type: integer
+    type: object
   audit.CreateVerificationRunRequest:
     properties:
       batch_size:
@@ -29,6 +87,11 @@ definitions:
     required:
     - from
     - to
+    type: object
+  audit.DismissClientTamperInput:
+    properties:
+      notes:
+        type: string
     type: object
   audit.ErrorResponse:
     properties:
@@ -792,6 +855,54 @@ definitions:
       update_actor_field:
         type: string
       updated_at:
+        type: string
+    type: object
+  models.ClientDataTamperRecord:
+    properties:
+      action:
+        type: string
+      actual_hash:
+        description: current client database canonical hash
+        type: string
+      auto_recovered:
+        type: boolean
+      blockchain_tx_id:
+        type: string
+      client_id:
+        type: string
+      detected_at:
+        type: string
+      discrepancies:
+        description: JSON array of column diffs
+        type: string
+      expected_hash:
+        description: latest offchain log hash_value
+        type: string
+      id:
+        type: string
+      last_confirmed_at:
+        type: string
+      log_id:
+        type: string
+      record_id:
+        type: string
+      recovery_error:
+        type: string
+      resolution_notes:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+      resource:
+        description: e.g. "SATUPETA_POLYGON:1001"
+        type: string
+      run_id:
+        type: string
+      status:
+        description: OPEN | RECOVERED | DISMISSED
+        type: string
+      table_name:
         type: string
     type: object
   models.ClientKafkaConfig:
@@ -1646,6 +1757,198 @@ paths:
       summary: Run Agent integrity audit
       tags:
       - Dashboard
+  /dashboard/client-tampering:
+    get:
+      description: Mengambil daftar anomali/perbedaan antara hash data aktual database
+        klien vs hash log terbaru offchain.
+      parameters:
+      - description: Filter status (OPEN, RECOVERED, DISMISSED, ALL)
+        in: query
+        name: status
+        type: string
+      - description: Filter nama tabel
+        in: query
+        name: table_name
+        type: string
+      - description: Filter nama resource (TABLE:ID)
+        in: query
+        name: resource
+        type: string
+      - description: Pencarian kata kunci
+        in: query
+        name: search
+        type: string
+      - description: Nomor halaman (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Ukuran halaman (default 10)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/audit.ClientTamperListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Daftar Insiden Tampered Client Data
+      tags:
+      - Client Tampering
+  /dashboard/client-tampering/{id}:
+    get:
+      description: Mengambil detail spesifik satu insiden manipulasi data klien beserta
+        ringkasan diskrepansi per kolom.
+      parameters:
+      - description: ID Rekaman Tamper
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ClientDataTamperRecord'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Detail Insiden Tampered Client Data
+      tags:
+      - Client Tampering
+  /dashboard/client-tampering/{id}/dismiss:
+    post:
+      consumes:
+      - application/json
+      description: Menandai insiden tamper sebagai diabaikan/dismissed dengan catatan
+        penjelasan.
+      parameters:
+      - description: ID Rekaman Tamper
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Catatan alasan pengabaian
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/audit.DismissClientTamperInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ClientDataTamperRecord'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Abaikan (Dismiss) Insiden Tampered Data Klien
+      tags:
+      - Client Tampering
+  /dashboard/client-tampering/{id}/recover:
+    post:
+      description: Mengirimkan instruksi pemulihan ke Agent klien menggunakan nilai
+        metadata bersih dari log offchain terverifikasi.
+      parameters:
+      - description: ID Rekaman Tamper
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/audit.ClientTamperRecoverResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Pemulihan (Recovery) Data Klien yang Tampered
+      tags:
+      - Client Tampering
   /dashboard/inventory:
     get:
       description: Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.
