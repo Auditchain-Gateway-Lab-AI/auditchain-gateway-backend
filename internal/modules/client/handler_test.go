@@ -67,3 +67,41 @@ func TestGetClientStatsRejectsUnsupportedTrendRange(t *testing.T) {
 		t.Fatalf("error = %q, want unsupported trend range message", body["error"])
 	}
 }
+
+func TestGetIntegrityHistoryRejectsUnsupportedRangeAndDimension(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{name: "range", url: "/dashboard/integrity-history?range=90D&dimension=proof"},
+		{name: "dimension", url: "/dashboard/integrity-history?range=8H&dimension=all"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, test.url, nil)
+			ctx.Set("client_id", "tenant-1")
+
+			(&Handler{}).GetIntegrityHistory(ctx)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestIntegrityHistoryRequiresAuthenticatedTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/dashboard/integrity-history?range=8H", nil)
+
+	(&Handler{}).GetIntegrityHistory(ctx)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+}

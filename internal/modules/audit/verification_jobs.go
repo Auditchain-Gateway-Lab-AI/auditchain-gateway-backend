@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/workerstatus"
 )
 
 const (
@@ -55,7 +56,13 @@ type VerificationJobService struct {
 	audit     Service
 	batchSize int
 	wake      chan struct{}
+	ownerID   string
 }
+
+var (
+	ErrActiveVerificationRun      = errors.New("client sudah memiliki verification run aktif")
+	ErrManualVerificationCooldown = errors.New("pemeriksaan manual tersedia kembali setelah 60 detik")
+)
 
 func NewVerificationJobService(db *gorm.DB, audit Service) *VerificationJobService {
 	batchSize := configuredVerificationBatchSize()
@@ -64,6 +71,7 @@ func NewVerificationJobService(db *gorm.DB, audit Service) *VerificationJobServi
 		audit:     audit,
 		batchSize: batchSize,
 		wake:      make(chan struct{}, 1),
+		ownerID:   uuid.NewString(),
 	}
 }
 
@@ -96,9 +104,26 @@ func (s *VerificationJobService) Run(ctx context.Context) {
 		return
 	}
 
-	if err := s.requeueInterruptedRuns(); err != nil {
-		log.Printf("[VerificationJob] gagal me-requeue run yang terputus: %v", err)
-	}
+	started := time.Now().UTC()
+	workerstatus.Save(s.db, "RANGE_WORKER", true, &started, nil, nil, nil, "all active clients", "")
+	defer workerstatus.Save(s.db, "RANGE_WORKER", false, &started, nil, nil, nil, "all active clients", "")
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				queued, _ := s.queuedRunCount()
+				workerstatus.Save(s.db, "RANGE_WORKER", true, &started, nil, nil, workerstatus.Count(queued), "all active clients", "")
+			}
+		}
+	}()
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -110,9 +135,13 @@ func (s *VerificationJobService) Run(ctx context.Context) {
 			log.Println("[VerificationJob] worker berhenti")
 			return
 		case <-ticker.C:
-			s.processNext(ctx)
+			err := s.processNext(ctx)
+			queued, _ := s.queuedRunCount()
+			workerstatus.Save(s.db, "RANGE_WORKER", true, &started, nil, nil, workerstatus.Count(queued), "all active clients", errorMessage(err))
 		case <-s.wake:
-			s.processNext(ctx)
+			err := s.processNext(ctx)
+			queued, _ := s.queuedRunCount()
+			workerstatus.Save(s.db, "RANGE_WORKER", true, &started, nil, nil, workerstatus.Count(queued), "all active clients", errorMessage(err))
 		}
 	}
 }
@@ -131,59 +160,61 @@ func (s *VerificationJobService) Enqueue(from, to time.Time, clientID, requested
 		batchSize = maxVerificationBatchSize
 	}
 
-	var active models.VerificationRun
-	err := s.db.Where(
-		"client_id = ? AND from_time = ? AND to_time = ? AND status IN ?",
-		clientID,
-		from,
-		to,
-		[]string{models.VerificationRunQueued, models.VerificationRunRunning},
-	).Order("created_at DESC").First(&active).Error
-	if err == nil {
-		signal := s.wake
-		select {
-		case signal <- struct{}{}:
-		default:
+	var run *models.VerificationRun
+	created := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", clientID).Error; err != nil {
+			return err
 		}
-		return &active, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	totalItems, err := s.audit.EstimateLogRange(from, to, clientID)
+		var active models.VerificationRun
+		lookupErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("client_id = ? AND status IN ?", clientID, []string{models.VerificationRunQueued, models.VerificationRunRunning}).
+			Order("created_at DESC").First(&active).Error
+		if lookupErr == nil {
+			if active.FromTime.Equal(from) && active.ToTime.Equal(to) {
+				run = &active
+				return nil
+			}
+			return ErrActiveVerificationRun
+		}
+		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return lookupErr
+		}
+		if !strings.EqualFold(strings.TrimSpace(requestedBy), "system:scheduler") {
+			var latestManual models.VerificationRun
+			cooldownErr := tx.Where("client_id = ? AND requested_by <> ?", clientID, "system:scheduler").
+				Order("created_at DESC").First(&latestManual).Error
+			if cooldownErr == nil && time.Since(latestManual.CreatedAt) < 60*time.Second {
+				return ErrManualVerificationCooldown
+			}
+			if cooldownErr != nil && !errors.Is(cooldownErr, gorm.ErrRecordNotFound) {
+				return cooldownErr
+			}
+		}
+		totalItems, estimateErr := s.audit.EstimateLogRange(from, to, clientID)
+		if estimateErr != nil {
+			return estimateErr
+		}
+		run = &models.VerificationRun{
+			ID: uuid.NewString(), ClientID: clientID, RequestedBy: requestedBy,
+			FromTime: from, ToTime: to, Status: models.VerificationRunQueued,
+			BatchSize: batchSize, TotalItems: totalItems,
+		}
+		if err := tx.Create(run).Error; err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	run := &models.VerificationRun{
-		ID:          uuid.NewString(),
-		ClientID:    clientID,
-		RequestedBy: requestedBy,
-		FromTime:    from,
-		ToTime:      to,
-		Status:      models.VerificationRunQueued,
-		BatchSize:   batchSize,
-		TotalItems:  totalItems,
-	}
-	if err := s.db.Create(run).Error; err != nil {
-		// A concurrent enqueue can win the partial unique active-range index.
-		// Return that existing run instead of exposing a duplicate-job failure.
-		if lookupErr := s.db.Where(
-			"client_id = ? AND from_time = ? AND to_time = ? AND status IN ?",
-			clientID,
-			from,
-			to,
-			[]string{models.VerificationRunQueued, models.VerificationRunRunning},
-		).Order("created_at DESC").First(&active).Error; lookupErr == nil {
-			return &active, nil
+	if created || run.Status == models.VerificationRunQueued {
+		select {
+		case s.wake <- struct{}{}:
+		default:
 		}
-		return nil, err
-	}
-
-	select {
-	case s.wake <- struct{}{}:
-	default:
 	}
 	return run, nil
 }
@@ -238,26 +269,36 @@ func ToVerificationRunResponse(run *models.VerificationRun) VerificationRunRespo
 	}
 }
 
-func (s *VerificationJobService) processNext(ctx context.Context) {
+func (s *VerificationJobService) processNext(ctx context.Context) error {
 	run, claimed, err := s.claimNextRun()
 	if err != nil {
 		log.Printf("[VerificationJob] gagal mengambil queued run: %v", err)
-		return
+		return err
 	}
 	if !claimed {
-		return
+		return nil
 	}
 	if err := s.processRun(ctx, run); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("[VerificationJob] run %s gagal: %v", run.ID, err)
-		_ = s.markFailed(run.ID, err)
+		_ = s.markFailed(run.ID, s.ownerID, err)
+		return err
 	}
+	return nil
+}
+
+func errorMessage(err error) string {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return ""
+	}
+	return err.Error()
 }
 
 func (s *VerificationJobService) claimNextRun() (*models.VerificationRun, bool, error) {
 	var run models.VerificationRun
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ?", models.VerificationRunQueued).
+			Where("status = ? OR (status = ? AND (lease_expires_at <= ? OR (lease_expires_at IS NULL AND started_at <= ?)))", models.VerificationRunQueued, models.VerificationRunRunning, now, now.Add(-15*time.Minute)).
 			Order("created_at ASC").
 			First(&run).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -267,12 +308,22 @@ func (s *VerificationJobService) claimNextRun() (*models.VerificationRun, bool, 
 			return err
 		}
 
-		now := time.Now().UTC()
-		return tx.Model(&run).Updates(map[string]interface{}{
-			"status":        models.VerificationRunRunning,
-			"started_at":    now,
-			"error_message": "",
-		}).Error
+		updates := map[string]interface{}{
+			"status":           models.VerificationRunRunning,
+			"started_at":       now,
+			"error_message":    "",
+			"lease_owner":      s.ownerID,
+			"lease_expires_at": now.Add(5 * time.Minute),
+		}
+		if run.Status == models.VerificationRunRunning {
+			updates["processed_items"] = 0
+			updates["total_valid"] = 0
+			updates["total_invalid"] = 0
+			updates["total_pending"] = 0
+			updates["already_verified"] = 0
+			updates["verified_now"] = 0
+		}
+		return tx.Model(&run).Updates(updates).Error
 	})
 	if err != nil {
 		return nil, false, err
@@ -285,13 +336,51 @@ func (s *VerificationJobService) processRun(ctx context.Context, run *models.Ver
 		return errors.New("verification run kosong")
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	leaseErrors := make(chan error, 1)
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				if err := s.renewLease(run.ID); err != nil {
+					select {
+					case leaseErrors <- err:
+					default:
+					}
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-heartbeatDone
+	}()
+
 	offset := 0
+	attemptID := uuid.NewString()
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
+		if err := runCtx.Err(); err != nil {
+			select {
+			case leaseErr := <-leaseErrors:
+				return leaseErr
+			default:
+				return err
+			}
 		}
 
-		requestID := "verification-run-" + run.ID
+		if err := s.renewLease(run.ID); err != nil {
+			return err
+		}
+		requestID := "verification-run-" + run.ID + "-" + attemptID
 		integritySource := integritySourceForVerificationRun(run.RequestedBy)
 		summary, loaded, err := s.audit.VerifyRangeBatch(
 			run.FromTime,
@@ -306,11 +395,19 @@ func (s *VerificationJobService) processRun(ctx context.Context, run *models.Ver
 		if err != nil {
 			return err
 		}
+		if err := runCtx.Err(); err != nil {
+			select {
+			case leaseErr := <-leaseErrors:
+				return leaseErr
+			default:
+				return err
+			}
+		}
 		if loaded == 0 {
 			break
 		}
 
-		if err := s.updateProgress(run.ID, loaded, summary); err != nil {
+		if err := s.updateProgress(run.ID, s.ownerID, loaded, summary); err != nil {
 			return err
 		}
 		offset += loaded
@@ -320,48 +417,73 @@ func (s *VerificationJobService) processRun(ctx context.Context, run *models.Ver
 	}
 
 	now := time.Now().UTC()
-	return s.db.Model(&models.VerificationRun{}).
-		Where("id = ?", run.ID).
+	result := s.db.Model(&models.VerificationRun{}).
+		Where("id = ? AND lease_owner = ? AND status = ?", run.ID, s.ownerID, models.VerificationRunRunning).
 		Updates(map[string]interface{}{
-			"status":          models.VerificationRunCompleted,
-			"processed_items": gorm.Expr("GREATEST(processed_items, total_items)"),
-			"completed_at":    now,
-		}).Error
+			"status":           models.VerificationRunCompleted,
+			"processed_items":  gorm.Expr("GREATEST(processed_items, total_items)"),
+			"completed_at":     now,
+			"lease_owner":      "",
+			"lease_expires_at": nil,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("completion ditolak karena lease verification run sudah berubah")
+	}
+	queued, _ := s.queuedRunCount()
+	workerstatus.Save(s.db, "RANGE_WORKER", true, nil, workerstatus.Time(now), workerstatus.Count(run.TotalItems), workerstatus.Count(queued), "all active clients", "")
+	return nil
 }
 
-func (s *VerificationJobService) updateProgress(id string, loaded int, summary RangeSummary) error {
-	return s.db.Model(&models.VerificationRun{}).Where("id = ?", id).Updates(map[string]interface{}{
+func (s *VerificationJobService) renewLease(id string) error {
+	result := s.db.Model(&models.VerificationRun{}).
+		Where("id = ? AND status = ? AND lease_owner = ?", id, models.VerificationRunRunning, s.ownerID).
+		Update("lease_expires_at", time.Now().UTC().Add(5*time.Minute))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("verification lease sudah tidak dimiliki worker ini")
+	}
+	return nil
+}
+
+func (s *VerificationJobService) updateProgress(id, ownerID string, loaded int, summary RangeSummary) error {
+	result := s.db.Model(&models.VerificationRun{}).Where("id = ? AND status = ? AND lease_owner = ?", id, models.VerificationRunRunning, ownerID).Updates(map[string]interface{}{
 		"processed_items":  gorm.Expr("processed_items + ?", loaded),
 		"total_valid":      gorm.Expr("total_valid + ?", summary.Valid),
 		"total_invalid":    gorm.Expr("total_invalid + ?", summary.Invalid),
 		"total_pending":    gorm.Expr("total_pending + ?", summary.Pending),
 		"already_verified": gorm.Expr("already_verified + ?", summary.AlreadyVerified),
 		"verified_now":     gorm.Expr("verified_now + ?", summary.VerifiedNow),
-	}).Error
+		"lease_expires_at": time.Now().UTC().Add(5 * time.Minute),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("progress verification run tidak diperbarui karena lease berubah")
+	}
+	return nil
 }
 
-func (s *VerificationJobService) markFailed(id string, runErr error) error {
+func (s *VerificationJobService) markFailed(id, ownerID string, runErr error) error {
 	message := "verification job gagal"
 	if runErr != nil {
 		message = runErr.Error()
 	}
-	return s.db.Model(&models.VerificationRun{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":        models.VerificationRunFailed,
-		"error_message": message,
+	return s.db.Model(&models.VerificationRun{}).Where("id = ? AND status = ? AND lease_owner = ?", id, models.VerificationRunRunning, ownerID).Updates(map[string]interface{}{
+		"status":           models.VerificationRunFailed,
+		"error_message":    message,
+		"lease_owner":      "",
+		"lease_expires_at": nil,
 	}).Error
 }
 
-func (s *VerificationJobService) requeueInterruptedRuns() error {
-	return s.db.Model(&models.VerificationRun{}).
-		Where("status = ?", models.VerificationRunRunning).
-		Updates(map[string]interface{}{
-			"status":           models.VerificationRunQueued,
-			"processed_items":  0,
-			"total_valid":      0,
-			"total_invalid":    0,
-			"total_pending":    0,
-			"already_verified": 0,
-			"verified_now":     0,
-			"error_message":    "",
-		}).Error
+func (s *VerificationJobService) queuedRunCount() (int64, error) {
+	var count int64
+	err := s.db.Model(&models.VerificationRun{}).Where("status = ?", models.VerificationRunQueued).Count(&count).Error
+	return count, err
 }

@@ -45,3 +45,16 @@ func TestCalculateVerificationRangeFallsBackWhenCursorIsInTheFuture(t *testing.T
 		t.Fatalf("to = %s, want %s", to, now)
 	}
 }
+
+func TestIncludeVerificationBoundsCapturesLateIngestedEvents(t *testing.T) {
+	from := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	lateEventAt := from.Add(-14 * 24 * time.Hour)
+	newEventAt := to.Add(time.Hour)
+
+	includeVerificationBounds(&from, &to, &lateEventAt, &newEventAt)
+
+	if !from.Equal(lateEventAt) || !to.Equal(newEventAt) {
+		t.Fatalf("expanded range = %s..%s, want %s..%s", from, to, lateEventAt, newEventAt)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"go-blockchain-api/internal/models"
+	"go-blockchain-api/internal/workerstatus"
 )
 
 // Verifier is intentionally narrower than the dashboard audit service. The
@@ -29,11 +30,13 @@ type BatchVerificationResult struct {
 }
 
 type BatchVerifier interface {
+	// Implementations own persistence of status and history for each result.
 	VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[string]BatchVerificationResult
 }
 
 type Config struct {
 	Enabled        bool
+	ClientID       string
 	Interval       time.Duration
 	BatchSize      int
 	Concurrency    int
@@ -44,6 +47,7 @@ type Worker struct {
 	db       *gorm.DB
 	verifier Verifier
 	cfg      Config
+	started  time.Time
 }
 
 func New(db *gorm.DB, verifier Verifier, cfg Config) (*Worker, error) {
@@ -67,8 +71,28 @@ func New(db *gorm.DB, verifier Verifier, cfg Config) (*Worker, error) {
 
 func (w *Worker) Run(ctx context.Context) {
 	if !w.cfg.Enabled {
+		workerstatus.Save(w.db, "PROOF_SCANNER", false, nil, nil, nil, nil, w.scope(), "", w.cfg.ClientID)
 		return
 	}
+	w.started = time.Now().UTC()
+	workerstatus.Save(w.db, "PROOF_SCANNER", true, &w.started, nil, nil, nil, w.scope(), "", w.cfg.ClientID)
+	defer workerstatus.Save(w.db, "PROOF_SCANNER", false, &w.started, nil, nil, nil, w.scope(), "", w.cfg.ClientID)
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				workerstatus.Save(w.db, "PROOF_SCANNER", true, &w.started, nil, nil, nil, w.scope(), "", w.cfg.ClientID)
+			}
+		}
+	}()
 
 	if err := w.Scan(ctx); err != nil {
 		log.Printf("⚠️ [TamperScanner] scan awal gagal: %v", err)
@@ -90,23 +114,71 @@ func (w *Worker) Run(ctx context.Context) {
 // Scan verifies the least-recently checked anchored logs. A single failing
 // log does not stop the remainder of the batch; the returned error is only a
 // signal for operational logging.
-func (w *Worker) Scan(ctx context.Context) error {
+func (w *Worker) Scan(ctx context.Context) (scanErr error) {
+	var checked int64
+	var startedAt *time.Time
+	if !w.started.IsZero() {
+		startedAt = &w.started
+	}
+	defer func() {
+		lastError := ""
+		if scanErr != nil {
+			lastError = scanErr.Error()
+		}
+		cutoff := time.Now().UTC().Add(-w.cfg.Interval)
+		backlogQuery := w.db.Model(&models.AuditLog{}).
+			Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "ANCHORED").
+			Where("integrity_checked_at IS NULL OR integrity_checked_at <= ?", cutoff)
+		if w.cfg.ClientID != "" {
+			backlogQuery = backlogQuery.Where("client_id = ?", w.cfg.ClientID)
+		}
+		if w.cfg.RecoveryCutoff != nil {
+			backlogQuery = backlogQuery.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *w.cfg.RecoveryCutoff)
+		}
+		var queued int64
+		if err := backlogQuery.Count(&queued).Error; err != nil {
+			log.Printf("[TamperScanner] gagal menghitung backlog: %v", err)
+		}
+		workerstatus.Save(w.db, "PROOF_SCANNER", true, startedAt, workerstatus.Time(time.Now().UTC()), workerstatus.Count(checked), workerstatus.Count(queued), w.scope(), lastError, w.cfg.ClientID)
+	}()
 	var logs []models.AuditLog
 	// Legacy RECOVERY rows may still exist in audit_logs for forensics, but
 	// they are no longer client-originated audit records and must not create
 	// normal tamper incidents. New recovery executions live in recovery_events.
-	query := w.db.WithContext(ctx).Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "ANCHORED")
+	cutoff := time.Now().UTC().Add(-w.cfg.Interval)
+	query := w.db.WithContext(ctx).Model(&models.AuditLog{}).
+		Select(`audit_logs.*,
+			CASE
+				WHEN integrity_checked_at IS NULL AND db_timestamp >= NOW() - INTERVAL '10 minutes' THEN 0
+				WHEN integrity_checked_at IS NULL THEN 1
+				ELSE 2
+			END AS priority_rank,
+			ROW_NUMBER() OVER (
+			PARTITION BY client_id
+			ORDER BY CASE
+				WHEN integrity_checked_at IS NULL AND db_timestamp >= NOW() - INTERVAL '10 minutes' THEN 0
+				WHEN integrity_checked_at IS NULL THEN 1
+				ELSE 2
+			END ASC,
+			         integrity_checked_at ASC NULLS FIRST,
+			         blockchain_timestamp DESC NULLS LAST, log_id ASC
+		) AS tenant_rank`).
+		Where("status = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'", "ANCHORED").
+		Where("integrity_checked_at IS NULL OR integrity_checked_at <= ?", cutoff)
+	if w.cfg.ClientID != "" {
+		query = query.Where("client_id = ?", w.cfg.ClientID)
+	}
 	if w.cfg.RecoveryCutoff != nil {
 		// Legacy history remains available for manual integrity checks, but
 		// the scheduled recovery scanner is scoped to snapshot-backed rows.
 		query = query.Where("db_timestamp IS NOT NULL AND db_timestamp >= ?", *w.cfg.RecoveryCutoff)
 	}
-	if err := query.
-		Order("integrity_checked_at ASC NULLS FIRST, blockchain_timestamp ASC NULLS FIRST, log_id ASC").
-		Limit(w.cfg.BatchSize).
-		Find(&logs).Error; err != nil {
+	if err := w.db.WithContext(ctx).Table("(?) AS fair", query).
+		Order("priority_rank ASC, tenant_rank ASC, integrity_checked_at ASC NULLS FIRST, blockchain_timestamp DESC NULLS LAST, client_id ASC").
+		Limit(w.cfg.BatchSize).Find(&logs).Error; err != nil {
 		return fmt.Errorf("ambil batch tamper scanner gagal: %w", err)
 	}
+	checked = int64(len(logs))
 
 	if len(logs) == 0 {
 		return nil
@@ -161,6 +233,13 @@ func (w *Worker) Scan(ctx context.Context) error {
 	return nil
 }
 
+func (w *Worker) scope() string {
+	if w.cfg.ClientID != "" {
+		return "selected tenant gateway proof"
+	}
+	return "all tenants gateway proof"
+}
+
 func (w *Worker) persistBatchResults(logs []models.AuditLog, results map[string]BatchVerificationResult) error {
 	var scanErrors []error
 	for _, row := range logs {
@@ -171,17 +250,10 @@ func (w *Worker) persistBatchResults(logs []models.AuditLog, results map[string]
 				Err:    errors.New("verifier tidak mengembalikan hasil untuk log"),
 			}
 		}
-		status := result.Status
-		message := ""
-		if result.Err != nil {
-			status = models.IntegrityStatusUnreachable
-			message = result.Err.Error()
-		}
-		if err := w.mark(row, status, message); err != nil {
-			scanErrors = append(scanErrors, fmt.Errorf("%s/%s: persist status gagal: %w", row.ClientID, row.LogID, err))
-		}
 		if result.Err != nil {
 			scanErrors = append(scanErrors, fmt.Errorf("%s/%s: %w", row.ClientID, row.LogID, result.Err))
+		} else if result.Status == "" {
+			scanErrors = append(scanErrors, fmt.Errorf("%s/%s: verifier returned no status", row.ClientID, row.LogID))
 		}
 	}
 	if len(scanErrors) > 0 {

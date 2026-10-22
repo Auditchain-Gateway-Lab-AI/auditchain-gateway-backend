@@ -16,6 +16,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.GET("/kafka-configs", h.ListKafkaConfigs)
 		adminRoutes.PATCH("/kafka-config/:id/toggle", h.ToggleKafkaConfig)
 		adminRoutes.GET("/summary", h.GetDashboardSummary)
+		adminRoutes.GET("/monitoring/overview", h.GetMonitoringOverview)
+		adminRoutes.GET("/clients/:id/monitoring", h.GetClientMonitoring)
 		adminRoutes.DELETE("/kafka-config/:id", h.DeleteKafkaConfig)
 		adminRoutes.PATCH("/clients/:id/toggle", h.ToggleClientStatus)
 		adminRoutes.PUT("/clients/:id", h.UpdateClient)
@@ -43,6 +45,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashRoutes.GET("/actor-config", h.GetActorConfig)
 		dashRoutes.PATCH("/actor-config", h.UpdateActorConfig)
 		dashRoutes.GET("/stats", h.GetClientStats)
+		dashRoutes.GET("/integrity-history", h.GetIntegrityHistory)
+		dashRoutes.GET("/worker-status", h.GetWorkerStatus)
 	}
 
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)

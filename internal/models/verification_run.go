@@ -16,11 +16,13 @@ type VerificationRun struct {
 	ID       string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	ClientID string `gorm:"type:varchar(36);not null;index" json:"client_id"`
 
-	RequestedBy string    `gorm:"type:varchar(100)" json:"requested_by,omitempty"`
-	FromTime    time.Time `gorm:"column:from_time;not null;index" json:"from_time"`
-	ToTime      time.Time `gorm:"column:to_time;not null;index" json:"to_time"`
-	Status      string    `gorm:"type:varchar(20);not null;index" json:"status"`
-	BatchSize   int       `gorm:"not null;default:100" json:"batch_size"`
+	RequestedBy    string     `gorm:"type:varchar(100)" json:"requested_by,omitempty"`
+	FromTime       time.Time  `gorm:"column:from_time;not null;index" json:"from_time"`
+	ToTime         time.Time  `gorm:"column:to_time;not null;index" json:"to_time"`
+	Status         string     `gorm:"type:varchar(20);not null;index" json:"status"`
+	BatchSize      int        `gorm:"not null;default:100" json:"batch_size"`
+	LeaseOwner     string     `gorm:"type:varchar(100);not null;default:'';index" json:"-"`
+	LeaseExpiresAt *time.Time `gorm:"index" json:"-"`
 
 	TotalItems      int64 `gorm:"not null;default:0" json:"total_items"`
 	ProcessedItems  int64 `gorm:"not null;default:0" json:"processed_items"`

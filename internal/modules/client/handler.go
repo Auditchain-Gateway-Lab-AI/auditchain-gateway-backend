@@ -1331,6 +1331,36 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung statistik audit"})
 		return
 	}
+	var currentIntegrity struct {
+		Total       int64      `gorm:"column:total"`
+		Valid       int64      `gorm:"column:valid"`
+		Tampered    int64      `gorm:"column:tampered"`
+		Pending     int64      `gorm:"column:pending"`
+		Unavailable int64      `gorm:"column:unavailable"`
+		NotChecked  int64      `gorm:"column:not_checked"`
+		CheckedAt   *time.Time `gorm:"column:checked_at"`
+	}
+	if err := h.DB.Raw(`
+		SELECT COUNT(*) AS total,
+		       COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'VALID') AS valid,
+		       COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'TAMPERED') AS tampered,
+		       COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) = 'PENDING') AS pending,
+	       COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) IN ('UNREACHABLE', 'UNAVAILABLE', 'AGENT_ERROR', 'FABRIC_ERROR')) AS unavailable,
+	       COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(integrity_status, ''))) IN ('', 'NOT_CHECKED')) AS not_checked,
+	       MAX(integrity_checked_at) AS checked_at
+		FROM audit_logs
+		WHERE client_id = ? AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'
+	`, clientID).Scan(&currentIntegrity).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung status integrity terkini"})
+		return
+	}
+	var integrityChecks90d int64
+	if err := h.DB.Model(&models.IntegrityCheck{}).
+		Where("client_id = ? AND checked_at >= ?", clientID, time.Now().UTC().Add(-90*24*time.Hour)).
+		Count(&integrityChecks90d).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghitung pemeriksaan integrity terbaru"})
+		return
+	}
 
 	var stats models.ClientDashboardStats
 	if err := h.DB.Where("client_id = ?", clientID).First(&stats).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1403,8 +1433,15 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 			CheckedLogs: stats.LastCheckLogs,
 		},
 		"table_verify_results": tableResults,
-		"created_at":           stats.CreatedAt,
-		"updated_at":           stats.UpdatedAt,
+		"integrity_totals": gin.H{
+			"total": currentIntegrity.Total, "valid": currentIntegrity.Valid,
+			"tampered": currentIntegrity.Tampered, "pending": currentIntegrity.Pending,
+			"unavailable": currentIntegrity.Unavailable, "not_checked": currentIntegrity.NotChecked,
+			"checked_at": currentIntegrity.CheckedAt,
+			"checks_90d": integrityChecks90d,
+		},
+		"created_at": stats.CreatedAt,
+		"updated_at": stats.UpdatedAt,
 	}
 	if trendRange != "" {
 		trend, err := loadDashboardTrend(h.DB, clientID, trendWindow, time.Now().UTC())

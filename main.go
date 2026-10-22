@@ -42,6 +42,7 @@ import (
 	"go-blockchain-api/internal/modules/recovery"
 	"go-blockchain-api/internal/modules/report"
 	"go-blockchain-api/internal/storage/snapshotstore"
+	"go-blockchain-api/internal/workerstatus"
 )
 
 func snapshotWriterEnabled() bool {
@@ -175,6 +176,7 @@ func loadTamperScannerConfig(recoveryCutoff *time.Time) (tamperscanner.Config, e
 	}
 	return tamperscanner.Config{
 		Enabled:        tamperScannerEnabled(),
+		ClientID:       strings.TrimSpace(os.Getenv("TAMPER_SCANNER_CLIENT_ID")),
 		Interval:       time.Duration(intervalSeconds) * time.Second,
 		BatchSize:      batchSize,
 		Concurrency:    concurrency,
@@ -403,7 +405,7 @@ func main() {
 		log.Fatal("❌ RECOVERY_MODE=agent_direct membutuhkan koneksi Fabric yang valid")
 	}
 	if tamperScannerEnabled() && fabricSvc == nil {
-		log.Fatal("❌ TAMPER_SCANNER_ENABLED=true membutuhkan koneksi Fabric yang valid")
+		log.Printf("⚠️ TAMPER_SCANNER_ENABLED=true tetapi Fabric tidak tersedia; scanner tetap berjalan dan mencatat hasil proof sebagai unavailable")
 	}
 
 	var recoverySnapshotBuilder snapshotstore.RecoveryEventOutboxBuilder
@@ -444,9 +446,14 @@ func main() {
 				*target = value
 			}
 		}
-		go audit.NewSourceSweep(db, auditService, time.Duration(interval)*time.Second, recent, backfill).Run(ctx)
+		sourceSweep := audit.NewSourceSweep(db, auditService, time.Duration(interval)*time.Second, recent, backfill)
+		sourceSweep.SetClientScope(os.Getenv("SOURCE_SWEEP_CLIENT_ID"))
+		go sourceSweep.Run(ctx)
 		log.Printf("[SourceSweep] active; interval=%ds recent=%d backfill=%d", interval, recent, backfill)
+	} else {
+		workerstatus.Save(db, "SOURCE_SWEEP", false, nil, nil, nil, nil, "disabled by configuration", "", strings.TrimSpace(os.Getenv("SOURCE_SWEEP_CLIENT_ID")))
 	}
+	go audit.RunIntegrityHistoryRetention(ctx, db)
 	verificationJobs := audit.NewVerificationJobService(db, auditService)
 	go verificationJobs.Run(ctx)
 	verificationSchedulerConfig, schedulerConfigErr := loadVerificationSchedulerConfig()
@@ -468,6 +475,8 @@ func main() {
 		}
 		go scanner.Run(ctx)
 		log.Printf("🔍 Tamper scanner aktif; interval=%s batch=%d concurrency=%d", scannerConfig.Interval, scannerConfig.BatchSize, scannerConfig.Concurrency)
+	} else {
+		workerstatus.Save(db, "PROOF_SCANNER", false, nil, nil, nil, nil, "disabled by configuration", "", strings.TrimSpace(os.Getenv("TAMPER_SCANNER_CLIENT_ID")))
 	}
 
 	authRepo := auth.NewRepository(db)

@@ -118,6 +118,7 @@ type RecentLogsResult struct {
 type Service interface {
 	GetDashboardStats(clientID string) (map[string]int64, error)
 	VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error)
+	VerifyClientSourceIntegrity(logID, clientID, attemptID string) (*VerificationResult, error)
 	// VerifyGatewayIntegrity checks only the AuditChain PostgreSQL row against
 	// its local hash and Fabric anchor. It deliberately does not contact the
 	// client database or Agent and is used by the scheduled tamper scanner.
@@ -378,7 +379,13 @@ func (s *auditService) verifyLogRange(from, to time.Time, clientID, requestID st
 		return nil, err
 	}
 
-	summary, results := s.verifyRangeItems(logs, clientID, requestID, models.IntegritySourceManualRange, "", true)
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	summary, results, verifyErr := s.verifyRangeItems(logs, clientID, requestID, models.IntegritySourceManualRange, "", true, requestID)
+	if verifyErr != nil {
+		return nil, verifyErr
+	}
 	return &RangeVerificationResult{
 		Range: RangeInfo{
 			From: formatPgTimestamp(from),
@@ -404,19 +411,27 @@ func (s *auditService) verifyRangeBatch(from, to time.Time, clientID, requestID,
 		return RangeSummary{}, 0, err
 	}
 
-	forceRecheck := integritySource == models.IntegritySourceBackgroundRun || integritySource == models.IntegritySourceScheduledRun
-	summary, _ := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID, forceRecheck)
-	return summary, len(logs), nil
+	// User requested runs perform a fresh check; the scheduler only catches up
+	// on ranges and must not duplicate the dedicated proof scanner's work.
+	forceRecheck := integritySource == models.IntegritySourceBackgroundRun
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	summary, _, verifyErr := s.verifyRangeItems(logs, clientID, requestID, integritySource, runID, forceRecheck, requestID)
+	return summary, len(logs), verifyErr
 }
 
-func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool) (RangeSummary, []RangeItemResult) {
+func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool, attemptID string) (RangeSummary, []RangeItemResult, error) {
 	result := &RangeVerificationResult{
 		Results: make([]RangeItemResult, 0, len(logs)),
 	}
 	newlyVerified := make([]RangeItemResult, 0, len(logs))
 
 	for _, auditLog := range logs {
-		item, verifiedNow := s.verifyRangeLog(auditLog, clientID, requestID, integritySource, runID, forceRecheck)
+		item, verifiedNow, err := s.verifyRangeLog(auditLog, clientID, requestID, integritySource, runID, forceRecheck, attemptID)
+		if err != nil {
+			return result.Summary, result.Results, err
+		}
 		if verifiedNow {
 			result.Summary.VerifiedNow++
 			newlyVerified = append(newlyVerified, item)
@@ -436,10 +451,10 @@ func (s *auditService) verifyRangeItems(logs []models.AuditLog, clientID, reques
 		s.recordLatestIntegrityCheck(clientID, integritySource, runID, int64(len(newlyVerified)))
 	}
 
-	return result.Summary, result.Results
+	return result.Summary, result.Results, nil
 }
 
-func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool) (RangeItemResult, bool) {
+func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, requestID, integritySource, runID string, forceRecheck bool, attemptID string) (RangeItemResult, bool, error) {
 	item := RangeItemResult{
 		LogID: auditLog.LogID,
 		Log:   auditLog,
@@ -448,7 +463,7 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 	if !forceRecheck && hasCachedIntegrity(&auditLog) {
 		item.VerifyStatus, item.Message = cachedRangeStatus(auditLog.IntegrityStatus)
 		item.VerificationAssessment = cachedRangeAssessment(auditLog.IntegrityStatus)
-		return item, false
+		return item, false, nil
 	}
 
 	verifyStarted := time.Now()
@@ -463,7 +478,9 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 		} else {
 			item.Message = "hasil verifikasi kosong"
 		}
-		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, err)
+		if persistErr := s.persistIntegrityStatusForAttempt(auditLog.LogID, clientID, persistedStatus, integritySource, runID, err, attemptID, ""); persistErr != nil {
+			return item, false, persistErr
+		}
 	} else {
 		item.VerifyStatus = rangeResultStatus(verifyResult)
 		item.Message = verifyResult.Message
@@ -480,9 +497,17 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 		item.AgentDiscrepancies = verifyResult.AgentDiscrepancies
 		item.AuditTrailDiscrepancies = verifyResult.AuditTrailDiffs
 		persistedStatus = integrityStatusFromVerificationResult(verifyResult)
-		s.persistIntegrityStatus(auditLog.LogID, clientID, persistedStatus, integritySource, runID, nil)
+		historyResult := ""
+		if verifyResult.ProofStatus == "LEGACY_LIMITED" {
+			historyResult = "LIMITED"
+		}
+		if persistErr := s.persistIntegrityStatusForAttempt(auditLog.LogID, clientID, persistedStatus, integritySource, runID, nil, attemptID, historyResult); persistErr != nil {
+			return item, false, persistErr
+		}
 		if verifyResult.SourceStatus != "" {
-			s.persistSourceIntegrityStatus(auditLog.LogID, clientID, verifyResult.SourceStatus, nil)
+			if persistErr := s.persistSourceIntegrityStatusForAttempt(auditLog.LogID, clientID, verifyResult.SourceStatus, nil, attemptID, runID, integritySource); persistErr != nil {
+				return item, false, persistErr
+			}
 		}
 	}
 
@@ -491,7 +516,7 @@ func (s *auditService) verifyRangeLog(auditLog models.AuditLog, clientID, reques
 	item.Log.IntegrityRunID = runID
 	now := time.Now().UTC()
 	item.Log.IntegrityCheckedAt = &now
-	return item, true
+	return item, true, nil
 }
 
 func hasCachedIntegrity(auditLog *models.AuditLog) bool {
@@ -749,6 +774,7 @@ func isHashStillPending(auditLog *models.AuditLog) bool {
 // Fabric (on-chain) saja sesuai keputusan terbaru.
 func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*VerificationResult, error) {
 	result, err := s.verifyLogIntegrity(logID, clientID, "", false)
+	attemptID := uuid.NewString()
 	status := models.IntegrityStatusUnreachable
 	if result != nil {
 		switch result.Status {
@@ -763,9 +789,17 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		}
 	}
 	if result != nil {
-		s.persistIntegrityStatus(result.LogID, clientID, status, models.IntegritySourceManualSingleLog, "", err)
+		historyResult := ""
+		if result.ProofStatus == "LEGACY_LIMITED" {
+			historyResult = "LIMITED"
+		}
+		if persistErr := s.persistIntegrityStatusForAttempt(result.LogID, clientID, status, models.IntegritySourceManualSingleLog, "", err, attemptID, historyResult); persistErr != nil {
+			return result, persistErr
+		}
 		if result.SourceStatus != "" {
-			s.persistSourceIntegrityStatus(result.LogID, clientID, result.SourceStatus, err)
+			if persistErr := s.persistSourceIntegrityStatusForAttempt(result.LogID, clientID, result.SourceStatus, err, attemptID, "", models.IntegritySourceManualSingleLog); persistErr != nil {
+				return result, persistErr
+			}
 		}
 		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceManualSingleLog, "", 1)
 		if err == nil && result.IncidentType != "" {
@@ -810,6 +844,85 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	return result, err
 }
 
+// VerifyClientSourceIntegrity checks only the live client row for its latest
+// event. Proof/Fabric validation is owned by the proof scanner and is not
+// repeated by the source sweep.
+func (s *auditService) VerifyClientSourceIntegrity(logID, clientID, attemptID string) (*VerificationResult, error) {
+	if attemptID == "" {
+		attemptID = uuid.NewString()
+	}
+	auditLog, err := s.repo.GetLogByID(logID, clientID)
+	if err != nil {
+		return nil, errors.New("log_not_found")
+	}
+	result := &VerificationResult{LogID: logID, ProofStatus: "NOT_CHECKED"}
+	var sourceErr error
+	latest, latestErr := s.repo.GetLatestClientLogByResource(auditLog.Resource, clientID)
+	if latestErr != nil {
+		result.SourceStatus = models.SourceStatusUnreachable
+		sourceErr = latestErr
+	} else if latest == nil || latest.LogID != logID || !shouldVerifyResourceWithAgent(*auditLog, latest != nil && latest.LogID == logID) {
+		result.SourceStatus = models.SourceStatusNotComparable
+		result.AgentStatus = "skipped_historical"
+	} else if s.agent == nil {
+		result.SourceStatus = models.SourceStatusNotComparable
+		result.AgentStatus = "not_configured"
+	} else {
+		agentResult, agentErr := s.agent.VerifyAgainstAgent(auditLog)
+		if agentErr != nil {
+			result.AgentStatus, result.SourceStatus = agentFailureStatuses(agentErr)
+			sourceErr = agentErr
+		} else if agentResult == nil || !agentResult.AgentUsed {
+			result.SourceStatus = models.SourceStatusNotComparable
+			result.AgentStatus = "not_configured"
+		} else {
+			result.AgentStatus = "matched"
+			result.SourceStateHash = agentResult.ClientStateHash
+			result.OffchainStateHash = agentResult.OffchainStateHash
+			result.SourceCheckedAt = agentResult.SourceCheckedAt
+			result.StateComparison = agentResult.StateComparison
+			result.ComparisonBasis = agentResult.ComparisonBasis
+			result.AuditTrailStatus = agentResult.AuditTrailStatus
+			result.AgentDiscrepancies = agentResult.Discrepancies
+			result.AuditTrailDiffs = agentResult.AuditTrailDiffs
+			if !agentResult.StateComparable {
+				result.SourceStatus = models.SourceStatusNotComparable
+				result.AgentStatus = "not_comparable"
+			} else if agentResult.IsMatch {
+				result.SourceStatus = models.SourceStatusMatched
+				result.AgentStatus = "matched"
+			} else {
+				result.SourceStatus = sourceStatusFromAgentResult(*auditLog, agentResult)
+				result.AgentStatus = "mismatch"
+			}
+		}
+	}
+
+	if result.SourceStatus == "" {
+		result.SourceStatus = models.SourceStatusNotComparable
+	}
+	if result.SourceStatus == models.SourceStatusMatched {
+		result.Status = "success"
+	} else if result.SourceStatus == models.SourceStatusMismatch || result.SourceStatus == models.SourceStatusMissing || result.SourceStatus == models.SourceStatusUnexpectedPresent {
+		result.Status = "failed_source"
+	} else {
+		result.Status = "inconclusive"
+	}
+	result.Assessment = verificationAssessment("SOURCE_ONLY", result.SourceStatus, result.AgentStatus, result.AuditTrailStatus)
+	if result.SourceCheckedAt == nil {
+		checkedAt := time.Now().UTC()
+		result.SourceCheckedAt = &checkedAt
+	}
+	if persistErr := s.persistSourceIntegrityStatusForAttempt(logID, clientID, result.SourceStatus, sourceErr, attemptID, "", "SOURCE_SWEEP"); persistErr != nil {
+		return result, persistErr
+	}
+	s.recordLatestIntegrityCheck(clientID, "SOURCE_SWEEP", "", 1)
+	if shouldRecordClientSourceIncident(result.ProofStatus, result.SourceStatus) {
+		s.recordClientSourceIncident(*auditLog, result.SourceStatus, result.SourceStateHash, result.AgentDiscrepancies)
+	}
+	return result, sourceErr
+}
+
 // VerifyGatewayIntegrity is the scanner-safe verification path. It checks
 // only the gateway database row, Merkle proof, and Fabric anchor. Client-side
 // Agent verification is intentionally outside this path.
@@ -828,6 +941,7 @@ func (s *auditService) VerifyGatewayIntegrity(logID, clientID string) (string, e
 func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[string]tamperscanner.BatchVerificationResult {
 	results := make(map[string]tamperscanner.BatchVerificationResult, len(logs))
 	checkedPerClient := make(map[string]int64)
+	attemptID := uuid.NewString()
 	type anchorResult struct {
 		root string
 		err  error
@@ -836,12 +950,18 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 
 	for _, input := range logs {
 		auditLog := input
-		checkedPerClient[auditLog.ClientID]++
 		result := tamperscanner.BatchVerificationResult{Status: models.IntegrityStatusUnreachable}
+		persistResult := func() {
+			if persistErr := s.persistIntegrityStatusForAttempt(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err, attemptID, ""); persistErr != nil {
+				result.Err = fmt.Errorf("persist integrity result: %w", persistErr)
+			} else {
+				checkedPerClient[auditLog.ClientID]++
+			}
+			results[auditLog.LogID] = result
+		}
 		if isHashStillPending(&auditLog) {
 			result.Status = models.IntegrityStatusPending
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+			persistResult()
 			continue
 		}
 
@@ -850,21 +970,18 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		if recalculated != auditLog.HashValue {
 			result.Status = models.IntegrityStatusTampered
 			s.recordTamperIncident(auditLog, "METADATA_HASH_MISMATCH", recalculated)
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+			persistResult()
 			continue
 		}
 
 		if auditLog.Status != "ANCHORED" || auditLog.BlockchainTxID == nil || strings.TrimSpace(*auditLog.BlockchainTxID) == "" {
 			result.Status = models.IntegrityStatusPending
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+			persistResult()
 			continue
 		}
 		if s.fabric == nil {
 			result.Err = errors.New("fabric_unavailable")
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
+			persistResult()
 			continue
 		}
 
@@ -892,24 +1009,21 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		}
 		if anchor.err != nil {
 			result.Err = anchor.err
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
+			persistResult()
 			continue
 		}
 
 		if auditLog.MerkleRoot != "" && auditLog.MerkleRoot != anchor.root {
 			result.Status = models.IntegrityStatusTampered
 			s.recordTamperIncident(auditLog, "MERKLE_ROOT_MISMATCH", recalculated)
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+			persistResult()
 			continue
 		}
 
 		proofs, err := s.repo.GetProofsByHash(auditLog.HashValue)
 		if err != nil {
 			result.Err = fmt.Errorf("merkle_proof_read_failed: %w", err)
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", result.Err)
+			persistResult()
 			continue
 		}
 		proofs = proofsForAnchorRoot(proofs, anchor.root)
@@ -921,8 +1035,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 			}
 		}
 		if result.Status == models.IntegrityStatusTampered {
-			results[auditLog.LogID] = result
-			s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+			persistResult()
 			continue
 		}
 
@@ -944,8 +1057,7 @@ func (s *auditService) VerifyGatewayIntegrityBatch(logs []models.AuditLog) map[s
 		} else {
 			result.Status = models.IntegrityStatusValid
 		}
-		results[auditLog.LogID] = result
-		s.persistIntegrityStatus(auditLog.LogID, auditLog.ClientID, result.Status, models.IntegritySourceTamperScanner, "", nil)
+		persistResult()
 	}
 	for clientID, count := range checkedPerClient {
 		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceTamperScanner, "", count)
@@ -968,29 +1080,97 @@ func integrityStatusModelValue(status string) string {
 	}
 }
 
-func (s *auditService) persistIntegrityStatus(logID, clientID, status, integritySource, runID string, verificationErr error) {
-	if s.db == nil || logID == "" || clientID == "" {
-		return
+func integrityHistoryResult(status string, verificationErr error) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case models.IntegrityStatusValid:
+		return "VALID"
+	case models.IntegrityStatusTampered:
+		return "TAMPERED"
+	case models.IntegrityStatusPending:
+		return "PENDING"
+	default:
+		if verificationErr != nil {
+			return "UNAVAILABLE"
+		}
+		return "UNAVAILABLE"
+	}
+}
+
+func sourceHistoryResult(sourceStatus string, verificationErr error) string {
+	switch strings.ToUpper(strings.TrimSpace(sourceStatus)) {
+	case models.SourceStatusMatched:
+		return "VALID"
+	case models.SourceStatusMismatch, models.SourceStatusMissing, models.SourceStatusUnexpectedPresent:
+		return "TAMPERED"
+	case models.SourceStatusUnreachable:
+		return "UNAVAILABLE"
+	case models.SourceStatusNotComparable:
+		return "NOT_COMPARABLE"
+	default:
+		if verificationErr != nil {
+			return "UNAVAILABLE"
+		}
+		return "NOT_COMPARABLE"
+	}
+}
+
+func (s *auditService) persistIntegrityStatus(logID, clientID, status, integritySource, runID string, verificationErr error) error {
+	return s.persistIntegrityStatusForAttempt(logID, clientID, status, integritySource, runID, verificationErr, uuid.NewString(), "")
+}
+
+func (s *auditService) persistIntegrityStatusForAttempt(logID, clientID, status, integritySource, runID string, verificationErr error, attemptID, historyResult string) error {
+	if s.db == nil {
+		return nil
+	}
+	if logID == "" || clientID == "" {
+		return errors.New("database atau identitas log tidak tersedia untuk menyimpan hasil pemeriksaan")
 	}
 	now := time.Now().UTC()
 	message := ""
 	if verificationErr != nil {
 		message = verificationErr.Error()
 	}
-	_ = s.db.Model(&models.AuditLog{}).
-		Where("log_id = ? AND client_id = ?", logID, clientID).
-		Updates(map[string]interface{}{
-			"integrity_status":     status,
-			"integrity_checked_at": now,
-			"integrity_error":      message,
-			"integrity_source":     integritySource,
-			"integrity_run_id":     runID,
-		}).Error
+	if historyResult == "" {
+		historyResult = integrityHistoryResult(status, verificationErr)
+	}
+	if attemptID == "" {
+		attemptID = uuid.NewString()
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		updated := tx.Model(&models.AuditLog{}).
+			Where("log_id = ? AND client_id = ?", logID, clientID).
+			Updates(map[string]interface{}{
+				"integrity_status":     status,
+				"integrity_checked_at": now,
+				"integrity_error":      message,
+				"integrity_source":     integritySource,
+				"integrity_run_id":     runID,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected == 0 {
+			return errors.New("audit log tidak ditemukan saat menyimpan hasil pemeriksaan")
+		}
+		check := models.IntegrityCheck{
+			ID: uuid.NewString(), AttemptID: attemptID, ClientID: clientID,
+			LogID: logID, RunID: runID, Dimension: models.IntegrityDimensionProof,
+			Trigger: integritySource, Result: historyResult, CheckedAt: now,
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&check).Error
+	})
 }
 
-func (s *auditService) persistSourceIntegrityStatus(logID, clientID, sourceStatus string, verificationErr error) {
-	if s.db == nil || logID == "" || clientID == "" || sourceStatus == "" {
-		return
+func (s *auditService) persistSourceIntegrityStatus(logID, clientID, sourceStatus string, verificationErr error) error {
+	return s.persistSourceIntegrityStatusForAttempt(logID, clientID, sourceStatus, verificationErr, uuid.NewString(), "", models.IntegritySourceManualSingleLog)
+}
+
+func (s *auditService) persistSourceIntegrityStatusForAttempt(logID, clientID, sourceStatus string, verificationErr error, attemptID, runID, trigger string) error {
+	if s.db == nil {
+		return nil
+	}
+	if logID == "" || clientID == "" || sourceStatus == "" {
+		return errors.New("database, log, atau status sumber tidak tersedia untuk menyimpan hasil pemeriksaan")
 	}
 	status := models.IntegrityStatusNotChecked
 	switch strings.ToUpper(strings.TrimSpace(sourceStatus)) {
@@ -1008,13 +1188,27 @@ func (s *auditService) persistSourceIntegrityStatus(logID, clientID, sourceStatu
 	if verificationErr != nil {
 		message = verificationErr.Error()
 	}
-	_ = s.db.Model(&models.AuditLog{}).
-		Where("log_id = ? AND client_id = ?", logID, clientID).
-		Updates(map[string]interface{}{
-			"source_integrity_status":     status,
-			"source_integrity_checked_at": now,
-			"source_integrity_error":      message,
-		}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		updated := tx.Model(&models.AuditLog{}).
+			Where("log_id = ? AND client_id = ?", logID, clientID).
+			Updates(map[string]interface{}{
+				"source_integrity_status":     status,
+				"source_integrity_checked_at": now,
+				"source_integrity_error":      message,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected == 0 {
+			return errors.New("audit log tidak ditemukan saat menyimpan pemeriksaan sumber")
+		}
+		check := models.IntegrityCheck{
+			ID: uuid.NewString(), AttemptID: attemptID, ClientID: clientID,
+			LogID: logID, RunID: runID, Dimension: models.IntegrityDimensionSource,
+			Trigger: trigger, Result: sourceHistoryResult(sourceStatus, verificationErr), CheckedAt: now,
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&check).Error
+	})
 }
 
 func (s *auditService) recordLatestIntegrityCheck(clientID, source, runID string, checkedLogs int64) {

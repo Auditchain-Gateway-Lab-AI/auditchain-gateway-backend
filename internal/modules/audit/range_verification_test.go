@@ -117,7 +117,30 @@ func TestRangeResultStatusCountsVerifiedSourceTamperAsInvalid(t *testing.T) {
 	}
 }
 
-func TestScheduledVerifyRangeBatchRechecksCachedRows(t *testing.T) {
+func TestIntegrityHistoryResultCategories(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{status: models.IntegrityStatusValid, want: "VALID"},
+		{status: models.IntegrityStatusTampered, want: "TAMPERED"},
+		{status: models.IntegrityStatusPending, want: "PENDING"},
+		{status: models.IntegrityStatusUnreachable, want: "UNAVAILABLE"},
+	}
+	for _, test := range tests {
+		if got := integrityHistoryResult(test.status, nil); got != test.want {
+			t.Errorf("integrityHistoryResult(%q) = %q, want %q", test.status, got, test.want)
+		}
+	}
+	if got := sourceHistoryResult(models.SourceStatusNotComparable, nil); got != "NOT_COMPARABLE" {
+		t.Errorf("sourceHistoryResult(not comparable) = %q, want NOT_COMPARABLE", got)
+	}
+	if got := sourceHistoryResult(models.SourceStatusUnreachable, errors.New("agent down")); got != "UNAVAILABLE" {
+		t.Errorf("sourceHistoryResult(unreachable) = %q, want UNAVAILABLE", got)
+	}
+}
+
+func TestScheduledVerifyRangeBatchReusesCachedRows(t *testing.T) {
 	checkedAt := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
 	repo := &rangeRepositoryStub{logs: []models.AuditLog{
 		{LogID: "log-1", ClientID: "client-1", IntegrityStatus: models.IntegrityStatusValid, IntegrityCheckedAt: &checkedAt},
@@ -132,7 +155,7 @@ func TestScheduledVerifyRangeBatchRechecksCachedRows(t *testing.T) {
 	if loaded != 1 {
 		t.Fatalf("loaded = %d, want 1", loaded)
 	}
-	if summary.Total != 1 || summary.Invalid != 1 || summary.AlreadyVerified != 0 || summary.VerifiedNow != 1 {
+	if summary.Total != 1 || summary.Valid != 1 || summary.AlreadyVerified != 1 || summary.VerifiedNow != 0 {
 		t.Fatalf("unexpected batch summary: %+v", summary)
 	}
 }

@@ -960,6 +960,14 @@ func (h *Handler) CreateVerificationRun(c *gin.Context) {
 	requestedByValue, _ := requestedBy.(string)
 	run, err := h.VerificationJobs.Enqueue(from.UTC(), to.UTC(), clientID, requestedByValue, req.BatchSize)
 	if err != nil {
+		if errors.Is(err, ErrManualVerificationCooldown) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error(), "retry_after_seconds": 60})
+			return
+		}
+		if errors.Is(err, ErrActiveVerificationRun) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengantrikan verification run."})
 		return
 	}
