@@ -27,6 +27,7 @@ const (
 type VerificationRunResponse struct {
 	ID              string     `json:"id"`
 	ClientID        string     `json:"client_id"`
+	RunType         string     `json:"run_type"`
 	From            string     `json:"from"`
 	To              string     `json:"to"`
 	Status          string     `json:"status"`
@@ -159,6 +160,7 @@ func (s *VerificationJobService) Enqueue(from, to time.Time, clientID, requested
 	run := &models.VerificationRun{
 		ID:          uuid.NewString(),
 		ClientID:    clientID,
+		RunType:     models.VerificationRunTypeInternal,
 		RequestedBy: requestedBy,
 		FromTime:    from,
 		ToTime:      to,
@@ -214,9 +216,14 @@ func ToVerificationRunResponse(run *models.VerificationRun) VerificationRunRespo
 			progress = 100
 		}
 	}
+	runType := run.RunType
+	if runType == "" {
+		runType = models.VerificationRunTypeInternal
+	}
 	return VerificationRunResponse{
 		ID:              run.ID,
 		ClientID:        run.ClientID,
+		RunType:         runType,
 		From:            run.FromTime.UTC().Format(time.RFC3339Nano),
 		To:              run.ToTime.UTC().Format(time.RFC3339Nano),
 		Status:          run.Status,

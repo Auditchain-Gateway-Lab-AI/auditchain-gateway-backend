@@ -216,3 +216,91 @@ Mengembalikan objek rekaman dengan status `DISMISSED`, `resolved_at`, `resolved_
 Dokumentasi OpenAPI / Swagger UI telah di-update secara otomatis dan dapat diakses pada:
 - **AuditChain Gateway API:** `http://localhost:8080/swagger/index.html` (Tag: `Client Tampering`)
 - **AuditChain Agent:** `http://localhost:8083/swagger/index.html` (Tag: `Recovery`, `Audit`, `Verification`)
+
+
+---
+
+## 6. Pemisahan Ranah Audit & Statistik: Audit Internal vs Audit External
+
+Sistem membedakan secara tegas antara **Audit Internal** dan **Audit External** demi mencegah pencampuran metrik integritas offchain dengan anomali data operasional klien:
+
+### 6.1. Definisi Ranah (Domain Separation)
+
+| Ranah Audit | Objek yang Diaudit | Alur Verifikasi | Eksekutor | Indikator Statistik |
+| :--- | :--- | :--- | :--- | :--- |
+| **Audit Internal (Offchain Gateway)** | Log transaksi offchain di PostgreSQL AuditChain | Membandingkan hash kanonikal baris `audit_logs` dan rekonstruksi pohon Merkle (`leaf_hash` + Merkle proofs) dengan Merkle root yang tercatat di Blockchain Hyperledger Fabric. Tidak menyentuh database operasional klien. | Gateway / Background Verifier (`VerificationJobService`) | `internal_audit` (`internal_total_verifications`, `internal_total_tampered`, `internal_integrity_score`) |
+| **Audit External (Data Klien)** | Data baris aktual di database operasional klien (misal: Oracle Satupeta) | 1. Membandingkan hash aktual data klien (`clientHash`) vs hash log offchain (`offchainHash`).<br>2. **Jika hash TIDAK cocok:** Proses verifikasi dihentikan seketika, status dicatat `TAMPERED`, dan panggilan ke blockchain di-skip.<br>3. **Jika hash COCOK:** Lanjut memanggil API `POST /api/agent/verify-merkle-root` membawa `leaf_hash` data klien. Gateway merekonstruksi Merkle root dari `leaf_hash` + `merkle_proofs` lalu mencocokkannya dengan Merkle root di ledger blockchain. | `auditchain-agent` yang berjalan di sisi klien | `external_audit` (`external_total_audited`, `external_total_tampered`, `external_integrity_score`, `client_data_tamper_records`) |
+
+### 6.2. Alur Rekonstruksi Merkle Proof pada Audit External
+```mermaid
+sequenceDiagram
+    autonumber
+    participant ClientDB as Database Klien (Oracle)
+    participant Agent as Auditchain Agent
+    participant Gateway as Auditchain Gateway
+    participant Fabric as Blockchain (Fabric)
+
+    Agent->>ClientDB: 1. Baca baris operasional klien
+    ClientDB-->>Agent: Data aktual baris
+    Agent->>Agent: 2. Hitung Canonical Hash (clientHash) & ambil offchainHash
+    alt clientHash != offchainHash
+        Agent->>Agent: 3a. Status: DATA TAMPERED (Hentikan proses, skip blockchain)
+    else clientHash == offchainHash
+        Agent->>Gateway: 3b. POST /api/agent/verify-merkle-root (leaf_hash, blockchain_tx_id)
+        Gateway->>Gateway: Ambil proofs dari DB offchain berdasarkan leaf_hash
+        Gateway->>Gateway: crypto.ReconstructMerkleRoot(leaf_hash, proofs)
+        Gateway->>Fabric: GetAnchorFromLedger(tx_id)
+        Gateway->>Gateway: Bandingkan reconstructedRoot == blockchainRoot
+        Gateway-->>Agent: is_match (true/false)
+        alt is_match == true
+            Agent->>Agent: Status: VALID (Lolos Audit Klien & Blockchain)
+        else is_match == false
+            Agent->>Agent: Status: BLOCKCHAIN TAMPERED
+        end
+    end
+```
+
+### 6.3. Pemisahan Metrik pada Endpoint `GET /api/dashboard/stats`
+Respons statistik dashboard memisahkan objek `internal_audit` dan `external_audit` secara bersih:
+```json
+{
+  "total_logs": 1250,
+  "anchored_logs": 1250,
+  "pending_logs": 0,
+  "data": {
+    "client_id": "c1f7a28e-87ef-4a64-b03a-3304dfdf1a22",
+    "total_logs": 1250,
+    
+    "internal_audit": {
+      "total_verifications": 1250,
+      "total_valid": 1250,
+      "total_tampered": 0,
+      "total_pending": 0,
+      "integrity_score": 100.0,
+      "last_verified_at": "2026-10-22T04:20:00Z"
+    },
+
+    "external_audit": {
+      "total_audited": 100,
+      "total_valid": 99,
+      "total_tampered": 1,
+      "total_pending": 0,
+      "integrity_score": 99.0,
+      "last_audited_at": "2026-10-22T04:25:00Z",
+      "table_verify_results": {
+        "SATUPETA_POLYGON": {
+          "total": 100,
+          "valid": 99,
+          "invalid": 1,
+          "pending": 0
+        }
+      }
+    },
+
+    "total_verifications": 1350,
+    "total_valid": 1349,
+    "total_tampered": 1,
+    "integrity_score": 99.92
+  }
+}
+```

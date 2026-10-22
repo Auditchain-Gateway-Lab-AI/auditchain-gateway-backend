@@ -41,6 +41,23 @@ type ClientDashboardStats struct {
 	TotalFabricError   int64      `gorm:"type:bigint;not null;default:0" json:"total_fabric_error"`
 	IntegrityScore     float64    `gorm:"type:decimal(5,2);not null;default:100" json:"integrity_score"` // (valid/verified)*100
 
+	// -- Statistik Audit Internal (Offchain Log vs Blockchain Merkle Root) --
+	InternalTotalVerifications int64      `gorm:"type:bigint;not null;default:0" json:"internal_total_verifications"`
+	InternalTotalValid         int64      `gorm:"type:bigint;not null;default:0" json:"internal_total_valid"`
+	InternalTotalTampered      int64      `gorm:"type:bigint;not null;default:0" json:"internal_total_tampered"`
+	InternalTotalPending       int64      `gorm:"type:bigint;not null;default:0" json:"internal_total_pending"`
+	InternalIntegrityScore     float64    `gorm:"type:decimal(5,2);not null;default:100" json:"internal_integrity_score"`
+	InternalLastVerifiedAt     *time.Time `gorm:"type:timestamptz" json:"internal_last_verified_at"`
+
+	// -- Statistik Audit External (Client Operational DB vs Offchain Log & Blockchain) --
+	ExternalTotalAudited       int64      `gorm:"type:bigint;not null;default:0" json:"external_total_audited"`
+	ExternalTotalValid         int64      `gorm:"type:bigint;not null;default:0" json:"external_total_valid"`
+	ExternalTotalTampered      int64      `gorm:"type:bigint;not null;default:0" json:"external_total_tampered"`
+	ExternalTotalPending       int64      `gorm:"type:bigint;not null;default:0" json:"external_total_pending"`
+	ExternalIntegrityScore     float64    `gorm:"type:decimal(5,2);not null;default:100" json:"external_integrity_score"`
+	ExternalLastAuditedAt      *time.Time `gorm:"type:timestamptz" json:"external_last_audited_at"`
+	ExternalTableResults       string     `gorm:"type:jsonb;default:'{}'" json:"external_table_results"`
+
 	// -- Statistik Aktivitas --
 	TotalInserts int64 `gorm:"type:bigint;not null;default:0" json:"total_inserts"`
 	TotalUpdates int64 `gorm:"type:bigint;not null;default:0" json:"total_updates"`
