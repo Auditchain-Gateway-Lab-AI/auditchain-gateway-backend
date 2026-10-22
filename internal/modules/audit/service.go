@@ -142,6 +142,7 @@ type Service interface {
 	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error)
 	ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error
+	VerifyMerkleProofAgainstBlockchain(leafHash, expectedMerkleRoot, blockchainTxID string) (*MerkleVerificationResult, error)
 	ListClientTamperRecords(clientID string, query ClientTamperQuery) (*ClientTamperListResponse, error)
 	GetClientTamperRecord(clientID, id string) (*models.ClientDataTamperRecord, error)
 	RecoverClientTamperRecord(ctx context.Context, clientID, id, recoveredBy string) (*ClientTamperRecoverResponse, error)
@@ -154,6 +155,15 @@ type auditService struct {
 	agent               *agentverifier.Service
 	db                  *gorm.DB
 	rangeVerificationMu sync.Mutex
+}
+
+type MerkleVerificationResult struct {
+	IsMatch            bool   `json:"is_match"`
+	LeafHash           string `json:"leaf_hash,omitempty"`
+	ReconstructedRoot  string `json:"reconstructed_root,omitempty"`
+	ExpectedMerkleRoot string `json:"expected_merkle_root"`
+	ActualMerkleRoot   string `json:"actual_merkle_root"`
+	BlockchainTxID     string `json:"blockchain_tx_id"`
 }
 
 type ResourceLogVerification struct {
@@ -672,16 +682,32 @@ func (s *auditService) updateRangeDashboardStats(clientID string, newlyVerified 
 			newIntegrityScore = float64(newTotalValid) / float64(newTotalVerifications) * 100
 		}
 
+		now := time.Now().UTC()
+		newInternalTotalVerifications := stat.InternalTotalVerifications + int64(len(newlyVerified))
+		newInternalTotalValid := stat.InternalTotalValid + totalValid
+		newInternalTotalTampered := stat.InternalTotalTampered + totalTampered
+		newInternalTotalPending := stat.InternalTotalPending + totalPending
+		newInternalIntegrityScore := float64(100)
+		if newInternalTotalVerifications > 0 {
+			newInternalIntegrityScore = float64(newInternalTotalValid) / float64(newInternalTotalVerifications) * 100
+		}
+
 		return tx.Model(&stat).Updates(map[string]interface{}{
-			"last_verified_at":     time.Now().UTC(),
-			"last_verified_table":  "MULTIPLE (Audit Range)",
-			"total_verifications":  newTotalVerifications,
-			"total_rows_verified":  gorm.Expr("total_rows_verified + ?", len(newlyVerified)),
-			"total_valid":          newTotalValid,
-			"total_tampered":       stat.TotalTampered + totalTampered,
-			"total_verify_pending": stat.TotalVerifyPending + totalPending,
-			"integrity_score":      newIntegrityScore,
-			"table_verify_results": string(newJSON),
+			"last_verified_at":             now,
+			"last_verified_table":          "MULTIPLE (Audit Range)",
+			"total_verifications":          newTotalVerifications,
+			"total_rows_verified":          gorm.Expr("total_rows_verified + ?", len(newlyVerified)),
+			"total_valid":                  newTotalValid,
+			"total_tampered":               stat.TotalTampered + totalTampered,
+			"total_verify_pending":         stat.TotalVerifyPending + totalPending,
+			"integrity_score":              newIntegrityScore,
+			"table_verify_results":         string(newJSON),
+			"internal_total_verifications": newInternalTotalVerifications,
+			"internal_total_valid":         newInternalTotalValid,
+			"internal_total_tampered":      newInternalTotalTampered,
+			"internal_total_pending":       newInternalTotalPending,
+			"internal_integrity_score":     newInternalIntegrityScore,
+			"internal_last_verified_at":    now,
 		}).Error
 	})
 }
@@ -2698,7 +2724,6 @@ type AgentAuditLogResult struct {
 	Error            string                  `json:"error,omitempty"`
 }
 
-
 func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error {
 	if s.db == nil {
 		return errors.New("database not available")
@@ -2762,6 +2787,11 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 		var tableResults map[string]rangeTableSummary
 		if err := json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults); err != nil || tableResults == nil {
 			tableResults = make(map[string]rangeTableSummary)
+		}
+
+		var extTableResults map[string]rangeTableSummary
+		if err := json.Unmarshal([]byte(stat.ExternalTableResults), &extTableResults); err != nil || extTableResults == nil {
+			extTableResults = make(map[string]rangeTableSummary)
 		}
 
 		totalValid := int64(0)
@@ -2899,6 +2929,8 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 
 				table := tableResults[tableName]
 				table.Total++
+				extTable := extTableResults[tableName]
+				extTable.Total++
 
 				isDataValid := strings.EqualFold(item.DataStatus, "VALID")
 				isChainValid := strings.EqualFold(item.BlockchainStatus, "VALID") || strings.EqualFold(item.BlockchainStatus, "SKIPPED")
@@ -2908,17 +2940,22 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 				if isDataValid && isChainValid {
 					totalValid++
 					table.Valid++
+					extTable.Valid++
 				} else if isTampered {
 					totalTampered++
 					table.Invalid++
+					extTable.Invalid++
 				} else if isPending {
 					totalPending++
 					table.Pending++
+					extTable.Pending++
 				} else {
 					table.Unavailable++
+					extTable.Unavailable++
 				}
 
 				tableResults[tableName] = table
+				extTableResults[tableName] = extTable
 			}
 		} else {
 			totalValid = int64(req.DataValid)
@@ -2927,6 +2964,7 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 		}
 
 		newJSON, _ := json.Marshal(tableResults)
+		extJSON, _ := json.Marshal(extTableResults)
 		auditedCount := int64(req.AuditedLogs)
 		if auditedCount == 0 && (totalValid > 0 || totalTampered > 0 || totalPending > 0) {
 			auditedCount = totalValid + totalTampered + totalPending
@@ -2940,6 +2978,15 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 			newIntegrityScore = float64(newTotalValid) / float64(newTotalVerifications) * 100
 		}
 
+		newExternalTotalAudited := stat.ExternalTotalAudited + auditedCount
+		newExternalTotalValid := stat.ExternalTotalValid + totalValid
+		newExternalTotalTampered := stat.ExternalTotalTampered + totalTampered
+		newExternalTotalPending := stat.ExternalTotalPending + totalPending
+		newExternalIntegrityScore := float64(100)
+		if newExternalTotalAudited > 0 {
+			newExternalIntegrityScore = float64(newExternalTotalValid) / float64(newExternalTotalAudited) * 100
+		}
+
 		fromTime := req.From
 		toTime := req.To
 		if fromTime.IsZero() {
@@ -2951,6 +2998,7 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 
 		vRun := models.VerificationRun{
 			ID: runID, ClientID: clientID, RequestedBy: "agent",
+			RunType:  models.VerificationRunTypeExternal,
 			FromTime: fromTime, ToTime: toTime, Status: models.VerificationRunCompleted,
 			BatchSize: int(auditedCount), TotalItems: int64(req.TotalLogs), ProcessedItems: auditedCount,
 			TotalValid: totalValid, TotalInvalid: totalTampered, TotalPending: totalPending,
@@ -2975,6 +3023,14 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 			"last_integrity_check_source": "agent",
 			"last_integrity_check_run_id": runID,
 			"last_integrity_check_logs":   auditedCount,
+
+			"external_total_audited":   newExternalTotalAudited,
+			"external_total_valid":     newExternalTotalValid,
+			"external_total_tampered":  newExternalTotalTampered,
+			"external_total_pending":   newExternalTotalPending,
+			"external_integrity_score": newExternalIntegrityScore,
+			"external_last_audited_at": &now,
+			"external_table_results":   string(extJSON),
 		}
 		if req.AutoRecoveredCount > 0 {
 			updates["total_recoveries"] = gorm.Expr("total_recoveries + ?", req.AutoRecoveredCount)
@@ -3004,4 +3060,49 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 		return transactionErr
 	}
 	return nil
+}
+
+func (s *auditService) VerifyMerkleProofAgainstBlockchain(leafHash, expectedMerkleRoot, blockchainTxID string) (*MerkleVerificationResult, error) {
+	fabricData, err := s.GetFabricRecord(blockchainTxID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch blockchain record: %w", err)
+	}
+
+	chainRoot := ""
+	if root, ok := fabricData["merkle_root"].(string); ok {
+		chainRoot = root
+	} else if root, ok := fabricData["merkleRoot"].(string); ok {
+		chainRoot = root
+	}
+
+	leafHash = strings.TrimSpace(leafHash)
+	expectedMerkleRoot = strings.TrimSpace(expectedMerkleRoot)
+
+	reconstructedRoot := expectedMerkleRoot
+	if leafHash != "" {
+		proofs, err := s.repo.GetProofsByHash(leafHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get merkle proofs: %w", err)
+		}
+		proofs = proofsForAnchorRoot(proofs, chainRoot)
+		if len(proofs) > 0 {
+			reconstructedRoot = crypto.ReconstructMerkleRoot(leafHash, toMerkleProofData(proofs))
+		} else {
+			reconstructedRoot = leafHash
+		}
+	}
+
+	isMatch := (chainRoot != "" && reconstructedRoot == chainRoot)
+	if expectedMerkleRoot != "" && reconstructedRoot != expectedMerkleRoot {
+		isMatch = false
+	}
+
+	return &MerkleVerificationResult{
+		IsMatch:            isMatch,
+		LeafHash:           leafHash,
+		ReconstructedRoot:  reconstructedRoot,
+		ExpectedMerkleRoot: expectedMerkleRoot,
+		ActualMerkleRoot:   chainRoot,
+		BlockchainTxID:     blockchainTxID,
+	}, nil
 }

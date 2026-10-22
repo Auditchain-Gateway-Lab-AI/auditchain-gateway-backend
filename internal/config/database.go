@@ -97,6 +97,13 @@ func ConnectDB() *gorm.DB {
 }
 
 func ensureVerificationRunSchema(db *gorm.DB) error {
+	// Agent reports predate run_type and receive the INTERNAL column default
+	// during migration. Reclassify only rows with the known Agent writer marker.
+	if err := db.Exec(`UPDATE verification_runs SET run_type = 'EXTERNAL'
+		WHERE requested_by = 'agent'
+		AND (run_type = 'INTERNAL' OR run_type = '' OR run_type IS NULL)`).Error; err != nil {
+		return err
+	}
 	return db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_runs_active_range
 		ON verification_runs (client_id, from_time, to_time)

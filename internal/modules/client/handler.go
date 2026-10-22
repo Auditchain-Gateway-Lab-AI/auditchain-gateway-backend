@@ -1400,6 +1400,10 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 	if stats.TableVerifyResults != "" {
 		_ = json.Unmarshal([]byte(stats.TableVerifyResults), &tableResults)
 	}
+	var externalTableResults interface{}
+	if stats.ExternalTableResults != "" {
+		_ = json.Unmarshal([]byte(stats.ExternalTableResults), &externalTableResults)
+	}
 
 	data := gin.H{
 		"id":                   stats.ID,
@@ -1426,6 +1430,41 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"integrity_score":      stats.IntegrityScore,
 		"last_verified_at":     stats.LastVerifiedAt,
 		"last_verified_table":  stats.LastVerifiedTable,
+
+		// Audit Internal (Offchain vs Blockchain)
+		"internal_audit": gin.H{
+			"total_verifications": stats.InternalTotalVerifications,
+			"total_valid":         stats.InternalTotalValid,
+			"total_tampered":      stats.InternalTotalTampered,
+			"total_pending":       stats.InternalTotalPending,
+			"integrity_score":     stats.InternalIntegrityScore,
+			"last_verified_at":    stats.InternalLastVerifiedAt,
+		},
+		"internal_total_verifications": stats.InternalTotalVerifications,
+		"internal_total_valid":         stats.InternalTotalValid,
+		"internal_total_tampered":      stats.InternalTotalTampered,
+		"internal_total_pending":       stats.InternalTotalPending,
+		"internal_integrity_score":     stats.InternalIntegrityScore,
+		"internal_last_verified_at":    stats.InternalLastVerifiedAt,
+
+		// Audit External (Client DB vs Offchain & Blockchain)
+		"external_audit": gin.H{
+			"total_audited":        stats.ExternalTotalAudited,
+			"total_valid":          stats.ExternalTotalValid,
+			"total_tampered":       stats.ExternalTotalTampered,
+			"total_pending":        stats.ExternalTotalPending,
+			"integrity_score":      stats.ExternalIntegrityScore,
+			"last_audited_at":      stats.ExternalLastAuditedAt,
+			"table_verify_results": externalTableResults,
+		},
+		"external_total_audited":       stats.ExternalTotalAudited,
+		"external_total_valid":         stats.ExternalTotalValid,
+		"external_total_tampered":      stats.ExternalTotalTampered,
+		"external_total_pending":       stats.ExternalTotalPending,
+		"external_integrity_score":     stats.ExternalIntegrityScore,
+		"external_last_audited_at":     stats.ExternalLastAuditedAt,
+		"external_table_results":       externalTableResults,
+
 		"integrity_check": IntegrityCheckResponse{
 			Source:      stats.LastCheckSource,
 			CheckedAt:   stats.LastCheckAt,

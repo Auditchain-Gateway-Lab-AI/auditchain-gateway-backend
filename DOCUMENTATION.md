@@ -62,6 +62,11 @@ Tampered Client Data terdeteksi saat membandingkan **hash kanonikal aktual data 
 | `POST` | `/api/dashboard/client-tampering/:id/recover` | JWT | Menjalankan pemulihan (recovery) baris data klien via Agent `POST /recover` |
 | `POST` | `/api/dashboard/client-tampering/:id/dismiss` | JWT | Mengabaikan (dismiss) anomali dengan catatan penjelasan |
 | `POST` | `/api/agent/audit-report` | JWT Agent | Endpoint ingest laporan audit dari Agent klien |
+| `POST` | `/api/agent/verify-merkle-root` | JWT Agent | Verifikasi rekonstruksi Merkle proof (leaf hash data client + proof) terhadap Merkle root di blockchain |
+
+### Pemisahan Ranah Audit: Internal vs External
+- **Audit Internal (Offchain)**: Memverifikasi hash log audit PostgreSQL dan rekonstruksi Merkle proof terhadap Merkle root Blockchain. Tidak membaca database klien. Metrik disimpan pada `internal_audit` di statistik dashboard.
+- **Audit External (Data Client)**: Membandingkan hash kanonikal database operasional klien dengan hash log offchain terbaru. Jika cocok, dilanjutkan dengan rekonstruksi Merkle proof via `/api/agent/verify-merkle-root`. Jika tidak cocok, proses langsung dihentikan dan ditandai `TAMPERED` (tanpa memeriksa blockchain). Metrik disimpan pada `external_audit` dan tabel `client_data_tamper_records`.
 
 ---
 

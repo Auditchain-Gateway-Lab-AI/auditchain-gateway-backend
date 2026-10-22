@@ -19,6 +19,52 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/agent/verify-merkle-root": {
+            "post": {
+                "description": "Endpoint khusus Agent untuk merekonstruksi Merkle root dari leaf_hash data client dengan Merkle proof offchain lalu membandingkannya dengan Merkle root di blockchain.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "Verifikasi Merkle root \u0026 proof terhadap ledger Blockchain",
+                "parameters": [
+                    {
+                        "description": "Leaf hash / Merkle root dan Blockchain TX ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/audit.VerifyMerkleRootRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/audit.MerkleVerificationResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Autentikasi pengguna dan mendapatkan token JWT untuk akses API.",
@@ -2306,6 +2352,29 @@ const docTemplate = `{
                 }
             }
         },
+        "audit.MerkleVerificationResult": {
+            "type": "object",
+            "properties": {
+                "actual_merkle_root": {
+                    "type": "string"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "expected_merkle_root": {
+                    "type": "string"
+                },
+                "is_match": {
+                    "type": "boolean"
+                },
+                "leaf_hash": {
+                    "type": "string"
+                },
+                "reconstructed_root": {
+                    "type": "string"
+                }
+            }
+        },
         "audit.RangeInfo": {
             "type": "object",
             "properties": {
@@ -2485,6 +2554,9 @@ const docTemplate = `{
                 "requested_by": {
                     "type": "string"
                 },
+                "run_type": {
+                    "type": "string"
+                },
                 "started_at": {
                     "type": "string"
                 },
@@ -2618,6 +2690,23 @@ const docTemplate = `{
                 "status": {
                     "type": "string",
                     "example": "success"
+                }
+            }
+        },
+        "audit.VerifyMerkleRootRequest": {
+            "type": "object",
+            "required": [
+                "blockchain_tx_id"
+            ],
+            "properties": {
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "leaf_hash": {
+                    "type": "string"
+                },
+                "merkle_root": {
+                    "type": "string"
                 }
             }
         },

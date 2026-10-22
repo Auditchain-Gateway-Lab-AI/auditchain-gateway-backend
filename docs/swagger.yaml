@@ -127,6 +127,21 @@ definitions:
       data:
         $ref: '#/definitions/audit.VerificationRunResponse'
     type: object
+  audit.MerkleVerificationResult:
+    properties:
+      actual_merkle_root:
+        type: string
+      blockchain_tx_id:
+        type: string
+      expected_merkle_root:
+        type: string
+      is_match:
+        type: boolean
+      leaf_hash:
+        type: string
+      reconstructed_root:
+        type: string
+    type: object
   audit.RangeInfo:
     properties:
       from:
@@ -245,6 +260,8 @@ definitions:
         type: number
       requested_by:
         type: string
+      run_type:
+        type: string
       started_at:
         type: string
       status:
@@ -335,6 +352,17 @@ definitions:
       status:
         example: success
         type: string
+    type: object
+  audit.VerifyMerkleRootRequest:
+    properties:
+      blockchain_tx_id:
+        type: string
+      leaf_hash:
+        type: string
+      merkle_root:
+        type: string
+    required:
+    - blockchain_tx_id
     type: object
   audit.VerifyRangeEstimateResponse:
     properties:
@@ -1496,6 +1524,38 @@ info:
   title: AuditChain Gateway API
   version: "1.0"
 paths:
+  /agent/verify-merkle-root:
+    post:
+      consumes:
+      - application/json
+      description: Endpoint khusus Agent untuk merekonstruksi Merkle root dari leaf_hash
+        data client dengan Merkle proof offchain lalu membandingkannya dengan Merkle
+        root di blockchain.
+      parameters:
+      - description: Leaf hash / Merkle root dan Blockchain TX ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/audit.VerifyMerkleRootRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/audit.MerkleVerificationResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/audit.ErrorResponse'
+      summary: Verifikasi Merkle root & proof terhadap ledger Blockchain
+      tags:
+      - Agent
   /auth/login:
     post:
       consumes:

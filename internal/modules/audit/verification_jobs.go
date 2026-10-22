@@ -20,6 +20,9 @@ import (
 const (
 	defaultVerificationBatchSize = 100
 	maxVerificationBatchSize     = 500
+	// Empty types are legacy internal jobs. Older Agent reports used the
+	// requested_by marker before run_type was introduced.
+	internalVerificationRunPredicate = "(run_type = 'INTERNAL' OR run_type = '' OR run_type IS NULL) AND COALESCE(requested_by, '') <> 'agent'"
 )
 
 // VerificationRunResponse is the API-safe projection of a background run.
@@ -28,6 +31,7 @@ const (
 type VerificationRunResponse struct {
 	ID              string     `json:"id"`
 	ClientID        string     `json:"client_id"`
+	RunType         string     `json:"run_type"`
 	From            string     `json:"from"`
 	To              string     `json:"to"`
 	Status          string     `json:"status"`
@@ -168,6 +172,7 @@ func (s *VerificationJobService) Enqueue(from, to time.Time, clientID, requested
 		}
 		var active models.VerificationRun
 		lookupErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(internalVerificationRunPredicate).
 			Where("client_id = ? AND status IN ?", clientID, []string{models.VerificationRunQueued, models.VerificationRunRunning}).
 			Order("created_at DESC").First(&active).Error
 		if lookupErr == nil {
@@ -182,7 +187,7 @@ func (s *VerificationJobService) Enqueue(from, to time.Time, clientID, requested
 		}
 		if !strings.EqualFold(strings.TrimSpace(requestedBy), "system:scheduler") {
 			var latestManual models.VerificationRun
-			cooldownErr := tx.Where("client_id = ? AND requested_by <> ?", clientID, "system:scheduler").
+			cooldownErr := tx.Where(internalVerificationRunPredicate).Where("client_id = ? AND requested_by <> ?", clientID, "system:scheduler").
 				Order("created_at DESC").First(&latestManual).Error
 			if cooldownErr == nil && time.Since(latestManual.CreatedAt) < 60*time.Second {
 				return ErrManualVerificationCooldown
@@ -197,6 +202,7 @@ func (s *VerificationJobService) Enqueue(from, to time.Time, clientID, requested
 		}
 		run = &models.VerificationRun{
 			ID: uuid.NewString(), ClientID: clientID, RequestedBy: requestedBy,
+			RunType:  models.VerificationRunTypeInternal,
 			FromTime: from, ToTime: to, Status: models.VerificationRunQueued,
 			BatchSize: batchSize, TotalItems: totalItems,
 		}
@@ -230,7 +236,7 @@ func (s *VerificationJobService) GetRun(id, clientID string) (*models.Verificati
 
 func (s *VerificationJobService) GetLatestRun(clientID string) (*models.VerificationRun, error) {
 	var run models.VerificationRun
-	err := s.db.Where("client_id = ?", clientID).Order("created_at DESC").First(&run).Error
+	err := s.db.Where(internalVerificationRunPredicate).Where("client_id = ?", clientID).Order("created_at DESC").First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -245,9 +251,17 @@ func ToVerificationRunResponse(run *models.VerificationRun) VerificationRunRespo
 			progress = 100
 		}
 	}
+	runType := run.RunType
+	if runType == "" {
+		runType = models.VerificationRunTypeInternal
+		if run.RequestedBy == "agent" {
+			runType = models.VerificationRunTypeExternal
+		}
+	}
 	return VerificationRunResponse{
 		ID:              run.ID,
 		ClientID:        run.ClientID,
+		RunType:         runType,
 		From:            run.FromTime.UTC().Format(time.RFC3339Nano),
 		To:              run.ToTime.UTC().Format(time.RFC3339Nano),
 		Status:          run.Status,
@@ -298,7 +312,8 @@ func (s *VerificationJobService) claimNextRun() (*models.VerificationRun, bool, 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? OR (status = ? AND (lease_expires_at <= ? OR (lease_expires_at IS NULL AND started_at <= ?)))", models.VerificationRunQueued, models.VerificationRunRunning, now, now.Add(-15*time.Minute)).
+			Where(internalVerificationRunPredicate).
+			Where("(status = ? OR (status = ? AND (lease_expires_at <= ? OR (lease_expires_at IS NULL AND started_at <= ?))))", models.VerificationRunQueued, models.VerificationRunRunning, now, now.Add(-15*time.Minute)).
 			Order("created_at ASC").
 			First(&run).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -484,6 +499,6 @@ func (s *VerificationJobService) markFailed(id, ownerID string, runErr error) er
 
 func (s *VerificationJobService) queuedRunCount() (int64, error) {
 	var count int64
-	err := s.db.Model(&models.VerificationRun{}).Where("status = ?", models.VerificationRunQueued).Count(&count).Error
+	err := s.db.Model(&models.VerificationRun{}).Where(internalVerificationRunPredicate).Where("status = ?", models.VerificationRunQueued).Count(&count).Error
 	return count, err
 }

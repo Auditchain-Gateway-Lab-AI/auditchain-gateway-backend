@@ -234,6 +234,7 @@ func (s *VerificationScheduler) hasActiveRun(ctx context.Context, clientID strin
 	var count int64
 	err := s.db.WithContext(ctx).
 		Model(&models.VerificationRun{}).
+		Where(internalVerificationRunPredicate).
 		Where("client_id = ? AND status IN ?", clientID, []string{
 			models.VerificationRunQueued,
 			models.VerificationRunRunning,
@@ -244,6 +245,7 @@ func (s *VerificationScheduler) hasActiveRun(ctx context.Context, clientID strin
 func (s *VerificationScheduler) latestCompletedRun(ctx context.Context, clientID string) (*models.VerificationRun, error) {
 	var run models.VerificationRun
 	err := s.db.WithContext(ctx).
+		Where(internalVerificationRunPredicate).
 		Where("client_id = ? AND status = ? AND requested_by = ?", clientID, models.VerificationRunCompleted, "system:scheduler").
 		Order("to_time DESC, completed_at DESC, created_at DESC").
 		First(&run).Error

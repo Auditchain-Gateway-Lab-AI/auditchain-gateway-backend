@@ -261,12 +261,14 @@ func (h *Handler) applyTenantWorkerMetrics(c *gin.Context, clientID string, item
 		return setLatestAttemptMetrics(db, clientID, models.IntegrityDimensionSource, "SOURCE_SWEEP", item)
 	case "RANGE_WORKER":
 		if err := db.Model(&models.VerificationRun{}).
+			Where("(run_type = 'INTERNAL' OR run_type = '' OR run_type IS NULL) AND COALESCE(requested_by, '') <> 'agent'").
 			Where("client_id = ? AND status = ?", clientID, models.VerificationRunQueued).
 			Count(&item.QueuedItems).Error; err != nil {
 			return err
 		}
 		var run models.VerificationRun
-		err := db.Where("client_id = ? AND status = ?", clientID, models.VerificationRunCompleted).
+		err := db.Where("(run_type = 'INTERNAL' OR run_type = '' OR run_type IS NULL) AND COALESCE(requested_by, '') <> 'agent'").
+			Where("client_id = ? AND status = ?", clientID, models.VerificationRunCompleted).
 			Order("completed_at DESC, created_at DESC").First(&run).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
