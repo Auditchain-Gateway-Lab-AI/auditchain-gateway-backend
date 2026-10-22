@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,6 +141,10 @@ type Service interface {
 	VerifyClientLogRange(from, to time.Time, clientID, requestID string) (*RangeVerificationResult, error)
 	VerifyRangeBatch(from, to time.Time, clientID, requestID, runID, integritySource string, limit, offset int) (RangeSummary, int, error)
 	ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error
+	ListClientTamperRecords(clientID string, query ClientTamperQuery) (*ClientTamperListResponse, error)
+	GetClientTamperRecord(clientID, id string) (*models.ClientDataTamperRecord, error)
+	RecoverClientTamperRecord(ctx context.Context, clientID, id, recoveredBy string) (*ClientTamperRecoverResponse, error)
+	DismissClientTamperRecord(clientID, id, dismissedBy, notes string) (*models.ClientDataTamperRecord, error)
 }
 
 type auditService struct {
@@ -2477,15 +2482,28 @@ type AgentAuditReportRequest struct {
 	Results            []AgentAuditLogResult `json:"results"`
 }
 
-type AgentAuditLogResult struct {
-	LogID            string `json:"log_id"`
-	Resource         string `json:"resource"`
-	Action           string `json:"action"`
-	DataStatus       string `json:"data_status"`
-	BlockchainStatus string `json:"blockchain_status"`
-	AutoRecovered    bool   `json:"auto_recovered,omitempty"`
-	Error            string `json:"error,omitempty"`
+type AgentAuditDiscrepancy struct {
+	Field    string      `json:"field"`
+	Expected interface{} `json:"expected"`
+	Actual   interface{} `json:"actual"`
 }
+
+type AgentAuditLogResult struct {
+	LogID            string                  `json:"log_id"`
+	Resource         string                  `json:"resource"`
+	Action           string                  `json:"action"`
+	DataStatus       string                  `json:"data_status"`       // VALID | TAMPERED | NOT_FOUND | ERROR
+	BlockchainStatus string                  `json:"blockchain_status"` // VALID | TAMPERED | PENDING | SKIPPED | ERROR
+	ClientHash       string                  `json:"client_hash,omitempty"`
+	OffchainHash     string                  `json:"offchain_hash,omitempty"`
+	MerkleRoot       string                  `json:"merkle_root,omitempty"`
+	BlockchainTxID   string                  `json:"blockchain_tx_id,omitempty"`
+	Discrepancies    []AgentAuditDiscrepancy `json:"discrepancies,omitempty"`
+	AutoRecovered    bool                    `json:"auto_recovered,omitempty"`
+	RecoveryError    string                  `json:"recovery_error,omitempty"`
+	Error            string                  `json:"error,omitempty"`
+}
+
 
 func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error {
 	if s.db == nil {
@@ -2512,9 +2530,8 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 	// client-source and Gateway-integrity findings in separate scopes.
 	verificationErrors := make(map[string]error)
 	for _, item := range req.Results {
-		dataStatus := strings.ToUpper(strings.TrimSpace(item.DataStatus))
 		chainStatus := strings.ToUpper(strings.TrimSpace(item.BlockchainStatus))
-		if strings.TrimSpace(item.LogID) == "" || (dataStatus != "TAMPERED" && dataStatus != "NOT_FOUND" && chainStatus != "TAMPERED") {
+		if strings.TrimSpace(item.LogID) == "" || chainStatus != "TAMPERED" {
 			continue
 		}
 		if _, verifyErr := s.VerifyLogIntegrity(item.LogID, clientID); verifyErr != nil {
@@ -2559,9 +2576,9 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 
 		if len(req.Results) > 0 {
 			for _, item := range req.Results {
+				sourceStatus := ""
 				if strings.TrimSpace(item.LogID) != "" {
 					status := models.IntegrityStatusUnreachable
-					sourceStatus := ""
 					dataStatus := strings.ToUpper(strings.TrimSpace(item.DataStatus))
 					chainStatus := strings.ToUpper(strings.TrimSpace(item.BlockchainStatus))
 					needsRecheck := dataStatus == "TAMPERED" || dataStatus == "NOT_FOUND" || chainStatus == "TAMPERED"
@@ -2604,6 +2621,81 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 					if err := tx.Model(&models.AuditLog{}).Where("log_id = ? AND client_id = ?", item.LogID, clientID).Updates(updates).Error; err != nil {
 						return fmt.Errorf("update Agent audit log status: %w", err)
 					}
+				}
+
+				// Track Client Data Tampering (comparing actual client DB hash vs offchain log hash)
+				if strings.EqualFold(item.DataStatus, "TAMPERED") {
+					sourceStatus = models.IntegrityStatusTampered
+					resParts := strings.SplitN(strings.TrimSpace(item.Resource), ":", 2)
+					recTable := "UNKNOWN"
+					recID := ""
+					if len(resParts) == 2 {
+						recTable = strings.TrimSpace(resParts[0])
+						recID = strings.TrimSpace(resParts[1])
+					} else if len(resParts) == 1 {
+						recTable = strings.TrimSpace(resParts[0])
+					}
+					discJSON, _ := json.Marshal(item.Discrepancies)
+
+					var existingTamper models.ClientDataTamperRecord
+					findErr := tx.Where("client_id = ? AND resource = ? AND status = ?", clientID, item.Resource, models.ClientTamperStatusOpen).
+						First(&existingTamper).Error
+					if findErr == nil {
+						upd := map[string]interface{}{
+							"run_id":            runID,
+							"log_id":            item.LogID,
+							"expected_hash":     item.OffchainHash,
+							"actual_hash":       item.ClientHash,
+							"discrepancies":     string(discJSON),
+							"blockchain_tx_id":  item.BlockchainTxID,
+							"last_confirmed_at": &now,
+							"recovery_error":    item.RecoveryError,
+						}
+						if item.AutoRecovered {
+							upd["status"] = models.ClientTamperStatusRecovered
+							upd["auto_recovered"] = true
+							upd["resolved_at"] = &now
+							upd["resolved_by"] = "agent_auto_recovery"
+						}
+						_ = tx.Model(&existingTamper).Updates(upd).Error
+					} else if errors.Is(findErr, gorm.ErrRecordNotFound) {
+						newRec := models.ClientDataTamperRecord{
+							ID:              uuid.New().String(),
+							ClientID:        clientID,
+							RunID:           runID,
+							Resource:        item.Resource,
+							TableName:       recTable,
+							RecordID:        recID,
+							LogID:           item.LogID,
+							Action:          item.Action,
+							ExpectedHash:    item.OffchainHash,
+							ActualHash:      item.ClientHash,
+							Discrepancies:   string(discJSON),
+							BlockchainTxID:  item.BlockchainTxID,
+							RecoveryError:   item.RecoveryError,
+							DetectedAt:      now,
+							LastConfirmedAt: &now,
+						}
+						if item.AutoRecovered {
+							newRec.Status = models.ClientTamperStatusRecovered
+							newRec.AutoRecovered = true
+							newRec.ResolvedAt = &now
+							newRec.ResolvedBy = "agent_auto_recovery"
+						} else {
+							newRec.Status = models.ClientTamperStatusOpen
+						}
+						_ = tx.Create(&newRec).Error
+					}
+				} else if strings.EqualFold(item.DataStatus, "VALID") {
+					sourceStatus = models.IntegrityStatusValid
+					_ = tx.Model(&models.ClientDataTamperRecord{}).
+						Where("client_id = ? AND resource = ? AND status = ?", clientID, item.Resource, models.ClientTamperStatusOpen).
+						Updates(map[string]interface{}{
+							"status":            models.ClientTamperStatusRecovered,
+							"resolved_at":       &now,
+							"resolved_by":       "agent_audit_verified",
+							"last_confirmed_at": &now,
+						}).Error
 				}
 
 				tableName := strings.TrimSpace(strings.SplitN(item.Resource, ":", 2)[0])

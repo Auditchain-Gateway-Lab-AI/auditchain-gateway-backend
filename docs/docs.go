@@ -79,6 +79,11 @@ const docTemplate = `{
         },
         "/auth/me": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mendapatkan informasi profil dari pengguna yang sedang login (berdasarkan JWT).",
                 "consumes": [
                     "application/json"
@@ -109,14 +114,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "put": {
+                ],
                 "description": "Memperbarui informasi profil pengguna yang sedang login. Bisa juga untuk mengubah password.",
                 "consumes": [
                     "application/json"
@@ -170,12 +175,7 @@ const docTemplate = `{
                             "$ref": "#/definitions/auth.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/auth/register": {
@@ -238,6 +238,11 @@ const docTemplate = `{
         },
         "/client": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar semua klien/perusahaan yang terdaftar.",
                 "produces": [
                     "application/json"
@@ -262,14 +267,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Mendaftarkan klien/perusahaan baru dan mengembalikan API Key.",
                 "consumes": [
                     "application/json"
@@ -311,16 +316,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/client/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil detail informasi klien beserta konfigurasi agent dan kafka-nya.",
                 "produces": [
                     "application/json"
@@ -363,16 +368,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/agent/audit-run": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.",
                 "consumes": [
                     "application/json"
@@ -410,16 +415,309 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                },
+                }
+            }
+        },
+        "/dashboard/client-tampering": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
+                ],
+                "description": "Mengambil daftar anomali/perbedaan antara hash data aktual database klien vs hash log terbaru offchain.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client Tampering"
+                ],
+                "summary": "Daftar Insiden Tampered Client Data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter status (OPEN, RECOVERED, DISMISSED, ALL)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter nama tabel",
+                        "name": "table_name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter nama resource (TABLE:ID)",
+                        "name": "resource",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Pencarian kata kunci",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Nomor halaman (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Ukuran halaman (default 10)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ClientTamperListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/client-tampering/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil detail spesifik satu insiden manipulasi data klien beserta ringkasan diskrepansi per kolom.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client Tampering"
+                ],
+                "summary": "Detail Insiden Tampered Client Data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID Rekaman Tamper",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ClientDataTamperRecord"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/client-tampering/{id}/dismiss": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menandai insiden tamper sebagai diabaikan/dismissed dengan catatan penjelasan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client Tampering"
+                ],
+                "summary": "Abaikan (Dismiss) Insiden Tampered Data Klien",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID Rekaman Tamper",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Catatan alasan pengabaian",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/audit.DismissClientTamperInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ClientDataTamperRecord"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/client-tampering/{id}/recover": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengirimkan instruksi pemulihan ke Agent klien menggunakan nilai metadata bersih dari log offchain terverifikasi.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client Tampering"
+                ],
+                "summary": "Pemulihan (Recovery) Data Klien yang Tampered",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID Rekaman Tamper",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ClientTamperRecoverResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/dashboard/inventory": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil inventaris/daftar resource unik (tabel/entity) yang terekam.",
                 "produces": [
                     "application/json"
@@ -450,16 +748,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/logs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar log terbaru dengan dukungan paginasi dan filter.",
                 "produces": [
                     "application/json"
@@ -543,16 +841,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/events": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil event recovery milik client, diurutkan dari yang terbaru.",
                 "produces": [
                     "application/json"
@@ -615,16 +913,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/events/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil detail event recovery milik client pada JWT.",
                 "produces": [
                     "application/json"
@@ -667,16 +965,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/events/{id}/verify": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memeriksa hash, Merkle proof, anchor Fabric, dan referensi recovery event.",
                 "produces": [
                     "application/json"
@@ -721,16 +1019,16 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/incidents": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil incident recovery milik client pada JWT. Kirim page/page_size untuk daftar berpaginasi; permintaan lama tanpa parameter itu tetap mengembalikan seluruh daftar.",
                 "produces": [
                     "application/json"
@@ -804,16 +1102,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/incidents/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil detail sebuah incident recovery berdasarkan ID.",
                 "produces": [
                     "application/json"
@@ -856,16 +1154,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/incidents/{id}/candidates": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil referensi terverifikasi untuk incident CLIENT_SOURCE atau GATEWAY_INTEGRITY.",
                 "produces": [
                     "application/json"
@@ -908,16 +1206,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/incidents/{id}/preflight": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memeriksa referensi PostgreSQL/Fabric dan state live sebelum recovery tanpa melakukan write.",
                 "produces": [
                     "application/json"
@@ -960,16 +1258,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/requests": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil daftar permintaan (request) recovery yang diajukan.",
                 "produces": [
                     "application/json"
@@ -1005,14 +1303,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Membekukan intent recovery sesuai scope incident setelah referensi terverifikasi dan preflight lulus.",
                 "consumes": [
                     "application/json"
@@ -1066,16 +1364,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/requests/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil status terbaru request recovery milik client pada JWT.",
                 "produces": [
                     "application/json"
@@ -1118,16 +1416,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/requests/{id}/execute": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengeksekusi request sesuai scope: memulihkan row client melalui Agent atau metadata audit Gateway yang terverifikasi.",
                 "produces": [
                     "application/json"
@@ -1176,16 +1474,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/recovery/resources/{resource}/versions": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil histori event client ter-anchor dari sebuah resource (table).",
                 "produces": [
                     "application/json"
@@ -1222,16 +1520,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/recovery.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/stats": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil statistik agregat tenant client yang sedang login. Parameter trend_range opsional menambahkan bucket agregat dari audit_logs tanpa mengirim row log.",
                 "produces": [
                     "application/json"
@@ -1279,16 +1577,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verification-runs": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Membuat job verifikasi range yang diproses backend secara bertahap. Ukuran batch membatasi pekerjaan per iterasi, bukan total log dalam range.",
                 "consumes": [
                     "application/json"
@@ -1342,16 +1640,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verification-runs/latest": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil verification run terakhir untuk tenant yang sedang login. Jika belum ada run, data bernilai null.",
                 "produces": [
                     "application/json"
@@ -1381,16 +1679,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verification-runs/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Mengambil progress dan summary verification run yang hanya boleh diakses oleh tenant pada token.",
                 "produces": [
                     "application/json"
@@ -1433,16 +1731,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Compatibility alias for the gateway dashboard. New clients should use /dashboard/verify-range/internal.",
                 "produces": [
                     "application/json"
@@ -1498,16 +1796,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/client": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memverifikasi seluruh audit log dalam rentang waktu dengan kontrak yang sama seperti gateway dashboard. Client Portal hanya menerima summary tanpa daftar row log.",
                 "produces": [
                     "application/json"
@@ -1563,16 +1861,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/estimate": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Menghitung jumlah audit log dalam rentang waktu sebelum verifikasi sinkron dijalankan.",
                 "produces": [
                     "application/json"
@@ -1622,16 +1920,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify-range/internal": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memverifikasi seluruh audit log dalam rentang waktu secara sinkron.",
                 "produces": [
                     "application/json"
@@ -1687,16 +1985,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/dashboard/verify/{log_id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Memverifikasi integritas satu log tertentu (Lapis 2, 3, dan 4).",
                 "produces": [
                     "application/json"
@@ -1751,16 +2049,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/audit.IncidentPersistenceErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/report/generate": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Men-generate laporan audit PDF atau CSV berdasarkan periode waktu tertentu.",
                 "consumes": [
                     "application/json"
@@ -1809,16 +2107,43 @@ const docTemplate = `{
                             "$ref": "#/definitions/report.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         }
     },
     "definitions": {
+        "agentverifier.ClientRecoverResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "recovered_columns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "table": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
         "agentverifier.Discrepancy": {
             "type": "object",
             "properties": {
@@ -1844,6 +2169,63 @@ const docTemplate = `{
                 }
             }
         },
+        "audit.ClientTamperListResponse": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ClientDataTamperRecord"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/audit.ClientTamperSummaryCounts"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "audit.ClientTamperRecoverResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "record": {
+                    "$ref": "#/definitions/models.ClientDataTamperRecord"
+                },
+                "result": {
+                    "$ref": "#/definitions/agentverifier.ClientRecoverResponse"
+                }
+            }
+        },
+        "audit.ClientTamperSummaryCounts": {
+            "type": "object",
+            "properties": {
+                "dismissed_count": {
+                    "type": "integer"
+                },
+                "open_count": {
+                    "type": "integer"
+                },
+                "recovered_count": {
+                    "type": "integer"
+                },
+                "total_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "audit.CreateVerificationRunRequest": {
             "type": "object",
             "required": [
@@ -1862,6 +2244,14 @@ const docTemplate = `{
                 "to": {
                     "type": "string",
                     "example": "2026-09-30T23:59:59Z"
+                }
+            }
+        },
+        "audit.DismissClientTamperInput": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "string"
                 }
             }
         },
@@ -2960,6 +3350,76 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ClientDataTamperRecord": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actual_hash": {
+                    "description": "current client database canonical hash",
+                    "type": "string"
+                },
+                "auto_recovered": {
+                    "type": "boolean"
+                },
+                "blockchain_tx_id": {
+                    "type": "string"
+                },
+                "client_id": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "discrepancies": {
+                    "description": "JSON array of column diffs",
+                    "type": "string"
+                },
+                "expected_hash": {
+                    "description": "latest offchain log hash_value",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_confirmed_at": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "record_id": {
+                    "type": "string"
+                },
+                "recovery_error": {
+                    "type": "string"
+                },
+                "resolution_notes": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by": {
+                    "type": "string"
+                },
+                "resource": {
+                    "description": "e.g. \"SATUPETA_POLYGON:1001\"",
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "OPEN | RECOVERED | DISMISSED",
+                    "type": "string"
+                },
+                "table_name": {
                     "type": "string"
                 }
             }

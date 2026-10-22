@@ -48,6 +48,21 @@ Endpoint recovery aktif hanya jika `RECOVERY_ENABLED=true`.
 Implementasi MVP hanya menulis kembali audit log target di Gateway setelah snapshot versi yang dipilih lolos dekripsi, hash, Merkle proof, dan verifikasi anchor Fabric. Menulis kembali record pada database operasional klien belum diaktifkan; jalur tersebut memerlukan Agent adapter dengan izin write-back yang eksplisit.
 Body request recovery: `incident_id`, `selected_log_id`, `reason`, dan `idempotency_key`. Untuk MVP, `selected_log_id` wajib sama dengan `log_id` pada incident target.
 
+## 2.2 Client Data Tampering & Direct Recovery
+
+Berbeda dengan `tamper_incidents` (yang digunakan untuk mendeteksi tamper internal audit log offchain di PostgreSQL vs blockchain), fitur **Client Data Tampering** difokuskan untuk mendeteksi manipulasi data pada database operasional klien (misal: Oracle).
+
+**Prinsip Domain:**
+Tampered Client Data terdeteksi saat membandingkan **hash kanonikal aktual data klien vs hash value log terbaru offchain** (`clientHash != offchainHash`).
+
+| Method | Endpoint | Auth | Keterangan |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/api/dashboard/client-tampering` | JWT | Mengambil daftar rekaman tampered data klien (filter: `status`, `table_name`, `page`, `page_size`) |
+| `GET` | `/api/dashboard/client-tampering/:id` | JWT | Detail anomali rekaman tamper beserta perbedaan kolom/discrepancies |
+| `POST` | `/api/dashboard/client-tampering/:id/recover` | JWT | Menjalankan pemulihan (recovery) baris data klien via Agent `POST /recover` |
+| `POST` | `/api/dashboard/client-tampering/:id/dismiss` | JWT | Mengabaikan (dismiss) anomali dengan catatan penjelasan |
+| `POST` | `/api/agent/audit-report` | JWT Agent | Endpoint ingest laporan audit dari Agent klien |
+
 ---
 
 ## 2. Skema Database Utama
@@ -64,6 +79,30 @@ Body request recovery: `incident_id`, `selected_log_id`, `reason`, dan `idempote
 | `fallback_actor_field` | `varchar(100)` | Fallback field aktor |
 | `action_field` | `varchar(100)` | Mapping field kustom untuk aksi |
 | `resource_field` | `varchar(100)` | Mapping field kustom untuk resource |
+
+### Tabel `client_data_tamper_records` (Dedikasi Tampered Client Data)
+| Kolom | Tipe Data | Keterangan |
+| :--- | :--- | :--- |
+| `id` | `varchar(36)` | Primary Key (UUID) |
+| `client_id` | `varchar(36)` | ID Klien (Tenant) |
+| `run_id` | `varchar(36)` | ID Batch Verifikasi/Audit yang menemukan tamper |
+| `resource` | `varchar(255)` | Format `TABLE:ID` (misal: `SATUPETA_POLYGON:1001`) |
+| `table_name` | `varchar(100)` | Nama tabel operasional klien |
+| `record_id` | `varchar(100)` | Primary key baris data pada database klien |
+| `log_id` | `varchar(100)` | Log ID offchain pembanding terbaru |
+| `action` | `varchar(30)` | Operasi aksi terakhir (`INSERT`/`UPDATE`/`DELETE`) |
+| `expected_hash` | `varchar(64)` | Hash value dari log audit offchain AuditChain |
+| `actual_hash` | `varchar(64)` | Hash kanonikal aktual data di database operasional klien |
+| `discrepancies` | `jsonb` | Detail perbedaan nilai kolom (kolom, expected, actual) |
+| `blockchain_tx_id`| `varchar(128)` | ID transaksi blockchain penjangkar offchain log |
+| `status` | `varchar(30)` | `OPEN` / `RECOVERED` / `DISMISSED` |
+| `auto_recovered` | `boolean` | `true` jika dipulihkan otomatis saat audit |
+| `recovery_error` | `text` | Catatan error jika pemulihan gagal |
+| `detected_at` | `timestamptz` | Waktu pertama kali terdeteksi |
+| `last_confirmed_at` | `timestamptz` | Waktu terakhir dikonfirmasi masih tampered |
+| `resolved_at` | `timestamptz` | Waktu pemulihan / pengabaian |
+| `resolved_by` | `varchar(100)`| Aktor pemulih (`agent_auto_recovery` / username) |
+| `resolution_notes`| `text` | Catatan dismiss |
 
 ### Tabel `agent_configs`
 | Kolom | Tipe Data | Keterangan |

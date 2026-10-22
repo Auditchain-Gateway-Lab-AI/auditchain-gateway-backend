@@ -37,5 +37,11 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		// Compatibility route for older gateway-dashboard bundles. New clients
 		// should call /verify-range/internal explicitly.
 		dashAPI.GET("/verify-range", h.VerifyLegacyLogRange)
+
+		// Client Data Tampering Endpoints (actual client DB hash vs latest offchain log hash)
+		dashAPI.GET("/client-tampering", h.ListClientTamperRecords)
+		dashAPI.GET("/client-tampering/:id", h.GetClientTamperRecord)
+		dashAPI.POST("/client-tampering/:id/recover", h.RecoverClientTamperRecord)
+		dashAPI.POST("/client-tampering/:id/dismiss", h.DismissClientTamperRecord)
 	}
 }
