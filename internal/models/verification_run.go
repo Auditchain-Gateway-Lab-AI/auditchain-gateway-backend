@@ -7,6 +7,9 @@ const (
 	VerificationRunRunning   = "RUNNING"
 	VerificationRunCompleted = "COMPLETED"
 	VerificationRunFailed    = "FAILED"
+
+	VerificationRunTypeInternal = "INTERNAL"
+	VerificationRunTypeExternal = "EXTERNAL"
 )
 
 // VerificationRun stores the durable summary of a background range
@@ -16,6 +19,7 @@ type VerificationRun struct {
 	ID       string `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	ClientID string `gorm:"type:varchar(36);not null;index" json:"client_id"`
 
+	RunType     string    `gorm:"type:varchar(20);not null;default:'INTERNAL';index" json:"run_type"`
 	RequestedBy string    `gorm:"type:varchar(100)" json:"requested_by,omitempty"`
 	FromTime    time.Time `gorm:"column:from_time;not null;index" json:"from_time"`
 	ToTime      time.Time `gorm:"column:to_time;not null;index" json:"to_time"`
