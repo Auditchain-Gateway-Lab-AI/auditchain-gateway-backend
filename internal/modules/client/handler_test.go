@@ -105,3 +105,16 @@ func TestIntegrityHistoryRequiresAuthenticatedTenant(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestIntegrityMonitoringRoutesAreRegisteredAndProtected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api"), &Handler{})
+	for _, path := range []string{"/api/dashboard/integrity-history?range=8H&dimension=proof", "/api/dashboard/worker-status"} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: got %d, want 401 for registered protected route", path, response.Code)
+		}
+	}
+}
