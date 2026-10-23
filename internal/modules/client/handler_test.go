@@ -67,3 +67,23 @@ func TestGetClientStatsRejectsUnsupportedTrendRange(t *testing.T) {
 		t.Fatalf("error = %q, want unsupported trend range message", body["error"])
 	}
 }
+
+func TestGetAdminExternalAuditOverview_NilDB(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/stats/external", nil)
+
+	(&Handler{DB: nil}).GetAdminExternalAuditOverview(ctx)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "Database tidak tersedia" {
+		t.Fatalf("error = %q, want 'Database tidak tersedia'", body["error"])
+	}
+}

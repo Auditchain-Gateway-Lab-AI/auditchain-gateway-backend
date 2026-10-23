@@ -200,8 +200,16 @@ func (s *VerificationJobService) GetRun(id, clientID string) (*models.Verificati
 }
 
 func (s *VerificationJobService) GetLatestRun(clientID string) (*models.VerificationRun, error) {
+	return s.GetLatestRunByType(clientID, "")
+}
+
+func (s *VerificationJobService) GetLatestRunByType(clientID, runType string) (*models.VerificationRun, error) {
 	var run models.VerificationRun
-	err := s.db.Where("client_id = ?", clientID).Order("created_at DESC").First(&run).Error
+	query := s.db.Where("client_id = ?", clientID)
+	if strings.TrimSpace(runType) != "" {
+		query = query.Where("run_type = ?", strings.ToUpper(strings.TrimSpace(runType)))
+	}
+	err := query.Order("created_at DESC").First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

@@ -671,6 +671,28 @@ func (s *auditService) updateRangeDashboardStats(clientID string, newlyVerified 
 			newInternalIntegrityScore = float64(newInternalTotalValid) / float64(newInternalTotalVerifications) * 100
 		}
 
+		// Upsert ke tabel terpisah: internal_audit_stats
+		var internalStat models.InternalAuditStats
+		if err := tx.Where("client_id = ?", clientID).First(&internalStat).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				internalStat = models.InternalAuditStats{
+					ClientID: clientID,
+				}
+				_ = tx.Create(&internalStat).Error
+			}
+		}
+		_ = tx.Model(&internalStat).Updates(map[string]interface{}{
+			"total_verifications":  newInternalTotalVerifications,
+			"total_rows_verified":  gorm.Expr("total_rows_verified + ?", len(newlyVerified)),
+			"total_valid":          newInternalTotalValid,
+			"total_tampered":       newInternalTotalTampered,
+			"total_pending":        newInternalTotalPending,
+			"integrity_score":      newInternalIntegrityScore,
+			"last_verified_at":     now,
+			"last_verified_table":  "MULTIPLE (Audit Range)",
+			"table_verify_results": string(newJSON),
+		}).Error
+
 		return tx.Model(&stat).Updates(map[string]interface{}{
 			"last_verified_at":             now,
 			"last_verified_table":          "MULTIPLE (Audit Range)",
@@ -2854,6 +2876,37 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 		if err := tx.Model(&stat).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update client stats: %w", err)
 		}
+
+		// Upsert ke tabel terpisah: external_audit_stats
+		var externalStat models.ExternalAuditStats
+		if err := tx.Where("client_id = ?", clientID).First(&externalStat).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				externalStat = models.ExternalAuditStats{
+					ClientID: clientID,
+				}
+				_ = tx.Create(&externalStat).Error
+			}
+		}
+		extUpdates := map[string]interface{}{
+			"total_audited":        newExternalTotalAudited,
+			"total_valid":          newExternalTotalValid,
+			"total_tampered":       newExternalTotalTampered,
+			"total_pending":        newExternalTotalPending,
+			"integrity_score":      newExternalIntegrityScore,
+			"last_audited_at":      &now,
+			"table_verify_results": string(extJSON),
+		}
+		if req.AutoRecoveredCount > 0 {
+			extUpdates["total_recoveries"] = gorm.Expr("total_recoveries + ?", req.AutoRecoveredCount)
+		}
+		if totalTampered > 0 {
+			extUpdates["total_tamper_incidents"] = gorm.Expr("total_tamper_incidents + ?", totalTampered)
+			unrecovered := totalTampered - int64(req.AutoRecoveredCount)
+			if unrecovered > 0 {
+				extUpdates["open_tamper_incidents"] = gorm.Expr("open_tamper_incidents + ?", unrecovered)
+			}
+		}
+		_ = tx.Model(&externalStat).Updates(extUpdates).Error
 
 		return nil
 	})
