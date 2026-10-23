@@ -253,12 +253,14 @@ func (s *Service) ListIncidents(ctx context.Context, clientID string, filter Inc
 	)`
 
 	base := s.db.WithContext(ctx).Model(&models.TamperIncident{}).Where("client_id = ?", clientID)
+	if scope := strings.ToUpper(strings.TrimSpace(filter.Scope)); scope != "" && scope != "ALL" {
+		base = base.Where("incident_scope = ?", scope)
+	}
 	var openCount, activeCount int64
-	if err := base.Where("status = ?", models.IncidentStatusOpen).Count(&openCount).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Where("status = ?", models.IncidentStatusOpen).Count(&openCount).Error; err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.TamperIncident{}).
-		Where("client_id = ? AND status = ?", clientID, models.IncidentStatusOpen).
+	if err := base.Session(&gorm.Session{}).Where("status = ?", models.IncidentStatusOpen).
 		Where(activeIncidentSQL, activeStatuses).Count(&activeCount).Error; err != nil {
 		return nil, err
 	}
