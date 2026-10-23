@@ -804,6 +804,9 @@ func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceReco
 			})
 			continue
 		}
+		expectedValue, actualValue = normalizeTemporalValuePair(key, expectedValue, actualValue)
+		expectedCanonical[key] = expectedValue
+		actualCanonical[key] = actualValue
 		projected[key] = actualValue
 		expectedJSON, _ := json.Marshal(expectedValue)
 		actualJSON, _ := json.Marshal(actualValue)
@@ -812,6 +815,11 @@ func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceReco
 				Field: key, InLog: string(expectedJSON), InAgent: string(actualJSON),
 			})
 		}
+	}
+	result.OffchainHash, err = HashResourceState(auditLog.ClientID, auditLog.Resource, expectedCanonical)
+	if err != nil {
+		result.Discrepancies = []Discrepancy{{Field: "offchain_state", InLog: "canonical state", InAgent: "hash failed"}}
+		return result
 	}
 	if len(projected) != len(expectedCanonical) {
 		return result
@@ -929,6 +937,87 @@ func formatValueToString(val interface{}) string {
 		return v
 	default:
 		return fmt.Sprintf("%v", v)
+	}
+}
+
+// normalizeTemporalValuePair treats Debezium epoch values and Agent RFC3339
+// values as the same state when they identify the exact same instant. This is
+// limited to temporal columns so ordinary numeric fields remain type-strict.
+func normalizeTemporalValuePair(field string, expected, actual interface{}) (interface{}, interface{}) {
+	if !isTemporalStateField(field) {
+		return expected, actual
+	}
+	if !isRFC3339StateValue(expected) && !isRFC3339StateValue(actual) {
+		return expected, actual
+	}
+	expectedTime, expectedOK := parseTemporalStateValue(expected)
+	actualTime, actualOK := parseTemporalStateValue(actual)
+	if !expectedOK || !actualOK || !expectedTime.Equal(actualTime) {
+		return expected, actual
+	}
+
+	canonical := expectedTime.UTC().Format(time.RFC3339Nano)
+	return canonical, canonical
+}
+
+func isTemporalStateField(field string) bool {
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, suffix := range []string{"_date", "_time", "_timestamp", "_at", "_on", "_tanggal", "_tgl", "_waktu"} {
+		if strings.HasSuffix(field, suffix) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"date_", "time_", "timestamp_", "tanggal_", "tgl_", "waktu_"} {
+		if strings.HasPrefix(field, prefix) {
+			return true
+		}
+	}
+	switch field {
+	case "date", "time", "timestamp", "tanggal", "tgl", "waktu":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRFC3339StateValue(value interface{}) bool {
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(text))
+	return err == nil
+}
+
+func parseTemporalStateValue(value interface{}) (time.Time, bool) {
+	if value == nil {
+		return time.Time{}, false
+	}
+	raw := strings.TrimSpace(formatValueToString(value))
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return parsed.UTC(), true
+	}
+
+	epoch, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(epoch) || math.IsInf(epoch, 0) || math.Abs(epoch) > 1e17 {
+		return time.Time{}, false
+	}
+	magnitude := math.Abs(epoch)
+	switch {
+	case magnitude >= 1e14: // Debezium microseconds
+		microseconds := int64(math.Round(epoch))
+		seconds := microseconds / 1_000_000
+		nanoseconds := (microseconds % 1_000_000) * 1_000
+		return time.Unix(seconds, nanoseconds).UTC(), true
+	case magnitude >= 1e11: // Debezium milliseconds
+		return time.UnixMilli(int64(math.Round(epoch))).UTC(), true
+	default: // Epoch seconds, including fractional seconds
+		seconds := int64(math.Trunc(epoch))
+		nanoseconds := int64(math.Round((epoch - float64(seconds)) * float64(time.Second)))
+		return time.Unix(seconds, nanoseconds).UTC(), true
 	}
 }
 
