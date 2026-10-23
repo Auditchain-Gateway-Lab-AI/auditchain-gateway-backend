@@ -331,7 +331,6 @@ func HashResourceState(clientID, resource string, state map[string]interface{}) 
 	return hash, err
 }
 
-
 // ClientRecoverPayload is the request body sent directly to the agent's POST /recover.
 type ClientRecoverPayload struct {
 	Resource string                 `json:"resource"`

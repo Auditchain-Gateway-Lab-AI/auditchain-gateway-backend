@@ -15,12 +15,12 @@ import (
 
 type clientTamperServiceStub struct {
 	Service
-	listCalled     bool
-	getCalled      bool
-	recoverCalled  bool
-	dismissCalled  bool
-	lastClientID   string
-	lastID         string
+	listCalled      bool
+	getCalled       bool
+	recoverCalled   bool
+	dismissCalled   bool
+	lastClientID    string
+	lastID          string
 	lastRecoveredBy string
 	lastDismissedBy string
 	lastNotes       string
@@ -76,10 +76,10 @@ func (s *clientTamperServiceStub) RecoverClientTamperRecord(_ context.Context, c
 	s.lastRecoveredBy = recoveredBy
 	return &ClientTamperRecoverResponse{
 		Record: models.ClientDataTamperRecord{
-			ID:          id,
-			ClientID:    clientID,
-			Status:      models.ClientTamperStatusRecovered,
-			ResolvedBy:  recoveredBy,
+			ID:         id,
+			ClientID:   clientID,
+			Status:     models.ClientTamperStatusRecovered,
+			ResolvedBy: recoveredBy,
 		},
 		Result: &agentverifier.ClientRecoverResponse{
 			Status:    "SUCCESS",

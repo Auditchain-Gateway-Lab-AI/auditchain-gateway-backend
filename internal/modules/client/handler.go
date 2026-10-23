@@ -230,32 +230,32 @@ type ExternalAuditStatsResponse struct {
 }
 
 type DashboardStatsDataResponse struct {
-	ID                 uint                    `json:"id" example:"1"`
-	ClientID           string                  `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
-	TotalLogs          int64                   `json:"total_logs" example:"100"`
-	LogsToday          int64                   `json:"logs_today" example:"12"`
-	TotalTablesAudited int                     `json:"total_tables_audited" example:"8"`
-	TotalInserts       int64                   `json:"total_inserts" example:"40"`
-	TotalUpdates       int64                   `json:"total_updates" example:"50"`
-	TotalDeletes       int64                   `json:"total_deletes" example:"10"`
-	LastLogAt          *time.Time              `json:"last_log_at,omitempty"`
-	TotalAnchored      int64                   `json:"total_anchored" example:"95"`
-	AnchoredLogs       int64                   `json:"anchored_logs" example:"95"`
-	TotalPending       int64                   `json:"total_pending" example:"5"`
-	PendingLogs        int64                   `json:"pending_logs" example:"5"`
-	AnchorPercentage   float64                 `json:"anchor_percentage" example:"95.00"`
+	ID                 uint       `json:"id" example:"1"`
+	ClientID           string     `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	TotalLogs          int64      `json:"total_logs" example:"100"`
+	LogsToday          int64      `json:"logs_today" example:"12"`
+	TotalTablesAudited int        `json:"total_tables_audited" example:"8"`
+	TotalInserts       int64      `json:"total_inserts" example:"40"`
+	TotalUpdates       int64      `json:"total_updates" example:"50"`
+	TotalDeletes       int64      `json:"total_deletes" example:"10"`
+	LastLogAt          *time.Time `json:"last_log_at,omitempty"`
+	TotalAnchored      int64      `json:"total_anchored" example:"95"`
+	AnchoredLogs       int64      `json:"anchored_logs" example:"95"`
+	TotalPending       int64      `json:"total_pending" example:"5"`
+	PendingLogs        int64      `json:"pending_logs" example:"5"`
+	AnchorPercentage   float64    `json:"anchor_percentage" example:"95.00"`
 
 	// Legacy / Total Verification Stats
-	TotalVerifications int64                   `json:"total_verifications" example:"80"`
-	TotalRowsVerified  int64                   `json:"total_rows_verified" example:"80"`
-	TotalValid         int64                   `json:"total_valid" example:"78"`
-	TotalTampered      int64                   `json:"total_tampered" example:"2"`
-	TotalVerifyPending int64                   `json:"total_verify_pending" example:"0"`
-	TotalAgentError    int64                   `json:"total_agent_error" example:"0"`
-	TotalFabricError   int64                   `json:"total_fabric_error" example:"0"`
-	IntegrityScore     float64                 `json:"integrity_score" example:"97.50"`
-	LastVerifiedAt     *time.Time              `json:"last_verified_at,omitempty"`
-	LastVerifiedTable  string                  `json:"last_verified_table" example:"users"`
+	TotalVerifications int64      `json:"total_verifications" example:"80"`
+	TotalRowsVerified  int64      `json:"total_rows_verified" example:"80"`
+	TotalValid         int64      `json:"total_valid" example:"78"`
+	TotalTampered      int64      `json:"total_tampered" example:"2"`
+	TotalVerifyPending int64      `json:"total_verify_pending" example:"0"`
+	TotalAgentError    int64      `json:"total_agent_error" example:"0"`
+	TotalFabricError   int64      `json:"total_fabric_error" example:"0"`
+	IntegrityScore     float64    `json:"integrity_score" example:"97.50"`
+	LastVerifiedAt     *time.Time `json:"last_verified_at,omitempty"`
+	LastVerifiedTable  string     `json:"last_verified_table" example:"users"`
 
 	// Audit Internal (Offchain Log vs Blockchain Merkle Root)
 	InternalAudit              InternalAuditStatsResponse `json:"internal_audit"`
@@ -267,14 +267,14 @@ type DashboardStatsDataResponse struct {
 	InternalLastVerifiedAt     *time.Time                 `json:"internal_last_verified_at,omitempty"`
 
 	// Audit External (Client DB vs Offchain & Blockchain)
-	ExternalAudit              ExternalAuditStatsResponse `json:"external_audit"`
-	ExternalTotalAudited       int64                      `json:"external_total_audited" example:"50"`
-	ExternalTotalValid         int64                      `json:"external_total_valid" example:"49"`
-	ExternalTotalTampered      int64                      `json:"external_total_tampered" example:"1"`
-	ExternalTotalPending       int64                      `json:"external_total_pending" example:"0"`
-	ExternalIntegrityScore     float64                    `json:"external_integrity_score" example:"98.00"`
-	ExternalLastAuditedAt      *time.Time                 `json:"external_last_audited_at,omitempty"`
-	ExternalTableResults       map[string]interface{}     `json:"external_table_results,omitempty" swaggertype:"object"`
+	ExternalAudit          ExternalAuditStatsResponse `json:"external_audit"`
+	ExternalTotalAudited   int64                      `json:"external_total_audited" example:"50"`
+	ExternalTotalValid     int64                      `json:"external_total_valid" example:"49"`
+	ExternalTotalTampered  int64                      `json:"external_total_tampered" example:"1"`
+	ExternalTotalPending   int64                      `json:"external_total_pending" example:"0"`
+	ExternalIntegrityScore float64                    `json:"external_integrity_score" example:"98.00"`
+	ExternalLastAuditedAt  *time.Time                 `json:"external_last_audited_at,omitempty"`
+	ExternalTableResults   map[string]interface{}     `json:"external_table_results,omitempty" swaggertype:"object"`
 
 	IntegrityCheck     IntegrityCheckResponse  `json:"integrity_check"`
 	TableVerifyResults map[string]interface{}  `json:"table_verify_results" swaggertype:"object"`
@@ -1582,13 +1582,13 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 			"last_audited_at":      stats.ExternalLastAuditedAt,
 			"table_verify_results": externalTableResults,
 		},
-		"external_total_audited":       stats.ExternalTotalAudited,
-		"external_total_valid":         stats.ExternalTotalValid,
-		"external_total_tampered":      stats.ExternalTotalTampered,
-		"external_total_pending":       stats.ExternalTotalPending,
-		"external_integrity_score":     stats.ExternalIntegrityScore,
-		"external_last_audited_at":     stats.ExternalLastAuditedAt,
-		"external_table_results":       externalTableResults,
+		"external_total_audited":   stats.ExternalTotalAudited,
+		"external_total_valid":     stats.ExternalTotalValid,
+		"external_total_tampered":  stats.ExternalTotalTampered,
+		"external_total_pending":   stats.ExternalTotalPending,
+		"external_integrity_score": stats.ExternalIntegrityScore,
+		"external_last_audited_at": stats.ExternalLastAuditedAt,
+		"external_table_results":   externalTableResults,
 
 		"integrity_check": IntegrityCheckResponse{
 			Source:      stats.LastCheckSource,
@@ -1619,7 +1619,6 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"data":          data,
 	})
 }
-
 
 // @Summary Get client internal audit statistics (Admin only)
 // @Description Mengambil statistik agregat audit internal klien tertentu (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root). Khusus Admin.
@@ -1785,7 +1784,6 @@ func (h *Handler) GetClientExternalStats(c *gin.Context) {
 	})
 }
 
-
 // @Summary Get admin external audit overview
 // @Description Mengambil ringkasan dan kompilasi statistik audit external dari semua klien (data operasional klien vs offchain log & blockchain).
 // @Tags Admin
@@ -1943,7 +1941,6 @@ func (h *Handler) GetAdminExternalAuditOverview(c *gin.Context) {
 		"data":    overview,
 	})
 }
-
 
 // @Summary Get admin internal audit overview
 // @Description Mengambil ringkasan dan kompilasi statistik audit internal (log offchain PostgreSQL Gateway vs Merkle Root Blockchain) dari seluruh klien. Khusus Admin.
