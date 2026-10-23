@@ -68,6 +68,12 @@ type AuditLog struct {
 	SourceIntegrityStatus    string     `gorm:"type:varchar(20);index;default:'NOT_CHECKED'" json:"source_integrity_status"`
 	SourceIntegrityCheckedAt *time.Time `gorm:"index" json:"source_integrity_checked_at,omitempty"`
 	SourceIntegrityError     string     `gorm:"type:text" json:"source_integrity_error,omitempty"`
+
+	// Operational confirmation state, never included in the audit leaf hash.
+	// A source mismatch must survive a later sweep before it becomes a recovery incident.
+	SourceMismatchFirstSeenAt *time.Time `json:"-"`
+	SourceMismatchStateHash   string     `gorm:"type:varchar(64)" json:"-"`
+	SourceMismatchReference   string     `gorm:"type:varchar(64)" json:"-"`
 }
 
 type MerkleMetadata struct {

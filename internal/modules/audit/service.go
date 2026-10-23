@@ -870,9 +870,9 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 	return result, err
 }
 
-// VerifyClientSourceIntegrity checks only the live client row for its latest
-// event. Proof/Fabric validation is owned by the proof scanner and is not
-// repeated by the source sweep.
+// VerifyClientSourceIntegrity checks the latest live client state. A persistent
+// mismatch additionally requires fresh proof validation and a second source read
+// before it can become a client recovery incident.
 func (s *auditService) VerifyClientSourceIntegrity(logID, clientID, attemptID string) (*VerificationResult, error) {
 	if attemptID == "" {
 		attemptID = uuid.NewString()
@@ -898,34 +898,18 @@ func (s *auditService) VerifyClientSourceIntegrity(logID, clientID, attemptID st
 		if agentErr != nil {
 			result.AgentStatus, result.SourceStatus = agentFailureStatuses(agentErr)
 			sourceErr = agentErr
-		} else if agentResult == nil || !agentResult.AgentUsed {
-			result.SourceStatus = models.SourceStatusNotComparable
-			result.AgentStatus = "not_configured"
 		} else {
-			result.AgentStatus = "matched"
-			result.SourceStateHash = agentResult.ClientStateHash
-			result.OffchainStateHash = agentResult.OffchainStateHash
-			result.SourceCheckedAt = agentResult.SourceCheckedAt
-			result.StateComparison = agentResult.StateComparison
-			result.ComparisonBasis = agentResult.ComparisonBasis
-			result.AuditTrailStatus = agentResult.AuditTrailStatus
-			result.AgentDiscrepancies = agentResult.Discrepancies
-			result.AuditTrailDiffs = agentResult.AuditTrailDiffs
-			if !agentResult.StateComparable {
-				result.SourceStatus = models.SourceStatusNotComparable
-				result.AgentStatus = "not_comparable"
-			} else if agentResult.IsMatch {
-				result.SourceStatus = models.SourceStatusMatched
-				result.AgentStatus = "matched"
-			} else {
-				result.SourceStatus = sourceStatusFromAgentResult(*auditLog, agentResult)
-				result.AgentStatus = "mismatch"
-			}
+			applySourceComparison(result, auditLog, agentResult)
 		}
 	}
 
 	if result.SourceStatus == "" {
 		result.SourceStatus = models.SourceStatusNotComparable
+	}
+	if sourceErr == nil {
+		sourceErr = s.sourceRecoveryWorkflow(attemptID).confirm(*auditLog, result)
+	} else if clearErr := s.clearSourceMismatch(*auditLog); clearErr != nil {
+		sourceErr = errors.Join(sourceErr, clearErr)
 	}
 	if result.SourceStatus == models.SourceStatusMatched {
 		result.Status = "success"
@@ -934,7 +918,9 @@ func (s *auditService) VerifyClientSourceIntegrity(logID, clientID, attemptID st
 	} else {
 		result.Status = "inconclusive"
 	}
-	result.Assessment = verificationAssessment("SOURCE_ONLY", result.SourceStatus, result.AgentStatus, result.AuditTrailStatus)
+	if result.Assessment == "" {
+		result.Assessment = verificationAssessment("SOURCE_ONLY", result.SourceStatus, result.AgentStatus, result.AuditTrailStatus)
+	}
 	if result.SourceCheckedAt == nil {
 		checkedAt := time.Now().UTC()
 		result.SourceCheckedAt = &checkedAt
@@ -943,9 +929,6 @@ func (s *auditService) VerifyClientSourceIntegrity(logID, clientID, attemptID st
 		return result, persistErr
 	}
 	s.recordLatestIntegrityCheck(clientID, "SOURCE_SWEEP", "", 1)
-	if shouldRecordClientSourceIncident(result.ProofStatus, result.SourceStatus) {
-		s.recordClientSourceIncident(*auditLog, result.SourceStatus, result.SourceStateHash, result.AgentDiscrepancies)
-	}
 	return result, sourceErr
 }
 
