@@ -177,6 +177,39 @@ type AdminExternalAuditOverviewEnvelope struct {
 	Data    AdminExternalAuditOverviewResponse `json:"data"`
 }
 
+type ClientInternalAuditSummaryItem struct {
+	ClientID           string     `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	CompanyName        string     `json:"company_name" example:"PT Karya Bangsa"`
+	Status             string     `json:"status" example:"active"`
+	HasInternalAudit   bool       `json:"has_internal_audit" example:"true"`
+	TotalVerifications int64      `json:"total_verifications" example:"80"`
+	TotalRowsVerified  int64      `json:"total_rows_verified" example:"80"`
+	TotalValid         int64      `json:"total_valid" example:"80"`
+	TotalTampered      int64      `json:"total_tampered" example:"0"`
+	TotalPending       int64      `json:"total_pending" example:"0"`
+	IntegrityScore     float64    `json:"integrity_score" example:"100.00"`
+	LastVerifiedAt     *time.Time `json:"last_verified_at,omitempty"`
+	AuditStatus        string     `json:"audit_status" example:"clean"`
+}
+
+type AdminInternalAuditOverviewResponse struct {
+	TotalClients          int64                            `json:"total_clients" example:"10"`
+	TotalClientsVerified  int64                            `json:"total_clients_verified" example:"7"`
+	TotalVerifications    int64                            `json:"total_verifications" example:"500"`
+	TotalRowsVerified     int64                            `json:"total_rows_verified" example:"35000"`
+	TotalValidRows        int64                            `json:"total_valid_rows" example:"34980"`
+	TotalTamperedRows     int64                            `json:"total_tampered_rows" example:"20"`
+	TotalPendingRows      int64                            `json:"total_pending_rows" example:"0"`
+	OverallIntegrityScore float64                          `json:"overall_integrity_score" example:"99.94"`
+	LastVerifiedAt        *time.Time                       `json:"last_verified_at,omitempty"`
+	Clients               []ClientInternalAuditSummaryItem `json:"clients"`
+}
+
+type AdminInternalAuditOverviewEnvelope struct {
+	Message string                             `json:"message" example:"Berhasil mengambil ringkasan statistik audit internal semua klien"`
+	Data    AdminInternalAuditOverviewResponse `json:"data"`
+}
+
 type InternalAuditStatsResponse struct {
 	TotalVerifications int64      `json:"total_verifications" example:"80"`
 	TotalValid         int64      `json:"total_valid" example:"80"`
@@ -1588,24 +1621,30 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 }
 
 
-// @Summary Get internal audit statistics
-// @Description Mengambil statistik agregat audit internal (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root).
-// @Tags Dashboard
+// @Summary Get client internal audit statistics (Admin only)
+// @Description Mengambil statistik agregat audit internal klien tertentu (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root). Khusus Admin.
+// @Tags Admin
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} InternalStatsEnvelope "Statistik audit internal"
-// @Failure 401 {object} ErrorResponse "Client ID tidak ditemukan atau tidak valid pada token"
+// @Param id path string true "Client ID"
+// @Success 200 {object} InternalStatsEnvelope "Statistik audit internal klien"
+// @Failure 400 {object} ErrorResponse "ID klien tidak boleh kosong"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - Hanya admin yang diizinkan"
 // @Failure 500 {object} ErrorResponse "Gagal mengambil statistik audit internal"
-// @Router /dashboard/stats/internal [get]
+// @Router /admin/clients/{id}/stats/internal [get]
 func (h *Handler) GetClientInternalStats(c *gin.Context) {
-	clientIDValue, exists := c.Get("client_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan pada token"})
-		return
+	clientID := strings.TrimSpace(c.Param("id"))
+	if clientID == "" {
+		clientIDValue, exists := c.Get("client_id")
+		if exists {
+			if idStr, ok := clientIDValue.(string); ok {
+				clientID = strings.TrimSpace(idStr)
+			}
+		}
 	}
-	clientID, ok := clientIDValue.(string)
-	if !ok || strings.TrimSpace(clientID) == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID pada token tidak valid"})
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID klien tidak boleh kosong"})
 		return
 	}
 
@@ -1901,6 +1940,145 @@ func (h *Handler) GetAdminExternalAuditOverview(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Berhasil mengambil ringkasan statistik audit external semua klien",
+		"data":    overview,
+	})
+}
+
+
+// @Summary Get admin internal audit overview
+// @Description Mengambil ringkasan dan kompilasi statistik audit internal (log offchain PostgreSQL Gateway vs Merkle Root Blockchain) dari seluruh klien. Khusus Admin.
+// @Tags Admin
+// @Produce json
+// @Security BearerAuth
+// @Param client_id query string false "Filter berdasarkan Client ID"
+// @Success 200 {object} AdminInternalAuditOverviewEnvelope "Ringkasan statistik audit internal seluruh klien"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - Hanya admin yang diizinkan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil data statistik internal"
+// @Router /admin/stats/internal [get]
+func (h *Handler) GetAdminInternalAuditOverview(c *gin.Context) {
+	if h.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database tidak tersedia"})
+		return
+	}
+
+	filterClientID := strings.TrimSpace(c.Query("client_id"))
+
+	clientQuery := h.DB.Order("created_at ASC")
+	if filterClientID != "" {
+		clientQuery = clientQuery.Where("id = ?", filterClientID)
+	}
+
+	var clients []models.Client
+	if err := clientQuery.Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar klien"})
+		return
+	}
+
+	var stats []models.InternalAuditStats
+	if err := h.DB.Find(&stats).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik audit internal"})
+		return
+	}
+	statsMap := make(map[string]models.InternalAuditStats)
+	for _, s := range stats {
+		statsMap[s.ClientID] = s
+	}
+
+	var dashStats []models.ClientDashboardStats
+	if err := h.DB.Find(&dashStats).Error; err == nil {
+		for _, ds := range dashStats {
+			if _, ok := statsMap[ds.ClientID]; !ok && (ds.InternalTotalVerifications > 0 || ds.TotalRowsVerified > 0) {
+				statsMap[ds.ClientID] = models.InternalAuditStats{
+					ClientID:           ds.ClientID,
+					TotalVerifications: ds.InternalTotalVerifications,
+					TotalRowsVerified:  ds.TotalRowsVerified,
+					TotalValid:         ds.InternalTotalValid,
+					TotalTampered:      ds.InternalTotalTampered,
+					TotalPending:       ds.InternalTotalPending,
+					IntegrityScore:     ds.InternalIntegrityScore,
+					LastVerifiedAt:     ds.InternalLastVerifiedAt,
+					LastVerifiedTable:  ds.LastVerifiedTable,
+					TableVerifyResults: ds.TableVerifyResults,
+				}
+			}
+		}
+	}
+
+	var (
+		totalClientsVerified int64
+		totalVerifications   int64
+		totalRowsVerified    int64
+		totalValidRows       int64
+		totalTamperedRows    int64
+		totalPendingRows     int64
+		latestVerifiedAt     *time.Time
+		clientSummaries      = make([]ClientInternalAuditSummaryItem, 0, len(clients))
+	)
+
+	for _, cl := range clients {
+		st, hasStats := statsMap[cl.ID]
+
+		item := ClientInternalAuditSummaryItem{
+			ClientID:           cl.ID,
+			CompanyName:        cl.CompanyName,
+			Status:             cl.Status,
+			HasInternalAudit:   hasStats && (st.TotalVerifications > 0 || st.TotalRowsVerified > 0),
+			TotalVerifications: st.TotalVerifications,
+			TotalRowsVerified:  st.TotalRowsVerified,
+			TotalValid:         st.TotalValid,
+			TotalTampered:      st.TotalTampered,
+			TotalPending:       st.TotalPending,
+			IntegrityScore:     100.0,
+			LastVerifiedAt:     st.LastVerifiedAt,
+			AuditStatus:        "unverified",
+		}
+
+		if item.HasInternalAudit {
+			totalClientsVerified++
+			item.IntegrityScore = st.IntegrityScore
+			if item.TotalTampered > 0 {
+				item.AuditStatus = "tampered"
+			} else {
+				item.AuditStatus = "clean"
+			}
+
+			totalVerifications += st.TotalVerifications
+			totalRowsVerified += st.TotalRowsVerified
+			totalValidRows += st.TotalValid
+			totalTamperedRows += st.TotalTampered
+			totalPendingRows += st.TotalPending
+
+			if st.LastVerifiedAt != nil {
+				if latestVerifiedAt == nil || st.LastVerifiedAt.After(*latestVerifiedAt) {
+					latestVerifiedAt = st.LastVerifiedAt
+				}
+			}
+		}
+
+		clientSummaries = append(clientSummaries, item)
+	}
+
+	overallScore := 100.0
+	if totalRowsVerified > 0 {
+		overallScore = math.Round((float64(totalValidRows)/float64(totalRowsVerified))*10000) / 100
+	}
+
+	overview := AdminInternalAuditOverviewResponse{
+		TotalClients:          int64(len(clients)),
+		TotalClientsVerified:  totalClientsVerified,
+		TotalVerifications:    totalVerifications,
+		TotalRowsVerified:     totalRowsVerified,
+		TotalValidRows:        totalValidRows,
+		TotalTamperedRows:     totalTamperedRows,
+		TotalPendingRows:      totalPendingRows,
+		OverallIntegrityScore: overallScore,
+		LastVerifiedAt:        latestVerifiedAt,
+		Clients:               clientSummaries,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil mengambil ringkasan statistik audit internal semua klien",
 		"data":    overview,
 	})
 }

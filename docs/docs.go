@@ -19,6 +19,64 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/clients/{id}/stats/internal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil statistik agregat audit internal klien tertentu (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root). Khusus Admin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Get client internal audit statistics (Admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Client ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Statistik audit internal klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.InternalStatsEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "ID klien tidak boleh kosong",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Hanya admin yang diizinkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil statistik audit internal",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/stats/external": {
             "get": {
                 "security": [
@@ -55,6 +113,57 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Gagal mengambil data statistik external",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/stats/internal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil ringkasan dan kompilasi statistik audit internal (log offchain PostgreSQL Gateway vs Merkle Root Blockchain) dari seluruh klien. Khusus Admin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Get admin internal audit overview",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter berdasarkan Client ID",
+                        "name": "client_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Ringkasan statistik audit internal seluruh klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.AdminInternalAuditOverviewEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Hanya admin yang diizinkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil data statistik internal",
                         "schema": {
                             "$ref": "#/definitions/client.ErrorResponse"
                         }
@@ -1706,43 +1815,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/dashboard/stats/internal": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Mengambil statistik agregat audit internal (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root).",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Dashboard"
-                ],
-                "summary": "Get internal audit statistics",
-                "responses": {
-                    "200": {
-                        "description": "Statistik audit internal",
-                        "schema": {
-                            "$ref": "#/definitions/client.InternalStatsEnvelope"
-                        }
-                    },
-                    "401": {
-                        "description": "Client ID tidak ditemukan atau tidak valid pada token",
-                        "schema": {
-                            "$ref": "#/definitions/client.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Gagal mengambil statistik audit internal",
-                        "schema": {
-                            "$ref": "#/definitions/client.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/dashboard/verification-runs": {
             "post": {
                 "security": [
@@ -3084,6 +3156,64 @@ const docTemplate = `{
                 }
             }
         },
+        "client.AdminInternalAuditOverviewEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/client.AdminInternalAuditOverviewResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil ringkasan statistik audit internal semua klien"
+                }
+            }
+        },
+        "client.AdminInternalAuditOverviewResponse": {
+            "type": "object",
+            "properties": {
+                "clients": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/client.ClientInternalAuditSummaryItem"
+                    }
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "overall_integrity_score": {
+                    "type": "number",
+                    "example": 99.94
+                },
+                "total_clients": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_clients_verified": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "total_pending_rows": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 35000
+                },
+                "total_tampered_rows": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "total_valid_rows": {
+                    "type": "integer",
+                    "example": 34980
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 500
+                }
+            }
+        },
         "client.ClientDetailResponse": {
             "type": "object",
             "properties": {
@@ -3155,6 +3285,58 @@ const docTemplate = `{
                 "total_valid": {
                     "type": "integer",
                     "example": 4990
+                }
+            }
+        },
+        "client.ClientInternalAuditSummaryItem": {
+            "type": "object",
+            "properties": {
+                "audit_status": {
+                    "type": "string",
+                    "example": "clean"
+                },
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "company_name": {
+                    "type": "string",
+                    "example": "PT Karya Bangsa"
+                },
+                "has_internal_audit": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 100
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 80
                 }
             }
         },
