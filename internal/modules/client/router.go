@@ -34,6 +34,10 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.GET("/clients/:id/agent-config", h.GetAgentConfig)
 		adminRoutes.DELETE("/clients/:id/agent-config", h.DeleteAgentConfig)
 		adminRoutes.GET("/clients/:id/agent-ping", h.PingAgentConfig)
+
+		// External Audit Overview for Admin
+		adminRoutes.GET("/stats/external", h.GetAdminExternalAuditOverview)
+		adminRoutes.GET("/external-audit-stats", h.GetAdminExternalAuditOverview)
 	}
 
 	// Dashboard Routes (Untuk Client yang login)
@@ -43,6 +47,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashRoutes.GET("/actor-config", h.GetActorConfig)
 		dashRoutes.PATCH("/actor-config", h.UpdateActorConfig)
 		dashRoutes.GET("/stats", h.GetClientStats)
+		dashRoutes.GET("/stats/internal", h.GetClientInternalStats)
+		dashRoutes.GET("/stats/external", h.GetClientExternalStats)
 	}
 
 	// Public Telemetry & Installer Routes (dapat diakses oleh install.sh)

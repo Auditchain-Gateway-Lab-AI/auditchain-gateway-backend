@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -96,6 +97,105 @@ type DashboardStatsResponse struct {
 	Data         DashboardStatsDataResponse `json:"data"`
 }
 
+type InternalAuditStatsDetailResponse struct {
+	ID                 uint                   `json:"id" example:"1"`
+	ClientID           string                 `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	TotalVerifications int64                  `json:"total_verifications" example:"80"`
+	TotalRowsVerified  int64                  `json:"total_rows_verified" example:"80"`
+	TotalValid         int64                  `json:"total_valid" example:"80"`
+	TotalTampered      int64                  `json:"total_tampered" example:"0"`
+	TotalPending       int64                  `json:"total_pending" example:"0"`
+	IntegrityScore     float64                `json:"integrity_score" example:"100.00"`
+	LastVerifiedAt     *time.Time             `json:"last_verified_at,omitempty"`
+	LastVerifiedTable  string                 `json:"last_verified_table" example:"users"`
+	TableVerifyResults map[string]interface{} `json:"table_verify_results,omitempty" swaggertype:"object"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+}
+
+type InternalStatsEnvelope struct {
+	Message string                           `json:"message" example:"Berhasil mengambil statistik audit internal"`
+	Data    InternalAuditStatsDetailResponse `json:"data"`
+}
+
+type ExternalAuditStatsDetailResponse struct {
+	ID                   uint                   `json:"id" example:"1"`
+	ClientID             string                 `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	TotalAudited         int64                  `json:"total_audited" example:"50"`
+	TotalValid           int64                  `json:"total_valid" example:"49"`
+	TotalTampered        int64                  `json:"total_tampered" example:"1"`
+	TotalPending         int64                  `json:"total_pending" example:"0"`
+	IntegrityScore       float64                `json:"integrity_score" example:"98.00"`
+	LastAuditedAt        *time.Time             `json:"last_audited_at,omitempty"`
+	TotalRecoveries      int64                  `json:"total_recoveries" example:"0"`
+	TotalTamperIncidents int64                  `json:"total_tamper_incidents" example:"1"`
+	OpenTamperIncidents  int64                  `json:"open_tamper_incidents" example:"1"`
+	TableVerifyResults   map[string]interface{} `json:"table_verify_results,omitempty" swaggertype:"object"`
+	CreatedAt            time.Time              `json:"created_at"`
+	UpdatedAt            time.Time              `json:"updated_at"`
+}
+
+type ExternalStatsEnvelope struct {
+	Message string                           `json:"message" example:"Berhasil mengambil statistik audit external"`
+	Data    ExternalAuditStatsDetailResponse `json:"data"`
+}
+
+type ClientExternalAuditSummaryItem struct {
+	ClientID             string     `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
+	CompanyName          string     `json:"company_name" example:"PT Karya Bangsa"`
+	Status               string     `json:"status" example:"active"`
+	HasExternalAudit     bool       `json:"has_external_audit" example:"true"`
+	TotalAudited         int64      `json:"total_audited" example:"5000"`
+	TotalValid           int64      `json:"total_valid" example:"4990"`
+	TotalTampered        int64      `json:"total_tampered" example:"10"`
+	TotalPending         int64      `json:"total_pending" example:"0"`
+	IntegrityScore       float64    `json:"integrity_score" example:"99.80"`
+	OpenTamperIncidents  int64      `json:"open_tamper_incidents" example:"2"`
+	TotalTamperIncidents int64      `json:"total_tamper_incidents" example:"10"`
+	TotalRecoveries      int64      `json:"total_recoveries" example:"8"`
+	LastAuditedAt        *time.Time `json:"last_audited_at,omitempty"`
+	AuditStatus          string     `json:"audit_status" example:"tampered"`
+}
+
+type AdminExternalAuditOverviewResponse struct {
+	TotalClients          int64                            `json:"total_clients" example:"10"`
+	TotalClientsAudited   int64                            `json:"total_clients_audited" example:"7"`
+	TotalAuditedRows      int64                            `json:"total_audited_rows" example:"35000"`
+	TotalValidRows        int64                            `json:"total_valid_rows" example:"34980"`
+	TotalTamperedRows     int64                            `json:"total_tampered_rows" example:"20"`
+	TotalPendingRows      int64                            `json:"total_pending_rows" example:"0"`
+	OverallIntegrityScore float64                          `json:"overall_integrity_score" example:"99.94"`
+	TotalTamperIncidents  int64                            `json:"total_tamper_incidents" example:"20"`
+	OpenTamperIncidents   int64                            `json:"open_tamper_incidents" example:"3"`
+	TotalRecoveries       int64                            `json:"total_recoveries" example:"17"`
+	LastAuditedAt         *time.Time                       `json:"last_audited_at,omitempty"`
+	Clients               []ClientExternalAuditSummaryItem `json:"clients"`
+}
+
+type AdminExternalAuditOverviewEnvelope struct {
+	Message string                             `json:"message" example:"Berhasil mengambil ringkasan statistik audit external semua klien"`
+	Data    AdminExternalAuditOverviewResponse `json:"data"`
+}
+
+type InternalAuditStatsResponse struct {
+	TotalVerifications int64      `json:"total_verifications" example:"80"`
+	TotalValid         int64      `json:"total_valid" example:"80"`
+	TotalTampered      int64      `json:"total_tampered" example:"0"`
+	TotalPending       int64      `json:"total_pending" example:"0"`
+	IntegrityScore     float64    `json:"integrity_score" example:"100.00"`
+	LastVerifiedAt     *time.Time `json:"last_verified_at,omitempty"`
+}
+
+type ExternalAuditStatsResponse struct {
+	TotalAudited       int64                  `json:"total_audited" example:"50"`
+	TotalValid         int64                  `json:"total_valid" example:"49"`
+	TotalTampered      int64                  `json:"total_tampered" example:"1"`
+	TotalPending       int64                  `json:"total_pending" example:"0"`
+	IntegrityScore     float64                `json:"integrity_score" example:"98.00"`
+	LastAuditedAt      *time.Time             `json:"last_audited_at,omitempty"`
+	TableVerifyResults map[string]interface{} `json:"table_verify_results,omitempty" swaggertype:"object"`
+}
+
 type DashboardStatsDataResponse struct {
 	ID                 uint                    `json:"id" example:"1"`
 	ClientID           string                  `json:"client_id" example:"a1b2c3d4-e5f6-7890-1234-56789abcdef0"`
@@ -111,6 +211,8 @@ type DashboardStatsDataResponse struct {
 	TotalPending       int64                   `json:"total_pending" example:"5"`
 	PendingLogs        int64                   `json:"pending_logs" example:"5"`
 	AnchorPercentage   float64                 `json:"anchor_percentage" example:"95.00"`
+
+	// Legacy / Total Verification Stats
 	TotalVerifications int64                   `json:"total_verifications" example:"80"`
 	TotalRowsVerified  int64                   `json:"total_rows_verified" example:"80"`
 	TotalValid         int64                   `json:"total_valid" example:"78"`
@@ -121,6 +223,26 @@ type DashboardStatsDataResponse struct {
 	IntegrityScore     float64                 `json:"integrity_score" example:"97.50"`
 	LastVerifiedAt     *time.Time              `json:"last_verified_at,omitempty"`
 	LastVerifiedTable  string                  `json:"last_verified_table" example:"users"`
+
+	// Audit Internal (Offchain Log vs Blockchain Merkle Root)
+	InternalAudit              InternalAuditStatsResponse `json:"internal_audit"`
+	InternalTotalVerifications int64                      `json:"internal_total_verifications" example:"80"`
+	InternalTotalValid         int64                      `json:"internal_total_valid" example:"80"`
+	InternalTotalTampered      int64                      `json:"internal_total_tampered" example:"0"`
+	InternalTotalPending       int64                      `json:"internal_total_pending" example:"0"`
+	InternalIntegrityScore     float64                    `json:"internal_integrity_score" example:"100.00"`
+	InternalLastVerifiedAt     *time.Time                 `json:"internal_last_verified_at,omitempty"`
+
+	// Audit External (Client DB vs Offchain & Blockchain)
+	ExternalAudit              ExternalAuditStatsResponse `json:"external_audit"`
+	ExternalTotalAudited       int64                      `json:"external_total_audited" example:"50"`
+	ExternalTotalValid         int64                      `json:"external_total_valid" example:"49"`
+	ExternalTotalTampered      int64                      `json:"external_total_tampered" example:"1"`
+	ExternalTotalPending       int64                      `json:"external_total_pending" example:"0"`
+	ExternalIntegrityScore     float64                    `json:"external_integrity_score" example:"98.00"`
+	ExternalLastAuditedAt      *time.Time                 `json:"external_last_audited_at,omitempty"`
+	ExternalTableResults       map[string]interface{}     `json:"external_table_results,omitempty" swaggertype:"object"`
+
 	IntegrityCheck     IntegrityCheckResponse  `json:"integrity_check"`
 	TableVerifyResults map[string]interface{}  `json:"table_verify_results" swaggertype:"object"`
 	Trend              *DashboardTrendResponse `json:"trend,omitempty"`
@@ -1462,5 +1584,323 @@ func (h *Handler) GetClientStats(c *gin.Context) {
 		"pending_logs":  liveCounts.PendingLogs,
 		"anchored_logs": liveCounts.AnchoredLogs,
 		"data":          data,
+	})
+}
+
+
+// @Summary Get internal audit statistics
+// @Description Mengambil statistik agregat audit internal (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root).
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} InternalStatsEnvelope "Statistik audit internal"
+// @Failure 401 {object} ErrorResponse "Client ID tidak ditemukan atau tidak valid pada token"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil statistik audit internal"
+// @Router /dashboard/stats/internal [get]
+func (h *Handler) GetClientInternalStats(c *gin.Context) {
+	clientIDValue, exists := c.Get("client_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan pada token"})
+		return
+	}
+	clientID, ok := clientIDValue.(string)
+	if !ok || strings.TrimSpace(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID pada token tidak valid"})
+		return
+	}
+
+	var stat models.InternalAuditStats
+	if err := h.DB.Where("client_id = ?", clientID).First(&stat).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Fallback: baca dari kolom internal di client_dashboard_stats jika ada
+			var dashStat models.ClientDashboardStats
+			if err2 := h.DB.Where("client_id = ?", clientID).First(&dashStat).Error; err2 == nil {
+				stat = models.InternalAuditStats{
+					ClientID:           clientID,
+					TotalVerifications: dashStat.InternalTotalVerifications,
+					TotalRowsVerified:  dashStat.TotalRowsVerified,
+					TotalValid:         dashStat.InternalTotalValid,
+					TotalTampered:      dashStat.InternalTotalTampered,
+					TotalPending:       dashStat.InternalTotalPending,
+					IntegrityScore:     dashStat.InternalIntegrityScore,
+					LastVerifiedAt:     dashStat.InternalLastVerifiedAt,
+					LastVerifiedTable:  dashStat.LastVerifiedTable,
+					TableVerifyResults: dashStat.TableVerifyResults,
+					CreatedAt:          dashStat.CreatedAt,
+					UpdatedAt:          dashStat.UpdatedAt,
+				}
+			} else {
+				stat = models.InternalAuditStats{
+					ClientID:       clientID,
+					IntegrityScore: 100,
+				}
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik internal"})
+			return
+		}
+	}
+
+	var tableResults interface{}
+	if stat.TableVerifyResults != "" {
+		_ = json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil mengambil statistik audit internal",
+		"data": gin.H{
+			"id":                   stat.ID,
+			"client_id":            stat.ClientID,
+			"total_verifications":  stat.TotalVerifications,
+			"total_rows_verified":  stat.TotalRowsVerified,
+			"total_valid":          stat.TotalValid,
+			"total_tampered":       stat.TotalTampered,
+			"total_pending":        stat.TotalPending,
+			"integrity_score":      stat.IntegrityScore,
+			"last_verified_at":     stat.LastVerifiedAt,
+			"last_verified_table":  stat.LastVerifiedTable,
+			"table_verify_results": tableResults,
+			"created_at":           stat.CreatedAt,
+			"updated_at":           stat.UpdatedAt,
+		},
+	})
+}
+
+// @Summary Get external audit statistics
+// @Description Mengambil statistik agregat audit external (verifikasi database operasional klien vs offchain log & blockchain oleh agent).
+// @Tags Dashboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} ExternalStatsEnvelope "Statistik audit external"
+// @Failure 401 {object} ErrorResponse "Client ID tidak ditemukan atau tidak valid pada token"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil statistik audit external"
+// @Router /dashboard/stats/external [get]
+func (h *Handler) GetClientExternalStats(c *gin.Context) {
+	clientIDValue, exists := c.Get("client_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID tidak ditemukan pada token"})
+		return
+	}
+	clientID, ok := clientIDValue.(string)
+	if !ok || strings.TrimSpace(clientID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Client ID pada token tidak valid"})
+		return
+	}
+
+	var stat models.ExternalAuditStats
+	if err := h.DB.Where("client_id = ?", clientID).First(&stat).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Fallback: baca dari kolom external di client_dashboard_stats jika ada
+			var dashStat models.ClientDashboardStats
+			if err2 := h.DB.Where("client_id = ?", clientID).First(&dashStat).Error; err2 == nil {
+				stat = models.ExternalAuditStats{
+					ClientID:             clientID,
+					TotalAudited:         dashStat.ExternalTotalAudited,
+					TotalValid:           dashStat.ExternalTotalValid,
+					TotalTampered:        dashStat.ExternalTotalTampered,
+					TotalPending:         dashStat.ExternalTotalPending,
+					IntegrityScore:       dashStat.ExternalIntegrityScore,
+					LastAuditedAt:        dashStat.ExternalLastAuditedAt,
+					TotalRecoveries:      dashStat.TotalRecoveries,
+					TotalTamperIncidents: dashStat.TotalTamperIncidents,
+					OpenTamperIncidents:  dashStat.OpenTamperIncidents,
+					TableVerifyResults:   dashStat.ExternalTableResults,
+					CreatedAt:            dashStat.CreatedAt,
+					UpdatedAt:            dashStat.UpdatedAt,
+				}
+			} else {
+				stat = models.ExternalAuditStats{
+					ClientID:       clientID,
+					IntegrityScore: 100,
+				}
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik external"})
+			return
+		}
+	}
+
+	var tableResults interface{}
+	if stat.TableVerifyResults != "" {
+		_ = json.Unmarshal([]byte(stat.TableVerifyResults), &tableResults)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil mengambil statistik audit external",
+		"data": gin.H{
+			"id":                     stat.ID,
+			"client_id":              stat.ClientID,
+			"total_audited":          stat.TotalAudited,
+			"total_valid":            stat.TotalValid,
+			"total_tampered":         stat.TotalTampered,
+			"total_pending":          stat.TotalPending,
+			"integrity_score":        stat.IntegrityScore,
+			"last_audited_at":        stat.LastAuditedAt,
+			"total_recoveries":       stat.TotalRecoveries,
+			"total_tamper_incidents": stat.TotalTamperIncidents,
+			"open_tamper_incidents":  stat.OpenTamperIncidents,
+			"table_verify_results":   tableResults,
+			"created_at":             stat.CreatedAt,
+			"updated_at":             stat.UpdatedAt,
+		},
+	})
+}
+
+
+// @Summary Get admin external audit overview
+// @Description Mengambil ringkasan dan kompilasi statistik audit external dari semua klien (data operasional klien vs offchain log & blockchain).
+// @Tags Admin
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} AdminExternalAuditOverviewEnvelope "Ringkasan statistik audit external semua klien"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - Hanya admin yang diizinkan"
+// @Failure 500 {object} ErrorResponse "Gagal mengambil data statistik external"
+// @Router /admin/stats/external [get]
+func (h *Handler) GetAdminExternalAuditOverview(c *gin.Context) {
+	if h.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database tidak tersedia"})
+		return
+	}
+
+	var clients []models.Client
+	if err := h.DB.Order("created_at ASC").Find(&clients).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar klien"})
+		return
+	}
+
+	var stats []models.ExternalAuditStats
+	if err := h.DB.Find(&stats).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data statistik audit external"})
+		return
+	}
+	statsMap := make(map[string]models.ExternalAuditStats)
+	for _, s := range stats {
+		statsMap[s.ClientID] = s
+	}
+
+	var dashStats []models.ClientDashboardStats
+	if err := h.DB.Find(&dashStats).Error; err == nil {
+		for _, ds := range dashStats {
+			if _, ok := statsMap[ds.ClientID]; !ok && ds.ExternalTotalAudited > 0 {
+				statsMap[ds.ClientID] = models.ExternalAuditStats{
+					ClientID:             ds.ClientID,
+					TotalAudited:         ds.ExternalTotalAudited,
+					TotalValid:           ds.ExternalTotalValid,
+					TotalTampered:        ds.ExternalTotalTampered,
+					TotalPending:         ds.ExternalTotalPending,
+					IntegrityScore:       ds.ExternalIntegrityScore,
+					LastAuditedAt:        ds.ExternalLastAuditedAt,
+					TotalRecoveries:      ds.TotalRecoveries,
+					TotalTamperIncidents: ds.TotalTamperIncidents,
+					OpenTamperIncidents:  ds.OpenTamperIncidents,
+					TableVerifyResults:   ds.ExternalTableResults,
+				}
+			}
+		}
+	}
+
+	type clientCount struct {
+		ClientID string
+		Count    int64
+	}
+	var openIncidents []clientCount
+	_ = h.DB.Model(&models.ClientDataTamperRecord{}).
+		Select("client_id, count(*) as count").
+		Where("status IN ?", []string{"PENDING", "DETECTED", "VERIFIED"}).
+		Group("client_id").
+		Scan(&openIncidents).Error
+	openIncidentsMap := make(map[string]int64)
+	for _, oi := range openIncidents {
+		openIncidentsMap[oi.ClientID] = oi.Count
+	}
+
+	var (
+		totalClientsAudited int64
+		totalAuditedRows    int64
+		totalValidRows      int64
+		totalTamperedRows   int64
+		totalPendingRows    int64
+		totalTamperInc      int64
+		totalOpenInc        int64
+		totalRecoveries     int64
+		latestAuditedAt     *time.Time
+		clientSummaries     = make([]ClientExternalAuditSummaryItem, 0, len(clients))
+	)
+
+	for _, cl := range clients {
+		st, hasStats := statsMap[cl.ID]
+		openInc := st.OpenTamperIncidents
+		if count, exists := openIncidentsMap[cl.ID]; exists {
+			openInc = count
+		}
+
+		item := ClientExternalAuditSummaryItem{
+			ClientID:             cl.ID,
+			CompanyName:          cl.CompanyName,
+			Status:               cl.Status,
+			HasExternalAudit:     hasStats && st.TotalAudited > 0,
+			TotalAudited:         st.TotalAudited,
+			TotalValid:           st.TotalValid,
+			TotalTampered:        st.TotalTampered,
+			TotalPending:         st.TotalPending,
+			IntegrityScore:       100.0,
+			OpenTamperIncidents:  openInc,
+			TotalTamperIncidents: st.TotalTamperIncidents,
+			TotalRecoveries:      st.TotalRecoveries,
+			LastAuditedAt:        st.LastAuditedAt,
+			AuditStatus:          "unaudited",
+		}
+
+		if hasStats && st.TotalAudited > 0 {
+			totalClientsAudited++
+			item.IntegrityScore = st.IntegrityScore
+			if item.OpenTamperIncidents > 0 || item.TotalTampered > 0 {
+				item.AuditStatus = "tampered"
+			} else {
+				item.AuditStatus = "clean"
+			}
+
+			totalAuditedRows += st.TotalAudited
+			totalValidRows += st.TotalValid
+			totalTamperedRows += st.TotalTampered
+			totalPendingRows += st.TotalPending
+			totalTamperInc += st.TotalTamperIncidents
+			totalOpenInc += openInc
+			totalRecoveries += st.TotalRecoveries
+
+			if st.LastAuditedAt != nil {
+				if latestAuditedAt == nil || st.LastAuditedAt.After(*latestAuditedAt) {
+					latestAuditedAt = st.LastAuditedAt
+				}
+			}
+		}
+
+		clientSummaries = append(clientSummaries, item)
+	}
+
+	overallScore := 100.0
+	if totalAuditedRows > 0 {
+		overallScore = math.Round((float64(totalValidRows)/float64(totalAuditedRows))*10000) / 100
+	}
+
+	overview := AdminExternalAuditOverviewResponse{
+		TotalClients:          int64(len(clients)),
+		TotalClientsAudited:   totalClientsAudited,
+		TotalAuditedRows:      totalAuditedRows,
+		TotalValidRows:        totalValidRows,
+		TotalTamperedRows:     totalTamperedRows,
+		TotalPendingRows:      totalPendingRows,
+		OverallIntegrityScore: overallScore,
+		TotalTamperIncidents:  totalTamperInc,
+		OpenTamperIncidents:   totalOpenInc,
+		TotalRecoveries:       totalRecoveries,
+		LastAuditedAt:         latestAuditedAt,
+		Clients:               clientSummaries,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil mengambil ringkasan statistik audit external semua klien",
+		"data":    overview,
 	})
 }

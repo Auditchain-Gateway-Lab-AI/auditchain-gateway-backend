@@ -485,6 +485,53 @@ definitions:
       username:
         type: string
     type: object
+  client.AdminExternalAuditOverviewEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/client.AdminExternalAuditOverviewResponse'
+      message:
+        example: Berhasil mengambil ringkasan statistik audit external semua klien
+        type: string
+    type: object
+  client.AdminExternalAuditOverviewResponse:
+    properties:
+      clients:
+        items:
+          $ref: '#/definitions/client.ClientExternalAuditSummaryItem'
+        type: array
+      last_audited_at:
+        type: string
+      open_tamper_incidents:
+        example: 3
+        type: integer
+      overall_integrity_score:
+        example: 99.94
+        type: number
+      total_audited_rows:
+        example: 35000
+        type: integer
+      total_clients:
+        example: 10
+        type: integer
+      total_clients_audited:
+        example: 7
+        type: integer
+      total_pending_rows:
+        example: 0
+        type: integer
+      total_recoveries:
+        example: 17
+        type: integer
+      total_tamper_incidents:
+        example: 20
+        type: integer
+      total_tampered_rows:
+        example: 20
+        type: integer
+      total_valid_rows:
+        example: 34980
+        type: integer
+    type: object
   client.ClientDetailResponse:
     properties:
       agent_config:
@@ -493,6 +540,50 @@ definitions:
         $ref: '#/definitions/models.Client'
       kafka_config:
         $ref: '#/definitions/models.ClientKafkaConfig'
+    type: object
+  client.ClientExternalAuditSummaryItem:
+    properties:
+      audit_status:
+        example: tampered
+        type: string
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      company_name:
+        example: PT Karya Bangsa
+        type: string
+      has_external_audit:
+        example: true
+        type: boolean
+      integrity_score:
+        example: 99.8
+        type: number
+      last_audited_at:
+        type: string
+      open_tamper_incidents:
+        example: 2
+        type: integer
+      status:
+        example: active
+        type: string
+      total_audited:
+        example: 5000
+        type: integer
+      total_pending:
+        example: 0
+        type: integer
+      total_recoveries:
+        example: 8
+        type: integer
+      total_tamper_incidents:
+        example: 10
+        type: integer
+      total_tampered:
+        example: 10
+        type: integer
+      total_valid:
+        example: 4990
+        type: integer
     type: object
   client.CreateClientRequest:
     properties:
@@ -566,6 +657,29 @@ definitions:
         type: string
       created_at:
         type: string
+      external_audit:
+        allOf:
+        - $ref: '#/definitions/client.ExternalAuditStatsResponse'
+        description: Audit External (Client DB vs Offchain & Blockchain)
+      external_integrity_score:
+        example: 98
+        type: number
+      external_last_audited_at:
+        type: string
+      external_table_results:
+        type: object
+      external_total_audited:
+        example: 50
+        type: integer
+      external_total_pending:
+        example: 0
+        type: integer
+      external_total_tampered:
+        example: 1
+        type: integer
+      external_total_valid:
+        example: 49
+        type: integer
       id:
         example: 1
         type: integer
@@ -574,6 +688,27 @@ definitions:
       integrity_score:
         example: 97.5
         type: number
+      internal_audit:
+        allOf:
+        - $ref: '#/definitions/client.InternalAuditStatsResponse'
+        description: Audit Internal (Offchain Log vs Blockchain Merkle Root)
+      internal_integrity_score:
+        example: 100
+        type: number
+      internal_last_verified_at:
+        type: string
+      internal_total_pending:
+        example: 0
+        type: integer
+      internal_total_tampered:
+        example: 0
+        type: integer
+      internal_total_valid:
+        example: 80
+        type: integer
+      internal_total_verifications:
+        example: 80
+        type: integer
       last_log_at:
         type: string
       last_verified_at:
@@ -626,6 +761,7 @@ definitions:
         example: 78
         type: integer
       total_verifications:
+        description: Legacy / Total Verification Stats
         example: 80
         type: integer
       total_verify_pending:
@@ -701,6 +837,77 @@ definitions:
         example: Pesan kesalahan atau validasi
         type: string
     type: object
+  client.ExternalAuditStatsDetailResponse:
+    properties:
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      created_at:
+        type: string
+      id:
+        example: 1
+        type: integer
+      integrity_score:
+        example: 98
+        type: number
+      last_audited_at:
+        type: string
+      open_tamper_incidents:
+        example: 1
+        type: integer
+      table_verify_results:
+        type: object
+      total_audited:
+        example: 50
+        type: integer
+      total_pending:
+        example: 0
+        type: integer
+      total_recoveries:
+        example: 0
+        type: integer
+      total_tamper_incidents:
+        example: 1
+        type: integer
+      total_tampered:
+        example: 1
+        type: integer
+      total_valid:
+        example: 49
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  client.ExternalAuditStatsResponse:
+    properties:
+      integrity_score:
+        example: 98
+        type: number
+      last_audited_at:
+        type: string
+      table_verify_results:
+        type: object
+      total_audited:
+        example: 50
+        type: integer
+      total_pending:
+        example: 0
+        type: integer
+      total_tampered:
+        example: 1
+        type: integer
+      total_valid:
+        example: 49
+        type: integer
+    type: object
+  client.ExternalStatsEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/client.ExternalAuditStatsDetailResponse'
+      message:
+        example: Berhasil mengambil statistik audit external
+        type: string
+    type: object
   client.IntegrityCheckResponse:
     properties:
       checked_at:
@@ -712,6 +919,72 @@ definitions:
         type: string
       source:
         example: TAMPER_SCANNER
+        type: string
+    type: object
+  client.InternalAuditStatsDetailResponse:
+    properties:
+      client_id:
+        example: a1b2c3d4-e5f6-7890-1234-56789abcdef0
+        type: string
+      created_at:
+        type: string
+      id:
+        example: 1
+        type: integer
+      integrity_score:
+        example: 100
+        type: number
+      last_verified_at:
+        type: string
+      last_verified_table:
+        example: users
+        type: string
+      table_verify_results:
+        type: object
+      total_pending:
+        example: 0
+        type: integer
+      total_rows_verified:
+        example: 80
+        type: integer
+      total_tampered:
+        example: 0
+        type: integer
+      total_valid:
+        example: 80
+        type: integer
+      total_verifications:
+        example: 80
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  client.InternalAuditStatsResponse:
+    properties:
+      integrity_score:
+        example: 100
+        type: number
+      last_verified_at:
+        type: string
+      total_pending:
+        example: 0
+        type: integer
+      total_tampered:
+        example: 0
+        type: integer
+      total_valid:
+        example: 80
+        type: integer
+      total_verifications:
+        example: 80
+        type: integer
+    type: object
+  client.InternalStatsEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/client.InternalAuditStatsDetailResponse'
+      message:
+        example: Berhasil mengambil statistik audit internal
         type: string
     type: object
   models.AgentConfig:
@@ -1524,6 +1797,34 @@ info:
   title: AuditChain Gateway API
   version: "1.0"
 paths:
+  /admin/stats/external:
+    get:
+      description: Mengambil ringkasan dan kompilasi statistik audit external dari
+        semua klien (data operasional klien vs offchain log & blockchain).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Ringkasan statistik audit external semua klien
+          schema:
+            $ref: '#/definitions/client.AdminExternalAuditOverviewEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "403":
+          description: Forbidden - Hanya admin yang diizinkan
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "500":
+          description: Gagal mengambil data statistik external
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get admin external audit overview
+      tags:
+      - Admin
   /agent/verify-merkle-root:
     post:
       consumes:
@@ -2575,6 +2876,54 @@ paths:
       summary: Get client dashboard statistics
       tags:
       - Dashboard
+  /dashboard/stats/external:
+    get:
+      description: Mengambil statistik agregat audit external (verifikasi database
+        operasional klien vs offchain log & blockchain oleh agent).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Statistik audit external
+          schema:
+            $ref: '#/definitions/client.ExternalStatsEnvelope'
+        "401":
+          description: Client ID tidak ditemukan atau tidak valid pada token
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "500":
+          description: Gagal mengambil statistik audit external
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get external audit statistics
+      tags:
+      - Dashboard
+  /dashboard/stats/internal:
+    get:
+      description: Mengambil statistik agregat audit internal (verifikasi log audit
+        offchain di PostgreSQL Gateway vs Blockchain Merkle Root).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Statistik audit internal
+          schema:
+            $ref: '#/definitions/client.InternalStatsEnvelope'
+        "401":
+          description: Client ID tidak ditemukan atau tidak valid pada token
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+        "500":
+          description: Gagal mengambil statistik audit internal
+          schema:
+            $ref: '#/definitions/client.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get internal audit statistics
+      tags:
+      - Dashboard
   /dashboard/verification-runs:
     post:
       consumes:
@@ -2658,6 +3007,13 @@ paths:
       - description: Client ID; hanya admin yang boleh memilih tenant
         in: query
         name: client_id
+        type: string
+      - description: Filter tipe audit
+        enum:
+        - INTERNAL
+        - EXTERNAL
+        in: query
+        name: run_type
         type: string
       produces:
       - application/json
