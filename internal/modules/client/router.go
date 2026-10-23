@@ -38,6 +38,11 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		// External Audit Overview for Admin
 		adminRoutes.GET("/stats/external", h.GetAdminExternalAuditOverview)
 		adminRoutes.GET("/external-audit-stats", h.GetAdminExternalAuditOverview)
+
+		// Internal Audit Overview for Admin (Ranah Khusus Admin)
+		adminRoutes.GET("/stats/internal", h.GetAdminInternalAuditOverview)
+		adminRoutes.GET("/internal-audit-stats", h.GetAdminInternalAuditOverview)
+		adminRoutes.GET("/clients/:id/stats/internal", h.GetClientInternalStats)
 	}
 
 	// Dashboard Routes (Untuk Client yang login)
@@ -47,7 +52,6 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		dashRoutes.GET("/actor-config", h.GetActorConfig)
 		dashRoutes.PATCH("/actor-config", h.UpdateActorConfig)
 		dashRoutes.GET("/stats", h.GetClientStats)
-		dashRoutes.GET("/stats/internal", h.GetClientInternalStats)
 		dashRoutes.GET("/stats/external", h.GetClientExternalStats)
 	}
 
