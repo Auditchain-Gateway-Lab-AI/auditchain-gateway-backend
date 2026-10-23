@@ -2553,7 +2553,6 @@ type AgentAuditLogResult struct {
 	Error            string                  `json:"error,omitempty"`
 }
 
-
 func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditReportRequest) error {
 	if s.db == nil {
 		return errors.New("database not available")
@@ -2828,7 +2827,7 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 
 		vRun := models.VerificationRun{
 			ID: runID, ClientID: clientID, RequestedBy: "agent",
-			RunType: models.VerificationRunTypeExternal,
+			RunType:  models.VerificationRunTypeExternal,
 			FromTime: fromTime, ToTime: toTime, Status: models.VerificationRunCompleted,
 			BatchSize: int(auditedCount), TotalItems: int64(req.TotalLogs), ProcessedItems: auditedCount,
 			TotalValid: totalValid, TotalInvalid: totalTampered, TotalPending: totalPending,
@@ -2854,13 +2853,13 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 			"last_integrity_check_run_id": runID,
 			"last_integrity_check_logs":   auditedCount,
 
-			"external_total_audited":      newExternalTotalAudited,
-			"external_total_valid":        newExternalTotalValid,
-			"external_total_tampered":     newExternalTotalTampered,
-			"external_total_pending":      newExternalTotalPending,
-			"external_integrity_score":    newExternalIntegrityScore,
-			"external_last_audited_at":    &now,
-			"external_table_results":      string(extJSON),
+			"external_total_audited":   newExternalTotalAudited,
+			"external_total_valid":     newExternalTotalValid,
+			"external_total_tampered":  newExternalTotalTampered,
+			"external_total_pending":   newExternalTotalPending,
+			"external_integrity_score": newExternalIntegrityScore,
+			"external_last_audited_at": &now,
+			"external_table_results":   string(extJSON),
 		}
 		if req.AutoRecoveredCount > 0 {
 			updates["total_recoveries"] = gorm.Expr("total_recoveries + ?", req.AutoRecoveredCount)
@@ -2922,7 +2921,6 @@ func (s *auditService) ProcessAgentAuditReport(clientID string, req AgentAuditRe
 	}
 	return nil
 }
-
 
 func (s *auditService) VerifyMerkleProofAgainstBlockchain(leafHash, expectedMerkleRoot, blockchainTxID string) (*MerkleVerificationResult, error) {
 	fabricData, err := s.GetFabricRecord(blockchainTxID)
