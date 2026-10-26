@@ -87,18 +87,18 @@ func TestRunAgentAuditUsesJWTTenantAndReturnsSummaryOnly(t *testing.T) {
 	}
 }
 
-func TestRunAgentAuditRejectsRangeOverOneHourBeforeCallingAgent(t *testing.T) {
-	runner := &agentAuditRunnerTestStub{}
+func TestRunAgentAuditAllowsWideTimeRanges(t *testing.T) {
+	runner := &agentAuditRunnerTestStub{report: &agentverifier.AuditRunReport{RunID: "run-wide", TotalLogs: 1, AuditedLogs: 1}}
 	handler := NewHandler(&agentAuditReportProcessorStub{})
 	handler.AgentAuditRunner = runner
 	to := time.Now().UTC().Add(-5 * time.Minute)
-	from := to.Add(-61 * time.Minute)
+	from := to.Add(-48 * time.Hour) // 2 days
 	body, _ := json.Marshal(agentAuditRunInput{From: from.Format(time.RFC3339), To: to.Format(time.RFC3339)})
 	ctx, recorder := newAgentAuditRunContext("tenant-1", string(body))
 
 	handler.RunAgentAudit(ctx)
 
-	if recorder.Code != http.StatusUnprocessableEntity || runner.calls != 0 {
+	if recorder.Code != http.StatusOK || runner.calls != 1 {
 		t.Fatalf("status/calls = %d/%d body=%s", recorder.Code, runner.calls, recorder.Body.String())
 	}
 }

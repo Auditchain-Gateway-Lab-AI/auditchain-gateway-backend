@@ -52,7 +52,7 @@ type agentAuditRunInput struct {
 // RunAgentAudit runs the tenant's configured Agent audit and returns only its
 // aggregate summary. Per-log rows and client payloads remain server-side.
 // @Summary Run Agent integrity audit
-// @Description Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.
+// @Description Runs a tenant-scoped Agent audit for the selected time range.
 // @Tags Dashboard
 // @Accept json
 // @Produce json
@@ -89,10 +89,6 @@ func (h *Handler) RunAgentAudit(c *gin.Context) {
 	}
 	if !to.After(from) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "to harus setelah from."})
-		return
-	}
-	if to.Sub(from) > time.Hour {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Rentang Agent audit maksimal satu jam.", "code": "audit_range_too_large"})
 		return
 	}
 	if from.After(time.Now().Add(time.Minute)) {
