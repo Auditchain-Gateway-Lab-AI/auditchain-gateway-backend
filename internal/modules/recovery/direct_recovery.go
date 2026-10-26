@@ -86,7 +86,7 @@ func (s *Service) loadDirectRecoveryData(ctx context.Context, clientID, incident
 	if err != nil {
 		return nil, err
 	}
-	sourceStatus := directSourceStatus(operation, clientRecord, clientHash, desiredHash)
+	sourceStatus := directComparisonStatus(operation, clientRecord, agentverifier.CompareResourceState(&logRow, clientRecord))
 	return &directRecoveryData{
 		Incident: incident, Log: logRow, Reference: reference, Operation: operation,
 		Desired: desired, DesiredRaw: desiredRaw, DesiredHash: desiredHash,
@@ -206,26 +206,6 @@ func sourceStatusFor(record *agentverifier.ResourceRecord) string {
 	return models.SourceStatusMatched
 }
 
-func directSourceStatus(operation string, record *agentverifier.ResourceRecord, currentHash, desiredHash string) string {
-	switch operation {
-	case models.RecoveryOperationDelete:
-		if record == nil || !record.Found {
-			return models.SourceStatusMatched
-		}
-		return models.SourceStatusUnexpectedPresent
-	case models.RecoveryOperationUpsert:
-		if record == nil || !record.Found {
-			return models.SourceStatusMissing
-		}
-		if currentHash != desiredHash {
-			return models.SourceStatusMismatch
-		}
-		return models.SourceStatusMatched
-	default:
-		return models.SourceStatusNotComparable
-	}
-}
-
 func directAgentStatus(sourceStatus string) string {
 	if sourceStatus == models.SourceStatusUnreachable {
 		return "unreachable"
@@ -286,14 +266,24 @@ func (s *Service) directSourceMatches(data *directRecoveryData) bool {
 	if data == nil {
 		return false
 	}
-	switch data.Operation {
-	case models.RecoveryOperationDelete:
-		return data.Client == nil || !data.Client.Found
-	case models.RecoveryOperationUpsert:
-		return data.Client != nil && data.Client.Found && data.ClientHash == data.DesiredHash
-	default:
-		return false
+	comparison := agentverifier.CompareResourceState(&data.Log, data.Client)
+	return comparison.Comparable && comparison.Match
+}
+
+func directComparisonStatus(operation string, record *agentverifier.ResourceRecord, comparison agentverifier.ResourceStateComparison) string {
+	if !comparison.Comparable {
+		return models.SourceStatusNotComparable
 	}
+	if comparison.Match {
+		return models.SourceStatusMatched
+	}
+	if record == nil || !record.Found {
+		return models.SourceStatusMissing
+	}
+	if operation == models.RecoveryOperationDelete {
+		return models.SourceStatusUnexpectedPresent
+	}
+	return models.SourceStatusMismatch
 }
 
 func (s *Service) listDirectCandidate(ctx context.Context, clientID, incidentID string) ([]CandidateView, error) {
@@ -337,12 +327,19 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 	if data.SourceStatus == models.SourceStatusUnreachable {
 		return nil, errors.New("client_source_unreachable")
 	}
-	executionReady, executionBlocker := s.directRecoveryCapability(ctx, clientID, data)
-	recoverable := !s.directSourceMatches(data)
+	comparison := agentverifier.CompareResourceState(&data.Log, data.Client)
+	recoverable := comparison.Comparable && !comparison.Match
 	status := "VALID"
-	if !recoverable {
-		status = "NO_RECOVERY_REQUIRED"
+	executionReady, executionBlocker := false, ""
+	switch {
+	case !comparison.Comparable:
+		status, executionBlocker = "NOT_COMPARABLE", "client_state_not_comparable"
+	case comparison.Match:
+		status, executionBlocker = "NO_RECOVERY_REQUIRED", "recovery_not_required"
+	default:
+		executionReady, executionBlocker = s.directRecoveryCapability(ctx, clientID, data)
 	}
+	changedFields := comparisonChangedFields(comparison)
 	localHash := hasher.GenerateLogHash(&data.Log)
 	currentIntegrity := data.Log.IntegrityStatus
 	if localHash != data.Log.HashValue {
@@ -380,6 +377,7 @@ func (s *Service) preflightDirect(ctx context.Context, clientID, incidentID stri
 		DesiredStateHash: data.DesiredHash, SourceStatus: data.SourceStatus,
 		AgentStatus: data.AgentStatus, SourceFound: data.Client != nil && data.Client.Found,
 		CurrentStatePreview: currentState, TrustedStatePreview: trustedState,
+		ChangedFields: &changedFields,
 		SnapshotPreview: SnapshotPreview{
 			Actor: data.Log.Actor, Action: data.Log.Action, Resource: data.Log.Resource,
 			Timestamp: data.Log.Timestamp, DBTimestamp: data.Log.DBTimestamp,
@@ -401,6 +399,9 @@ func (s *Service) directRecoveryCapability(ctx context.Context, clientID string,
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
+	// The Agent execution contract still validates exact canonical values for
+	// immutable columns. Keep its capability check strict even though the UI
+	// and necessity checks use semantic source equality.
 	changedFields := directChangedStateFields(data.Client, data.Desired)
 	capabilityInput := agentverifier.RecoveryCapabilityInput{
 		Operation: data.Operation, SourceFound: data.Client != nil && data.Client.Found,
@@ -432,6 +433,21 @@ func (s *Service) directRecoveryCapability(ctx context.Context, clientID string,
 		return false, "recovery_operation_not_allowed"
 	}
 	return true, ""
+}
+
+// Only field names are exposed; values remain in the redacted preview.
+func comparisonChangedFields(comparison agentverifier.ResourceStateComparison) []string {
+	fields := make([]string, 0, len(comparison.Discrepancies))
+	seen := make(map[string]bool)
+	for _, discrepancy := range comparison.Discrepancies {
+		field := strings.ToLower(strings.TrimSpace(discrepancy.Field))
+		if field != "" && !seen[field] {
+			fields = append(fields, field)
+			seen[field] = true
+		}
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 func directChangedStateFields(client *agentverifier.ResourceRecord, desired map[string]interface{}) []string {
@@ -483,6 +499,12 @@ func (s *Service) createDirectRequest(ctx context.Context, clientID, userID stri
 	if err != nil {
 		return nil, err
 	}
+	if data.SourceStatus == models.SourceStatusNotComparable {
+		return nil, errors.New("client_state_not_comparable")
+	}
+	if s.directSourceMatches(data) {
+		return nil, errors.New("recovery_not_required")
+	}
 	if ready, blocker := s.directRecoveryCapability(ctx, clientID, data); !ready {
 		return nil, errors.New(blocker)
 	}
@@ -504,9 +526,6 @@ func (s *Service) createDirectRequest(ctx context.Context, clientID, userID stri
 	}
 	if data.SourceStatus == models.SourceStatusUnreachable {
 		return nil, errors.New("client_source_unreachable")
-	}
-	if s.directSourceMatches(data) {
-		return nil, errors.New("recovery_not_required")
 	}
 	now := time.Now().UTC()
 	request := &models.RecoveryRequest{
@@ -611,6 +630,13 @@ func (s *Service) executeDirect(ctx context.Context, clientID, requestID, execut
 	}
 	if clientHash != request.ClientBeforeHash {
 		return s.failDirectRequest(ctx, &request, executorID, errors.New("source_state_changed"))
+	}
+	comparison := agentverifier.CompareResourceState(&logRow, clientRecord)
+	if !comparison.Comparable {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New("client_state_not_comparable"))
+	}
+	if comparison.Match {
+		return s.failDirectRequest(ctx, &request, executorID, errors.New("recovery_not_required"))
 	}
 	capabilityData := &directRecoveryData{Log: logRow, Operation: operation, Desired: desired, Client: clientRecord}
 	if ready, blocker := s.directRecoveryCapability(ctx, clientID, capabilityData); !ready {
@@ -1082,7 +1108,7 @@ func directFailureStatuses(code string) (requestStatus, eventStatus string) {
 	requestStatus = models.RecoveryStatusFailedExecution
 	eventStatus = models.RecoveryResultExecution
 	code = strings.ToLower(strings.TrimSpace(code))
-	verification := code == "client_source_unreachable" ||
+	verification := code == "client_state_not_comparable" || code == "recovery_not_required" || code == "client_source_unreachable" ||
 		code == "source_state_changed" ||
 		code == "incident_closed" ||
 		code == "record_not_found" ||

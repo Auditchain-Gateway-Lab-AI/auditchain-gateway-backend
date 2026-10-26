@@ -139,7 +139,9 @@ type PreflightResult struct {
 	DesiredStateHash    string      `json:"desired_state_hash,omitempty"`
 	SourceStatus        string      `json:"source_status,omitempty"`
 	AgentStatus         string      `json:"agent_status,omitempty"`
-	SourceFound         bool        `json:"source_found,omitempty"`
+	SourceFound         bool        `json:"source_found"`
+	// An explicit empty list means a fresh comparison found no changed fields.
+	ChangedFields *[]string `json:"changed_fields,omitempty"`
 }
 
 type CreateRequestInput struct {

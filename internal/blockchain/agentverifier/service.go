@@ -703,6 +703,16 @@ type resourceStateComparison struct {
 	Discrepancies []Discrepancy
 }
 
+// ResourceStateComparison exposes the source verifier's semantic comparison.
+// Its hashes describe projected state, not the raw Agent execution state.
+type ResourceStateComparison = resourceStateComparison
+
+// CompareResourceState shares source verification rules with recovery. Callers
+// must independently validate the reference and retain raw hashes for Agent CAS.
+func CompareResourceState(auditLog *models.AuditLog, record *ResourceRecord) ResourceStateComparison {
+	return compareCurrentResourceState(auditLog, record)
+}
+
 // compareCurrentResourceState hashes the same projected state on both sides.
 // The state hash is deliberately distinct from the audit-log leaf hash.
 func compareCurrentResourceState(auditLog *models.AuditLog, record *ResourceRecord) resourceStateComparison {

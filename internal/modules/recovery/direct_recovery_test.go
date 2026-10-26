@@ -60,20 +60,6 @@ func TestValidateDirectCDCResultRequiresMatchingVerifiedEvidence(t *testing.T) {
 	}
 }
 
-func TestDirectSourceStatusDistinguishesMismatchAndMissing(t *testing.T) {
-	missing := &agentverifier.ResourceRecord{Found: false}
-	if got := directSourceStatus(models.RecoveryOperationUpsert, missing, strings.Repeat("a", 64), strings.Repeat("b", 64)); got != models.SourceStatusMissing {
-		t.Fatalf("missing status = %q", got)
-	}
-	found := &agentverifier.ResourceRecord{Found: true}
-	if got := directSourceStatus(models.RecoveryOperationUpsert, found, strings.Repeat("a", 64), strings.Repeat("b", 64)); got != models.SourceStatusMismatch {
-		t.Fatalf("mismatch status = %q", got)
-	}
-	if got := directSourceStatus(models.RecoveryOperationDelete, found, strings.Repeat("a", 64), ""); got != models.SourceStatusUnexpectedPresent {
-		t.Fatalf("delete status = %q", got)
-	}
-}
-
 func TestDirectChangedStateFieldsNormalizesKeysAndNumbers(t *testing.T) {
 	client := &agentverifier.ResourceRecord{Found: true, Data: map[string]interface{}{"ID": int64(7), "NAMA": "Before"}}
 	desired := map[string]interface{}{"id": json.Number("7.0"), "nama": "After"}
