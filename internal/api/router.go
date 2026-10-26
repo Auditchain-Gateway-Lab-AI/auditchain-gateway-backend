@@ -58,7 +58,7 @@ func SetupRouter(
 
 	auth.RegisterRoutes(apiGroup, authHandler)
 	client.RegisterRoutes(apiGroup, clientHandler)
-	audit.RegisterRoutes(apiGroup, auditHandler)
+	audit.RegisterRoutes(apiGroup, auditHandler, db)
 	report.RegisterRoutes(apiGroup, reportHandler)
 	recovery.RegisterRoutes(apiGroup, recoveryHandler)
 	agentverifier.RegisterRoutes(apiGroup.Group("/dashboard"), agentHandler)

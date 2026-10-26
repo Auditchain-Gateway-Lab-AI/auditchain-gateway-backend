@@ -2,13 +2,22 @@ package audit
 
 import (
 	"go-blockchain-api/internal/middleware"
+	"gorm.io/gorm"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
+func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler, db ...*gorm.DB) {
+	var gormDB *gorm.DB
+	if len(db) > 0 {
+		gormDB = db[0]
+	}
 	agentAPI := routerGroup.Group("/agent")
-	agentAPI.Use(middleware.JWTAuth())
+	if gormDB != nil {
+		agentAPI.Use(middleware.AgentAuth(gormDB))
+	} else {
+		agentAPI.Use(middleware.JWTAuth())
+	}
 	{
 		agentAPI.GET("/offchain-data", h.GetOffchainDataForAgent)
 		agentAPI.GET("/offchain-data/:resource", h.GetOffchainDataForAgent)
