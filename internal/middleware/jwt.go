@@ -1,12 +1,17 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"strings"
 
+	"go-blockchain-api/internal/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 )
 
 // JWTAuth melindungi endpoint Dashboard — hanya user login yang boleh masuk
@@ -151,5 +156,51 @@ func AdminAuth() gin.HandlerFunc {
 		}
 		c.Set("role", roleStr)
 		c.Next()
+	}
+}
+
+
+// AgentAuth memvalidasi request dari auditchain-agent:
+// Mendukung JWT Token (Bearer <jwt>) MAUPUN API Key Klien (Bearer ak_live_... atau x-api-key / api-key).
+func AgentAuth(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		apiKey := c.GetHeader("x-api-key")
+		if apiKey == "" {
+			apiKey = c.GetHeader("api-key")
+		}
+
+		// Cek apakah ada API Key (ak_live_...) di Authorization header
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenCandidate := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			if strings.HasPrefix(tokenCandidate, "ak_live_") && apiKey == "" {
+				apiKey = tokenCandidate
+			}
+		}
+
+		// Jika menggunakan API Key
+		if apiKey != "" && db != nil {
+			if len(apiKey) >= 72 {
+				prefix := apiKey[:16]
+				hashBytes := sha256.Sum256([]byte(apiKey))
+				hashedKey := hex.EncodeToString(hashBytes[:])
+
+				var client models.Client
+				err := db.Where(
+					"api_key_prefix = ? AND api_key_hash = ? AND status = ?",
+					prefix, hashedKey, "active",
+				).First(&client).Error
+
+				if err == nil {
+					c.Set("client_id", client.ID)
+					c.Set("role", "agent")
+					c.Next()
+					return
+				}
+			}
+		}
+
+		// Fallback ke validasi JWT standar
+		JWTAuth()(c)
 	}
 }
