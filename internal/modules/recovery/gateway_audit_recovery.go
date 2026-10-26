@@ -49,7 +49,7 @@ func (s *Service) loadGatewayAuditRecoveryData(ctx context.Context, clientID, in
 	if !strings.EqualFold(strings.TrimSpace(incident.IncidentScope), models.RecoveryScopeGatewayIntegrity) {
 		return nil, errors.New("gateway_integrity_incident_required")
 	}
-	if incident.Status == models.IncidentStatusResolved {
+	if incident.Status != models.IncidentStatusOpen {
 		return nil, errors.New("incident_closed")
 	}
 	if !strings.EqualFold(strings.TrimSpace(incident.IncidentType), "METADATA_HASH_MISMATCH") {

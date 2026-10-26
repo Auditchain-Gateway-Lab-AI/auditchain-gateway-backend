@@ -850,13 +850,22 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 		if persistErr := s.persistIntegrityStatusForAttempt(result.LogID, clientID, status, models.IntegritySourceManualSingleLog, "", err, attemptID, historyResult); persistErr != nil {
 			return result, persistErr
 		}
+		if err == nil && result.IncidentType == "" && (isClientSourceIncidentStatus(result.SourceStatus) || result.SourceStatus == models.SourceStatusMatched) {
+			row, lookupErr := s.repo.GetLogByID(result.LogID, clientID)
+			if lookupErr != nil {
+				return result, lookupErr
+			}
+			if confirmErr := s.sourceRecoveryWorkflow(attemptID).confirm(*row, result); confirmErr != nil {
+				return result, confirmErr
+			}
+		}
 		if result.SourceStatus != "" {
 			if persistErr := s.persistSourceIntegrityStatusForAttempt(result.LogID, clientID, result.SourceStatus, err, attemptID, "", models.IntegritySourceManualSingleLog); persistErr != nil {
 				return result, persistErr
 			}
 		}
 		s.recordLatestIntegrityCheck(clientID, models.IntegritySourceManualSingleLog, "", 1)
-		if err == nil && result.IncidentType != "" {
+		if err == nil && result.IncidentType != "" && result.IncidentScope != models.RecoveryScopeClientSource {
 			auditLog, lookupErr := s.repo.GetLogByID(result.LogID, clientID)
 			if lookupErr != nil {
 				return result, &IncidentPersistenceError{
@@ -873,25 +882,6 @@ func (s *auditService) VerifyLogIntegrity(logID, clientID string) (*Verification
 			}
 			result.IncidentID = incident.ID
 			result.IncidentScope = incident.IncidentScope
-			result.IncidentStatus = incident.Status
-		} else if err == nil && shouldRecordClientSourceIncident(result.ProofStatus, result.SourceStatus) {
-			auditLog, lookupErr := s.repo.GetLogByID(result.LogID, clientID)
-			if lookupErr != nil {
-				return result, &IncidentPersistenceError{
-					LogID: result.LogID, IncidentType: clientSourceIncidentType(result.SourceStatus),
-					IncidentScope: models.RecoveryScopeClientSource, Cause: lookupErr,
-				}
-			}
-			incident, persistErr := s.ensureClientSourceIncident(*auditLog, result.SourceStatus, result.SourceStateHash, result.AgentDiscrepancies)
-			if persistErr != nil {
-				return result, &IncidentPersistenceError{
-					LogID: result.LogID, IncidentType: clientSourceIncidentType(result.SourceStatus),
-					IncidentScope: models.RecoveryScopeClientSource, Cause: persistErr,
-				}
-			}
-			result.IncidentID = incident.ID
-			result.IncidentScope = incident.IncidentScope
-			result.IncidentType = incident.IncidentType
 			result.IncidentStatus = incident.Status
 		}
 	}
@@ -1498,9 +1488,6 @@ func (s *auditService) verifyLogIntegrity(logID, clientID, requestID string, ski
 						agentStatus = "mismatch"
 						sourceStatus = sourceStatusFromAgentResult(*auditLog, agentResult)
 						agentDiscrepancies = agentResult.Discrepancies
-						if shouldRecordClientSourceIncident(proofStatus, sourceStatusFromAgentResult(*auditLog, agentResult)) {
-							s.recordClientSourceIncident(*auditLog, sourceStatusFromAgentResult(*auditLog, agentResult), agentResult.ClientStateHash, agentResult.Discrepancies)
-						}
 					}
 				} else {
 					sourceStatus = models.SourceStatusNotComparable

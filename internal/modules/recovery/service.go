@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"go-blockchain-api/internal/auditreference"
 	"go-blockchain-api/internal/blockchain/agentverifier"
 	"go-blockchain-api/internal/config"
 	"go-blockchain-api/internal/engine/hasher"
@@ -227,6 +228,9 @@ func recoveryEventHasTrustedLineage(event *models.RecoveryEvent) bool {
 }
 
 func (s *Service) ListIncidents(ctx context.Context, clientID string, filter IncidentFilter) (*IncidentPage, error) {
+	if err := auditreference.SupersedeSourceIncidents(s.db.WithContext(ctx), clientID); err != nil {
+		return nil, err
+	}
 	page := filter.Page
 	if page < 1 {
 		page = 1
@@ -598,7 +602,7 @@ func (s *Service) Preflight(ctx context.Context, clientID, incidentID string) (*
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved {
+	if incident.Status != models.IncidentStatusOpen {
 		return nil, errors.New("incident_closed")
 	}
 	var logRow models.AuditLog
@@ -713,7 +717,7 @@ func (s *Service) CreateRequest(ctx context.Context, clientID, userID string, in
 		}
 		return nil, err
 	}
-	if incident.Status == models.IncidentStatusResolved {
+	if incident.Status != models.IncidentStatusOpen {
 		return nil, errors.New("incident_closed")
 	}
 

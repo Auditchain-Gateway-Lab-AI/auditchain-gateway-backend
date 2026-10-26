@@ -110,7 +110,7 @@ func (s *Service) loadDirectReference(ctx context.Context, clientID, incidentID 
 		// untrusted, and Fabric stores a root rather than a recoverable row.
 		return models.TamperIncident{}, models.AuditLog{}, nil, "", errors.New("client_source_incident_required")
 	}
-	if incident.Status == models.IncidentStatusResolved {
+	if incident.Status != models.IncidentStatusOpen {
 		return models.TamperIncident{}, models.AuditLog{}, nil, "", errors.New("incident_closed")
 	}
 	targetLogID := strings.TrimSpace(incident.ReferenceLogID)
@@ -583,7 +583,7 @@ func (s *Service) executeDirect(ctx context.Context, clientID, requestID, execut
 	if err := s.db.WithContext(ctx).Where("id = ? AND client_id = ?", request.IncidentID, clientID).First(&incident).Error; err != nil {
 		return s.failDirectRequest(ctx, &request, executorID, err)
 	}
-	if incident.Status == models.IncidentStatusResolved {
+	if incident.Status != models.IncidentStatusOpen {
 		return s.failDirectRequest(ctx, &request, executorID, errors.New("incident_closed"))
 	}
 	var logRow models.AuditLog

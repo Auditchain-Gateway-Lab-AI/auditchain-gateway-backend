@@ -16,8 +16,9 @@ const (
 	OutboxStatusCompleted  = "COMPLETED"
 	OutboxStatusDeadLetter = "DEAD_LETTER"
 
-	IncidentStatusOpen     = "OPEN"
-	IncidentStatusResolved = "RESOLVED"
+	IncidentStatusOpen       = "OPEN"
+	IncidentStatusResolved   = "RESOLVED"
+	IncidentStatusSuperseded = "SUPERSEDED"
 
 	// Recovery is client-operated. A request is ready to be executed by the
 	// authenticated user that belongs to the owning client; no platform-admin

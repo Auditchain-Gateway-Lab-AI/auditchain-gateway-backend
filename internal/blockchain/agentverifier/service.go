@@ -412,10 +412,12 @@ func (s *Service) CompareResourceData(auditLog *models.AuditLog, rec *ResourceRe
 			continue
 		}
 
+		// Preserve Oracle TIMESTAMP(6) precision. Formatting a matching Agent
+		// time as RFC3339 (seconds only) creates a false difference against the
+		// original RFC3339Nano response. Normalize exact instants on both sides.
+		logVal, agentVal = normalizeTemporalValuePair(key, logVal, agentVal)
 		strLogVal := formatValueToString(logVal)
 		strAgentVal := formatValueToString(agentVal)
-
-		strLogVal, strAgentVal = tryNormalizeTimeMatch(strLogVal, strAgentVal)
 
 		if strLogVal != strAgentVal {
 			diffs = append(diffs, Discrepancy{
@@ -1029,55 +1031,6 @@ func parseTemporalStateValue(value interface{}) (time.Time, bool) {
 		nanoseconds := int64(math.Round((epoch - float64(seconds)) * float64(time.Second)))
 		return time.Unix(seconds, nanoseconds).UTC(), true
 	}
-}
-
-func tryNormalizeTimeMatch(strLog, strAgent string) (string, string) {
-	if strLog == strAgent {
-		return strLog, strAgent
-	}
-
-	var timeLog, timeAgent time.Time
-	var errLog, errAgent error
-
-	// Coba parse Agent time sebagai ISO-8601 (RFC3339)
-	timeAgent, errAgent = time.Parse(time.RFC3339, strAgent)
-	if errAgent != nil {
-		return strLog, strAgent
-	}
-
-	// Parse Log time
-	timeLog, errLog = time.Parse(time.RFC3339, strLog)
-	if errLog != nil {
-		// Coba parse sebagai angka epoch (dari Debezium)
-		epochFloat, err := strconv.ParseFloat(strLog, 64)
-		if err == nil {
-			if epochFloat > 1e14 {
-				// Microseconds
-				timeLog = time.Unix(0, int64(epochFloat*1000)).UTC()
-			} else if epochFloat > 1e11 {
-				// Milliseconds
-				timeLog = time.UnixMilli(int64(epochFloat)).UTC()
-			} else {
-				// Seconds
-				timeLog = time.Unix(int64(epochFloat), 0).UTC()
-			}
-		} else {
-			return strLog, strAgent
-		}
-	}
-
-	// Bandingkan selisih waktu
-	diff := timeLog.Sub(timeAgent)
-	if diff < 0 {
-		diff = -diff
-	}
-
-	// Jika selisih max 1 detik (toleransi presisi/pembulatan), anggap cocok
-	if diff <= time.Second {
-		return timeAgent.Format(time.RFC3339), strAgent
-	}
-
-	return strLog, strAgent
 }
 
 func normalizeJSON(raw string) string {

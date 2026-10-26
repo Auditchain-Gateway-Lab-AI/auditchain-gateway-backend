@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"go-blockchain-api/internal/auditreference"
 	"go-blockchain-api/internal/models"
 	"go-blockchain-api/internal/workerstatus"
 	"gorm.io/gorm"
@@ -97,6 +98,9 @@ const latestSourceEventQuery = `
 func (s *SourceSweep) Scan(ctx context.Context) (scanErr error) {
 	if s == nil || s.db == nil || s.verifier == nil {
 		return nil
+	}
+	if err := auditreference.SupersedeSourceIncidents(s.db.WithContext(ctx), s.clientID); err != nil {
+		return fmt.Errorf("reconcile obsolete source incidents: %w", err)
 	}
 	var startedAt *time.Time
 	if !s.started.IsZero() {

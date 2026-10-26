@@ -219,6 +219,45 @@ func TestSourceRecoveryClearsObservationWhenInitialReadIsHealthyOrUnknown(t *tes
 	}
 }
 
+func TestSourceRecoveryClosesOnlyFreshlyVerifiedLatestMatch(t *testing.T) {
+	for _, state := range []string{"matched", "bad proof", "unreachable", "mismatch", "new event", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			f := newSourceRecoveryFixture()
+			resolved := 0
+			f.w.hasOpen = func(models.AuditLog) (bool, error) { return true, nil }
+			f.w.resolve = func(models.AuditLog) error { resolved++; return nil }
+			f.read.IsMatch = true
+			f.read.ClientStateHash = "matched-state"
+			switch state {
+			case "bad proof":
+				f.proof.ProofStatus = "FAILED_LOCAL"
+			case "unreachable":
+				f.readErr = errors.New("agent offline")
+			case "mismatch":
+				f.read.IsMatch = false
+			case "unknown":
+				f.read.StateComparable = false
+			case "new event":
+				f.afterRead = func() { newer := f.row; newer.LogID = "new"; f.latest = &newer }
+			}
+			err := f.w.confirm(f.row, &VerificationResult{SourceStatus: models.SourceStatusMatched, SourceStateHash: "matched-state"})
+			if state == "unreachable" && err == nil {
+				t.Fatal("source failure must be surfaced")
+			}
+			want := 0
+			if state == "matched" {
+				want = 1
+			}
+			if resolved != want {
+				t.Fatalf("resolved=%d want %d", resolved, want)
+			}
+			if f.created != 0 {
+				t.Fatal("a closing check must never create a recovery incident")
+			}
+		})
+	}
+}
+
 type sourceRecoveryRepositoryStub struct {
 	AuditRepository
 	row models.AuditLog

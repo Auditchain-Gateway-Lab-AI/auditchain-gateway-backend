@@ -28,6 +28,8 @@ type sourceRecoveryWorkflow struct {
 	proof   func(models.AuditLog) (*VerificationResult, error)
 	read    func(*models.AuditLog) (*agentverifier.VerifyResult, error)
 	create  func(models.AuditLog, *VerificationResult) (*models.TamperIncident, error)
+	hasOpen func(models.AuditLog) (bool, error)
+	resolve func(models.AuditLog) error
 }
 
 func sourceRecoveryReference(row models.AuditLog) string {
@@ -43,7 +45,19 @@ func sourceRecoveryReference(row models.AuditLog) string {
 
 func (w sourceRecoveryWorkflow) confirm(row models.AuditLog, result *VerificationResult) error {
 	if !isClientSourceIncidentStatus(result.SourceStatus) || result.SourceStateHash == "" {
-		return w.clear(row)
+		if err := w.clear(row); err != nil {
+			return err
+		}
+		if result.SourceStatus == models.SourceStatusMatched && w.hasOpen != nil {
+			open, err := w.hasOpen(row)
+			if err != nil {
+				return err
+			}
+			if open {
+				return w.confirmMatched(row, result)
+			}
+		}
+		return nil
 	}
 	// Include pending newer events: never recover from an older anchored event
 	// merely because its replacement is still moving through the CDC pipeline.
@@ -122,6 +136,44 @@ func (w sourceRecoveryWorkflow) confirm(row models.AuditLog, result *Verificatio
 	return nil
 }
 
+// A successful source read alone cannot close an incident. Revalidate the
+// evidence and read the source again, then check the reference is still latest.
+func (w sourceRecoveryWorkflow) confirmMatched(row models.AuditLog, result *VerificationResult) error {
+	current, err := w.latest(row.Resource, row.ClientID)
+	if err != nil {
+		return err
+	}
+	if current == nil || row.Status != "ANCHORED" || sourceRecoveryReference(*current) != sourceRecoveryReference(row) {
+		return nil
+	}
+	proof, err := w.proof(row)
+	if err != nil {
+		return err
+	}
+	if proof == nil || proof.ProofStatus != "VERIFIED" {
+		return nil
+	}
+	observed, err := w.read(&row)
+	if err != nil {
+		return err
+	}
+	applySourceComparison(result, &row, observed)
+	result.ProofStatus = proof.ProofStatus
+	if result.SourceStatus != models.SourceStatusMatched {
+		return nil
+	}
+	current, err = w.latest(row.Resource, row.ClientID)
+	if err != nil {
+		return err
+	}
+	if current == nil || sourceRecoveryReference(*current) != sourceRecoveryReference(row) {
+		result.SourceStatus = models.SourceStatusNotComparable
+		result.Assessment = "SOURCE_REFERENCE_CHANGED"
+		return nil
+	}
+	return w.resolve(row)
+}
+
 func applySourceComparison(result *VerificationResult, row *models.AuditLog, observed *agentverifier.VerifyResult) {
 	// Clear fields from an earlier read before applying an inconclusive response.
 	result.SourceStateHash, result.ClientStateHash, result.OffchainStateHash = "", "", ""
@@ -167,8 +219,43 @@ func (s *auditService) sourceRecoveryWorkflow(attemptID string) sourceRecoveryWo
 				integrityStatusFromVerificationResult(proof), "SOURCE_SWEEP", "", nil, attemptID, historyResult)
 			return proof, err
 		},
-		create: s.createConfirmedSourceIncident,
+		create:  s.createConfirmedSourceIncident,
+		hasOpen: s.hasOpenSourceIncident,
+		resolve: s.resolveMatchedSourceIncidents,
 	}
+}
+
+func (s *auditService) hasOpenSourceIncident(row models.AuditLog) (bool, error) {
+	if s.db == nil {
+		return false, nil
+	}
+	var count int64
+	err := s.db.Model(&models.TamperIncident{}).Where(
+		"client_id = ? AND resource = ? AND incident_scope = ? AND status = ? AND COALESCE(NULLIF(reference_log_id, ''), log_id) = ?",
+		row.ClientID, row.Resource, models.RecoveryScopeClientSource, models.IncidentStatusOpen, row.LogID).Count(&count).Error
+	return count > 0, err
+}
+
+func (s *auditService) resolveMatchedSourceIncidents(row models.AuditLog) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var stored models.AuditLog
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("client_id = ? AND log_id = ?", row.ClientID, row.LogID).First(&stored).Error; err != nil {
+			return err
+		}
+		latest, err := auditreference.LatestClientEvent(tx, row.ClientID, row.Resource)
+		if err != nil {
+			return err
+		}
+		if sourceRecoveryReference(stored) != sourceRecoveryReference(row) || sourceRecoveryReference(*latest) != sourceRecoveryReference(row) {
+			return errors.New("source reference changed before closing incident")
+		}
+		return tx.Model(&models.TamperIncident{}).Where(
+			"client_id = ? AND resource = ? AND incident_scope = ? AND status = ? AND COALESCE(NULLIF(reference_log_id, ''), log_id) = ?",
+			row.ClientID, row.Resource, models.RecoveryScopeClientSource, models.IncidentStatusOpen, row.LogID).
+			Where(`NOT EXISTS (SELECT 1 FROM recovery_requests r WHERE r.client_id = tamper_incidents.client_id AND r.incident_id = tamper_incidents.id AND r.status IN (?, ?, ?))`,
+				models.RecoveryStatusPendingExecution, models.RecoveryStatusExecuting, models.RecoveryStatusAppliedAwaitingCDC).
+			Updates(map[string]interface{}{"status": models.IncidentStatusResolved, "source_status": models.SourceStatusMatched, "resolved_at": time.Now().UTC()}).Error
+	})
 }
 
 func (s *auditService) observeSourceMismatch(row models.AuditLog, stateHash string, now time.Time) (time.Time, error) {
