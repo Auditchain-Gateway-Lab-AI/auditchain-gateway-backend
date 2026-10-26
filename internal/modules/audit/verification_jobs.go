@@ -235,8 +235,23 @@ func (s *VerificationJobService) GetRun(id, clientID string) (*models.Verificati
 }
 
 func (s *VerificationJobService) GetLatestRun(clientID string) (*models.VerificationRun, error) {
+	return s.GetLatestRunByType(clientID, models.VerificationRunTypeInternal)
+}
+
+func (s *VerificationJobService) GetLatestRunByType(clientID, runType string) (*models.VerificationRun, error) {
 	var run models.VerificationRun
-	err := s.db.Where(internalVerificationRunPredicate).Where("client_id = ?", clientID).Order("created_at DESC").First(&run).Error
+	query := s.db.Where("client_id = ?", clientID)
+	// Unfiltered dashboard polling remains scoped to internal worker jobs.
+	// Legacy Agent reports identify external audits using requested_by.
+	switch strings.ToUpper(strings.TrimSpace(runType)) {
+	case "", models.VerificationRunTypeInternal:
+		query = query.Where(internalVerificationRunPredicate)
+	case models.VerificationRunTypeExternal:
+		query = query.Where("(run_type = 'EXTERNAL' OR ((run_type = '' OR run_type IS NULL) AND requested_by = 'agent'))")
+	default:
+		return nil, errors.New("run_type harus INTERNAL atau EXTERNAL")
+	}
+	err := query.Order("created_at DESC").First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

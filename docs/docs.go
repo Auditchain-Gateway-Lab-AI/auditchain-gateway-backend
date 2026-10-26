@@ -19,6 +19,158 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/clients/{id}/stats/internal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil statistik agregat audit internal klien tertentu (verifikasi log audit offchain di PostgreSQL Gateway vs Blockchain Merkle Root). Khusus Admin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Get client internal audit statistics (Admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Client ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Statistik audit internal klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.InternalStatsEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "ID klien tidak boleh kosong",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Hanya admin yang diizinkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil statistik audit internal",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/stats/external": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil ringkasan dan kompilasi statistik audit external dari semua klien (data operasional klien vs offchain log \u0026 blockchain).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Get admin external audit overview",
+                "responses": {
+                    "200": {
+                        "description": "Ringkasan statistik audit external semua klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.AdminExternalAuditOverviewEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Hanya admin yang diizinkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil data statistik external",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/stats/internal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil ringkasan dan kompilasi statistik audit internal (log offchain PostgreSQL Gateway vs Merkle Root Blockchain) dari seluruh klien. Khusus Admin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Get admin internal audit overview",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter berdasarkan Client ID",
+                        "name": "client_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Ringkasan statistik audit internal seluruh klien",
+                        "schema": {
+                            "$ref": "#/definitions/client.AdminInternalAuditOverviewEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Hanya admin yang diizinkan",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil data statistik internal",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/verify-merkle-root": {
             "post": {
                 "description": "Endpoint khusus Agent untuk merekonstruksi Merkle root dari leaf_hash data client dengan Merkle proof offchain lalu membandingkannya dengan Merkle root di blockchain.",
@@ -1626,6 +1778,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/dashboard/stats/external": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil statistik agregat audit external (verifikasi database operasional klien vs offchain log \u0026 blockchain oleh agent).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Dashboard"
+                ],
+                "summary": "Get external audit statistics",
+                "responses": {
+                    "200": {
+                        "description": "Statistik audit external",
+                        "schema": {
+                            "$ref": "#/definitions/client.ExternalStatsEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Client ID tidak ditemukan atau tidak valid pada token",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gagal mengambil statistik audit external",
+                        "schema": {
+                            "$ref": "#/definitions/client.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/dashboard/verification-runs": {
             "post": {
                 "security": [
@@ -1710,6 +1899,16 @@ const docTemplate = `{
                         "description": "Client ID; hanya admin yang boleh memilih tenant",
                         "name": "client_id",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "INTERNAL",
+                            "EXTERNAL"
+                        ],
+                        "type": "string",
+                        "description": "Filter tipe audit (default INTERNAL)",
+                        "name": "run_type",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1717,6 +1916,12 @@ const docTemplate = `{
                         "description": "Verification run terakhir",
                         "schema": {
                             "$ref": "#/definitions/audit.LatestVerificationRunResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Tipe audit tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2891,6 +3096,130 @@ const docTemplate = `{
                 }
             }
         },
+        "client.AdminExternalAuditOverviewEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/client.AdminExternalAuditOverviewResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil ringkasan statistik audit external semua klien"
+                }
+            }
+        },
+        "client.AdminExternalAuditOverviewResponse": {
+            "type": "object",
+            "properties": {
+                "clients": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/client.ClientExternalAuditSummaryItem"
+                    }
+                },
+                "last_audited_at": {
+                    "type": "string"
+                },
+                "open_tamper_incidents": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "overall_integrity_score": {
+                    "type": "number",
+                    "example": 99.94
+                },
+                "total_audited_rows": {
+                    "type": "integer",
+                    "example": 35000
+                },
+                "total_clients": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_clients_audited": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "total_pending_rows": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_recoveries": {
+                    "type": "integer",
+                    "example": 17
+                },
+                "total_tamper_incidents": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "total_tampered_rows": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "total_valid_rows": {
+                    "type": "integer",
+                    "example": 34980
+                }
+            }
+        },
+        "client.AdminInternalAuditOverviewEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/client.AdminInternalAuditOverviewResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil ringkasan statistik audit internal semua klien"
+                }
+            }
+        },
+        "client.AdminInternalAuditOverviewResponse": {
+            "type": "object",
+            "properties": {
+                "clients": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/client.ClientInternalAuditSummaryItem"
+                    }
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "overall_integrity_score": {
+                    "type": "number",
+                    "example": 99.94
+                },
+                "total_clients": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_clients_verified": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "total_pending_rows": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 35000
+                },
+                "total_tampered_rows": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "total_valid_rows": {
+                    "type": "integer",
+                    "example": 34980
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 500
+                }
+            }
+        },
         "client.ClientDetailResponse": {
             "type": "object",
             "properties": {
@@ -2902,6 +3231,118 @@ const docTemplate = `{
                 },
                 "kafka_config": {
                     "$ref": "#/definitions/models.ClientKafkaConfig"
+                }
+            }
+        },
+        "client.ClientExternalAuditSummaryItem": {
+            "type": "object",
+            "properties": {
+                "audit_status": {
+                    "type": "string",
+                    "example": "tampered"
+                },
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "company_name": {
+                    "type": "string",
+                    "example": "PT Karya Bangsa"
+                },
+                "has_external_audit": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 99.8
+                },
+                "last_audited_at": {
+                    "type": "string"
+                },
+                "open_tamper_incidents": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "total_audited": {
+                    "type": "integer",
+                    "example": 5000
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_recoveries": {
+                    "type": "integer",
+                    "example": 8
+                },
+                "total_tamper_incidents": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 4990
+                }
+            }
+        },
+        "client.ClientInternalAuditSummaryItem": {
+            "type": "object",
+            "properties": {
+                "audit_status": {
+                    "type": "string",
+                    "example": "clean"
+                },
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "company_name": {
+                    "type": "string",
+                    "example": "PT Karya Bangsa"
+                },
+                "has_internal_audit": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 100
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 80
                 }
             }
         },
@@ -3008,6 +3449,40 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "external_audit": {
+                    "description": "Audit External (Client DB vs Offchain \u0026 Blockchain)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/client.ExternalAuditStatsResponse"
+                        }
+                    ]
+                },
+                "external_integrity_score": {
+                    "type": "number",
+                    "example": 98
+                },
+                "external_last_audited_at": {
+                    "type": "string"
+                },
+                "external_table_results": {
+                    "type": "object"
+                },
+                "external_total_audited": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "external_total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "external_total_tampered": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "external_total_valid": {
+                    "type": "integer",
+                    "example": 49
+                },
                 "id": {
                     "type": "integer",
                     "example": 1
@@ -3018,6 +3493,37 @@ const docTemplate = `{
                 "integrity_score": {
                     "type": "number",
                     "example": 97.5
+                },
+                "internal_audit": {
+                    "description": "Audit Internal (Offchain Log vs Blockchain Merkle Root)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/client.InternalAuditStatsResponse"
+                        }
+                    ]
+                },
+                "internal_integrity_score": {
+                    "type": "number",
+                    "example": 100
+                },
+                "internal_last_verified_at": {
+                    "type": "string"
+                },
+                "internal_total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "internal_total_tampered": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "internal_total_valid": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "internal_total_verifications": {
+                    "type": "integer",
+                    "example": 80
                 },
                 "last_log_at": {
                     "type": "string"
@@ -3089,6 +3595,7 @@ const docTemplate = `{
                     "example": 78
                 },
                 "total_verifications": {
+                    "description": "Legacy / Total Verification Stats",
                     "type": "integer",
                     "example": 80
                 },
@@ -3200,6 +3707,106 @@ const docTemplate = `{
                 }
             }
         },
+        "client.ExternalAuditStatsDetailResponse": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 98
+                },
+                "last_audited_at": {
+                    "type": "string"
+                },
+                "open_tamper_incidents": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "table_verify_results": {
+                    "type": "object"
+                },
+                "total_audited": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_recoveries": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_tamper_incidents": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 49
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "client.ExternalAuditStatsResponse": {
+            "type": "object",
+            "properties": {
+                "integrity_score": {
+                    "type": "number",
+                    "example": 98
+                },
+                "last_audited_at": {
+                    "type": "string"
+                },
+                "table_verify_results": {
+                    "type": "object"
+                },
+                "total_audited": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 49
+                }
+            }
+        },
+        "client.ExternalStatsEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/client.ExternalAuditStatsDetailResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil statistik audit external"
+                }
+            }
+        },
         "client.IntegrityCheckResponse": {
             "type": "object",
             "properties": {
@@ -3216,6 +3823,99 @@ const docTemplate = `{
                 "source": {
                     "type": "string",
                     "example": "TAMPER_SCANNER"
+                }
+            }
+        },
+        "client.InternalAuditStatsDetailResponse": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string",
+                    "example": "a1b2c3d4-e5f6-7890-1234-56789abcdef0"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "integrity_score": {
+                    "type": "number",
+                    "example": 100
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "last_verified_table": {
+                    "type": "string",
+                    "example": "users"
+                },
+                "table_verify_results": {
+                    "type": "object"
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_rows_verified": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "client.InternalAuditStatsResponse": {
+            "type": "object",
+            "properties": {
+                "integrity_score": {
+                    "type": "number",
+                    "example": 100
+                },
+                "last_verified_at": {
+                    "type": "string"
+                },
+                "total_pending": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_tampered": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "total_valid": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_verifications": {
+                    "type": "integer",
+                    "example": 80
+                }
+            }
+        },
+        "client.InternalStatsEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/client.InternalAuditStatsDetailResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Berhasil mengambil statistik audit internal"
                 }
             }
         },

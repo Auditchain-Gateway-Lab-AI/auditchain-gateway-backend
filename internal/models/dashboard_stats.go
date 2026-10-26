@@ -50,13 +50,13 @@ type ClientDashboardStats struct {
 	InternalLastVerifiedAt     *time.Time `gorm:"type:timestamptz" json:"internal_last_verified_at"`
 
 	// -- Statistik Audit External (Client Operational DB vs Offchain Log & Blockchain) --
-	ExternalTotalAudited       int64      `gorm:"type:bigint;not null;default:0" json:"external_total_audited"`
-	ExternalTotalValid         int64      `gorm:"type:bigint;not null;default:0" json:"external_total_valid"`
-	ExternalTotalTampered      int64      `gorm:"type:bigint;not null;default:0" json:"external_total_tampered"`
-	ExternalTotalPending       int64      `gorm:"type:bigint;not null;default:0" json:"external_total_pending"`
-	ExternalIntegrityScore     float64    `gorm:"type:decimal(5,2);not null;default:100" json:"external_integrity_score"`
-	ExternalLastAuditedAt      *time.Time `gorm:"type:timestamptz" json:"external_last_audited_at"`
-	ExternalTableResults       string     `gorm:"type:jsonb;default:'{}'" json:"external_table_results"`
+	ExternalTotalAudited   int64      `gorm:"type:bigint;not null;default:0" json:"external_total_audited"`
+	ExternalTotalValid     int64      `gorm:"type:bigint;not null;default:0" json:"external_total_valid"`
+	ExternalTotalTampered  int64      `gorm:"type:bigint;not null;default:0" json:"external_total_tampered"`
+	ExternalTotalPending   int64      `gorm:"type:bigint;not null;default:0" json:"external_total_pending"`
+	ExternalIntegrityScore float64    `gorm:"type:decimal(5,2);not null;default:100" json:"external_integrity_score"`
+	ExternalLastAuditedAt  *time.Time `gorm:"type:timestamptz" json:"external_last_audited_at"`
+	ExternalTableResults   string     `gorm:"type:jsonb;default:'{}'" json:"external_table_results"`
 
 	// -- Statistik Aktivitas --
 	TotalInserts int64 `gorm:"type:bigint;not null;default:0" json:"total_inserts"`

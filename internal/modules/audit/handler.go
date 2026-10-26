@@ -1018,7 +1018,9 @@ func (h *Handler) GetVerificationRun(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param client_id query string false "Client ID; hanya admin yang boleh memilih tenant"
+// @Param run_type query string false "Filter tipe audit (default INTERNAL)" Enums(INTERNAL,EXTERNAL)
 // @Success 200 {object} LatestVerificationRunResponse "Verification run terakhir"
+// @Failure 400 {object} ErrorResponse "Tipe audit tidak valid"
 // @Failure 401 {object} ErrorResponse "Identitas client tidak valid"
 // @Router /dashboard/verification-runs/latest [get]
 func (h *Handler) GetLatestVerificationRun(c *gin.Context) {
@@ -1031,7 +1033,12 @@ func (h *Handler) GetLatestVerificationRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	run, err := h.VerificationJobs.GetLatestRun(clientID)
+	runType := strings.ToUpper(strings.TrimSpace(c.Query("run_type")))
+	if runType != "" && runType != models.VerificationRunTypeInternal && runType != models.VerificationRunTypeExternal {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "run_type harus INTERNAL atau EXTERNAL"})
+		return
+	}
+	run, err := h.VerificationJobs.GetLatestRunByType(clientID, runType)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil verification run terakhir."})
 		return
