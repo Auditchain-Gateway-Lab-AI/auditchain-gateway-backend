@@ -159,7 +159,6 @@ func AdminAuth() gin.HandlerFunc {
 	}
 }
 
-
 // AgentAuth memvalidasi request dari auditchain-agent:
 // Mendukung JWT Token (Bearer <jwt>) MAUPUN API Key Klien (Bearer ak_live_... atau x-api-key / api-key).
 func AgentAuth(db *gorm.DB) gin.HandlerFunc {
