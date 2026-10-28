@@ -145,6 +145,7 @@ type Service interface {
 	GetClientTamperRecord(clientID, id string) (*models.ClientDataTamperRecord, error)
 	RecoverClientTamperRecord(ctx context.Context, clientID, id, recoveredBy string) (*ClientTamperRecoverResponse, error)
 	DismissClientTamperRecord(clientID, id, dismissedBy, notes string) (*models.ClientDataTamperRecord, error)
+	ListClientRecoveryEvents(clientID string, query ClientRecoveryEventQuery) (*ClientRecoveryEventListResponse, error)
 }
 
 type auditService struct {

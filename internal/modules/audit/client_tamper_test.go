@@ -18,8 +18,9 @@ type clientTamperServiceStub struct {
 	listCalled      bool
 	getCalled       bool
 	recoverCalled   bool
-	dismissCalled   bool
-	lastClientID    string
+	dismissCalled    bool
+	listEventsCalled bool
+	lastClientID     string
 	lastID          string
 	lastRecoveredBy string
 	lastDismissedBy string
@@ -103,6 +104,33 @@ func (s *clientTamperServiceStub) DismissClientTamperRecord(clientID, id, dismis
 		Status:          models.ClientTamperStatusDismissed,
 		ResolvedBy:      dismissedBy,
 		ResolutionNotes: notes,
+	}, nil
+}
+
+func (s *clientTamperServiceStub) ListClientRecoveryEvents(clientID string, query ClientRecoveryEventQuery) (*ClientRecoveryEventListResponse, error) {
+	s.listEventsCalled = true
+	s.lastClientID = clientID
+	return &ClientRecoveryEventListResponse{
+		Events: []models.ClientRecoveryEvent{
+			{
+				ID:             "rec-event-1",
+				ClientID:       clientID,
+				Resource:       "RUANGAN:1812",
+				TableName:      "RUANGAN",
+				RecordID:       "1812",
+				Operation:      "UPDATE",
+				Status:         models.ClientRecoveryStatusSuccess,
+				RecoveredBy:    "morbis1",
+			},
+		},
+		Total:      1,
+		Page:       1,
+		PageSize:   10,
+		TotalPages: 1,
+		Summary: ClientRecoveryEventSummaryCounts{
+			SuccessCount: 1,
+			TotalCount:   1,
+		},
 	}, nil
 }
 
@@ -209,5 +237,39 @@ func TestDismissClientTamperRecord(t *testing.T) {
 	}
 	if !stub.dismissCalled || stub.lastNotes != "False positive after database index rebuild" {
 		t.Errorf("expected Dismiss with notes, got %s", stub.lastNotes)
+	}
+}
+
+
+func TestListClientRecoveryEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("client_id", "client-test-99")
+
+	req, _ := http.NewRequest(http.MethodGet, "/dashboard/client-recovery/events?status=SUCCESS", nil)
+	ctx.Request = req
+
+	stub := &clientTamperServiceStub{}
+	handler := NewHandler(stub)
+
+	handler.ListClientRecoveryEvents(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if !stub.listEventsCalled {
+		t.Error("expected ListClientRecoveryEvents to be called")
+	}
+	if stub.lastClientID != "client-test-99" {
+		t.Errorf("expected clientID client-test-99, got %s", stub.lastClientID)
+	}
+
+	var resp ClientRecoveryEventListResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed unmarshal: %v", err)
+	}
+	if len(resp.Events) != 1 || resp.Events[0].Resource != "RUANGAN:1812" {
+		t.Errorf("unexpected events: %+v", resp.Events)
 	}
 }

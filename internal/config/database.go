@@ -40,6 +40,7 @@ func ConnectDB() *gorm.DB {
 		&models.ClientDataTamperRecord{},
 		&models.InternalAuditStats{},
 		&models.ExternalAuditStats{},
+		&models.ClientRecoveryEvent{},
 	)
 	if err != nil {
 		log.Fatalf("Gagal migrasi database: %v", err)

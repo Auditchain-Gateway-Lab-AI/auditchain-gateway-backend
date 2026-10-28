@@ -36,6 +36,32 @@ definitions:
       summary:
         $ref: '#/definitions/audit.RangeSummary'
     type: object
+  audit.ClientRecoveryEventListResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/models.ClientRecoveryEvent'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      summary:
+        $ref: '#/definitions/audit.ClientRecoveryEventSummaryCounts'
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  audit.ClientRecoveryEventSummaryCounts:
+    properties:
+      failed_count:
+        type: integer
+      success_count:
+        type: integer
+      total_count:
+        type: integer
+    type: object
   audit.ClientTamperListResponse:
     properties:
       page:
@@ -1310,6 +1336,40 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.ClientRecoveryEvent:
+    properties:
+      client_id:
+        type: string
+      error_message:
+        type: string
+      executed_at:
+        type: string
+      id:
+        type: string
+      log_id:
+        type: string
+      operation:
+        description: e.g. "UPDATE" | "INSERT"
+        type: string
+      record_id:
+        type: string
+      recovered_by:
+        type: string
+      recovered_columns:
+        type: string
+      recovered_data:
+        type: string
+      resource:
+        description: e.g. "RUANGAN:1812"
+        type: string
+      status:
+        description: SUCCESS | FAILED
+        type: string
+      table_name:
+        type: string
+      tamper_record_id:
+        type: string
+    type: object
   models.ClientTable:
     properties:
       client_id:
@@ -2243,8 +2303,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Runs a tenant-scoped Agent audit for a range of at most one hour
-        and up to 100 Gateway logs.
+      description: Runs a tenant-scoped Agent audit for the selected time range.
       parameters:
       - description: Audit time range
         in: body
@@ -2270,6 +2329,59 @@ paths:
       summary: Run Agent integrity audit
       tags:
       - Dashboard
+  /dashboard/client-recovery/events:
+    get:
+      description: Mengambil riwayat log eksekusi pemulihan baris data klien ke database
+        operasional.
+      parameters:
+      - description: Filter status (SUCCESS, FAILED, ALL)
+        in: query
+        name: status
+        type: string
+      - description: Filter nama tabel
+        in: query
+        name: table_name
+        type: string
+      - description: Filter nama resource (TABLE:ID)
+        in: query
+        name: resource
+        type: string
+      - description: Pencarian kata kunci
+        in: query
+        name: search
+        type: string
+      - description: Nomor halaman (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Ukuran halaman (default 10)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/audit.ClientRecoveryEventListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Daftar Riwayat Pemulihan Data Klien
+      tags:
+      - Client Tampering
   /dashboard/client-tampering:
     get:
       description: Mengambil daftar anomali/perbedaan antara hash data aktual database
