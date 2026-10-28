@@ -576,7 +576,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Runs a tenant-scoped Agent audit for a range of at most one hour and up to 100 Gateway logs.",
+                "description": "Runs a tenant-scoped Agent audit for the selected time range.",
                 "consumes": [
                     "application/json"
                 ],
@@ -611,6 +611,87 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/dashboard/client-recovery/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Mengambil riwayat log eksekusi pemulihan baris data klien ke database operasional.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client Tampering"
+                ],
+                "summary": "Daftar Riwayat Pemulihan Data Klien",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter status (SUCCESS, FAILED, ALL)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter nama tabel",
+                        "name": "table_name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter nama resource (TABLE:ID)",
+                        "name": "resource",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Pencarian kata kunci",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Nomor halaman (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Ukuran halaman (default 10)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/audit.ClientRecoveryEventListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -2411,6 +2492,46 @@ const docTemplate = `{
                 },
                 "summary": {
                     "$ref": "#/definitions/audit.RangeSummary"
+                }
+            }
+        },
+        "audit.ClientRecoveryEventListResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ClientRecoveryEvent"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/audit.ClientRecoveryEventSummaryCounts"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "audit.ClientRecoveryEventSummaryCounts": {
+            "type": "object",
+            "properties": {
+                "failed_count": {
+                    "type": "integer"
+                },
+                "success_count": {
+                    "type": "integer"
+                },
+                "total_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -4241,6 +4362,56 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ClientRecoveryEvent": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "executed_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "log_id": {
+                    "type": "string"
+                },
+                "operation": {
+                    "description": "e.g. \"UPDATE\" | \"INSERT\"",
+                    "type": "string"
+                },
+                "record_id": {
+                    "type": "string"
+                },
+                "recovered_by": {
+                    "type": "string"
+                },
+                "recovered_columns": {
+                    "type": "string"
+                },
+                "recovered_data": {
+                    "type": "string"
+                },
+                "resource": {
+                    "description": "e.g. \"RUANGAN:1812\"",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "SUCCESS | FAILED",
+                    "type": "string"
+                },
+                "table_name": {
+                    "type": "string"
+                },
+                "tamper_record_id": {
                     "type": "string"
                 }
             }

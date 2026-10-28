@@ -52,5 +52,8 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler, db ...*gorm.DB) {
 		dashAPI.GET("/client-tampering/:id", h.GetClientTamperRecord)
 		dashAPI.POST("/client-tampering/:id/recover", h.RecoverClientTamperRecord)
 		dashAPI.POST("/client-tampering/:id/dismiss", h.DismissClientTamperRecord)
+
+		// Client Recovery Events (immutable execution history of client DB recoveries)
+		dashAPI.GET("/client-recovery/events", h.ListClientRecoveryEvents)
 	}
 }

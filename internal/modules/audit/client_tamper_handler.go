@@ -177,3 +177,41 @@ func (h *Handler) DismissClientTamperRecord(c *gin.Context) {
 
 	c.JSON(http.StatusOK, record)
 }
+
+
+// ListClientRecoveryEvents godoc
+// @Summary Daftar Riwayat Pemulihan Data Klien
+// @Description Mengambil riwayat log eksekusi pemulihan baris data klien ke database operasional.
+// @Tags Client Tampering
+// @Produce json
+// @Security BearerAuth
+// @Param status query string false "Filter status (SUCCESS, FAILED, ALL)"
+// @Param table_name query string false "Filter nama tabel"
+// @Param resource query string false "Filter nama resource (TABLE:ID)"
+// @Param search query string false "Pencarian kata kunci"
+// @Param page query int false "Nomor halaman (default 1)"
+// @Param page_size query int false "Ukuran halaman (default 10)"
+// @Success 200 {object} ClientRecoveryEventListResponse
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /dashboard/client-recovery/events [get]
+func (h *Handler) ListClientRecoveryEvents(c *gin.Context) {
+	clientID, ok := h.getClientID(c)
+	if !ok {
+		return
+	}
+
+	var query ClientRecoveryEventQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Parameter query tidak valid: " + err.Error()})
+		return
+	}
+
+	resp, err := h.Service.ListClientRecoveryEvents(clientID, query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar riwayat pemulihan: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
