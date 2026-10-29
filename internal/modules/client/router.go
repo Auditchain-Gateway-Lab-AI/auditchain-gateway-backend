@@ -13,6 +13,7 @@ func RegisterRoutes(routerGroup *gin.RouterGroup, h *Handler) {
 		adminRoutes.POST("/clients/:id/regenerate-api-key", h.RegenerateAPIKey)
 		adminRoutes.GET("/clients", h.ListClients)
 		adminRoutes.GET("/monitoring/overview", h.GetMonitoringOverview)
+		adminRoutes.GET("/monitoring/statistics", h.GetMonitoringStatistics)
 		adminRoutes.POST("/kafka-config", h.CreateKafkaConfig)
 		adminRoutes.GET("/kafka-configs", h.ListKafkaConfigs)
 		adminRoutes.PATCH("/kafka-config/:id/toggle", h.ToggleKafkaConfig)

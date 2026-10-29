@@ -65,11 +65,19 @@ type dashboardTrendAggregate struct {
 }
 
 func loadDashboardTrend(db *gorm.DB, clientID string, window dashboardTrendWindow, to time.Time) (*DashboardTrendResponse, error) {
+	return loadDashboardTrendForClients(db, []string{clientID}, window, to)
+}
+
+// Explicit client IDs keep tenant queries scoped and exclude orphaned audit logs.
+func loadDashboardTrendForClients(db *gorm.DB, clientIDs []string, window dashboardTrendWindow, to time.Time) (*DashboardTrendResponse, error) {
 	from := to.Add(-window.duration)
 	bucketDuration := window.duration / time.Duration(window.bucketQty)
 	bucketSeconds := int64(bucketDuration.Seconds())
 
 	var aggregates []dashboardTrendAggregate
+	if len(clientIDs) == 0 {
+		return buildDashboardTrendResponse(window, from, to, bucketDuration, bucketSeconds, aggregates), nil
+	}
 	err := db.Raw(`
 		SELECT
 			LEAST(?, GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (timestamp - ?)) / ?)::int)) AS bucket_index,
@@ -84,13 +92,13 @@ func loadDashboardTrend(db *gorm.DB, clientID string, window dashboardTrendWindo
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(action, ''))) = 'UPDATE') AS update_count,
 			COUNT(*) FILTER (WHERE UPPER(TRIM(COALESCE(action, ''))) = 'DELETE') AS delete_count
 		FROM audit_logs
-		WHERE client_id = ?
+		WHERE client_id IN ?
 		  AND timestamp >= ?
 		  AND timestamp < ?
 		  AND COALESCE(UPPER(TRIM(action)), '') <> 'RECOVERY'
 		GROUP BY bucket_index
 		ORDER BY bucket_index
-	`, window.bucketQty-1, from, bucketSeconds, clientID, from, to).Scan(&aggregates).Error
+	`, window.bucketQty-1, from, bucketSeconds, clientIDs, from, to).Scan(&aggregates).Error
 	if err != nil {
 		return nil, err
 	}
