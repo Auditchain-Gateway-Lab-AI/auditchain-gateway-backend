@@ -28,6 +28,9 @@ func TestMonitoringStatisticsAggregation(t *testing.T) {
 	clients[0] = buildMonitoringClient(models.Client{ID: "a", CompanyName: "Alpha", Status: "inactive"}, monitoringMetrics{Total: 100, Anchored: 90, Valid: 98, Tampered: 2, Logs24H: 3, CheckedAt: &older, LastLogAt: &older}, monitoringIntegration{}, 15, now)
 	clients[24] = buildMonitoringClient(models.Client{ID: "z", CompanyName: "Zulu", Status: "pending_setup"}, monitoringMetrics{Total: 10, Pending: 10, NotChecked: 10, Logs24H: 10, OldestPendingAt: &older, LastLogAt: &now}, monitoringIntegration{}, 15, now)
 	got := summarizeMonitoringStatistics(clients)
+	if len(got.Clients) != 25 || got.Clients[0].ID != "a" || got.Clients[1].ID != "z" || clients[24].ID != "z" {
+		t.Fatalf("comparison must include all clients, sort by volume, and preserve input order: %+v", got.Clients)
+	}
 	if got.Summary.Total != 25 || got.Summary.Critical != 1 || got.Summary.Attention != 1 || got.Summary.Unknown != 23 {
 		t.Fatalf("unexpected conditions: %+v", got.Summary)
 	}
@@ -44,7 +47,7 @@ func TestMonitoringStatisticsAggregation(t *testing.T) {
 		t.Fatal("incorrect aggregate observation timestamps")
 	}
 	empty := summarizeMonitoringStatistics(nil)
-	if empty.Metrics.Total != 0 || empty.Metrics.AnchorPercentage != nil || empty.Attention == nil || len(empty.Attention) != 0 {
+	if empty.Metrics.Total != 0 || empty.Metrics.AnchorPercentage != nil || empty.Attention == nil || len(empty.Attention) != 0 || empty.Clients == nil || len(empty.Clients) != 0 {
 		t.Fatalf("incorrect empty state: %+v", empty)
 	}
 }
@@ -150,6 +153,9 @@ func TestMonitoringStatisticsPostgres(t *testing.T) {
 		if got.Summary.Total != 25 || got.Summary.Critical != 1 || got.Summary.Normal != 1 || got.Summary.Unknown != 23 || got.Metrics.Total != 100 || got.Metrics.Anchored != 90 || got.Metrics.Pending != 10 || got.Metrics.Tampered != 10 || got.Metrics.Logs24H != 100 || *got.Metrics.AnchorPercentage != 90 {
 			t.Fatalf("incorrect database aggregate: %+v %+v", got.Summary, got.Metrics)
 		}
+		if len(got.Clients) != 25 || got.Clients[0].ID != "client-1" || got.Clients[0].Metrics.Total != 90 || got.Clients[0].AdministrativeStatus != "inactive" || got.Clients[1].ID != "client-25" || got.Clients[1].Metrics.Tampered != 10 || got.Clients[1].AdministrativeStatus != "pending_setup" || got.Clients[2].Metrics.Total != 0 {
+			t.Fatalf("comparison lost per-client identities, metrics or empty clients: %+v", got.Clients)
+		}
 		window, _ := parseDashboardTrendRange(rangeName)
 		var total int64
 		for _, point := range got.Trend.Points {
@@ -181,7 +187,7 @@ func TestMonitoringStatisticsPostgres(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &empty); err != nil {
 		t.Fatal(err)
 	}
-	if res.Code != 200 || empty.Summary.Total != 0 || empty.Metrics.Total != 0 || empty.Metrics.AnchorPercentage != nil || len(empty.Attention) != 0 || len(empty.Trend.Points) != 7 {
+	if res.Code != 200 || empty.Summary.Total != 0 || empty.Metrics.Total != 0 || empty.Metrics.AnchorPercentage != nil || len(empty.Attention) != 0 || len(empty.Clients) != 0 || len(empty.Trend.Points) != 7 {
 		t.Fatalf("incorrect empty response: %s", res.Body.String())
 	}
 	if err := tx.Exec(`DROP TABLE audit_logs`).Error; err != nil {

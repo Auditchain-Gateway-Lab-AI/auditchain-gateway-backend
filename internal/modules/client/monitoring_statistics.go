@@ -17,6 +17,7 @@ type monitoringStatisticsResponse struct {
 	Metrics                 monitoringMetrics       `json:"metrics"`
 	Trend                   *DashboardTrendResponse `json:"trend"`
 	Attention               []monitoringClient      `json:"attention"`
+	Clients                 []monitoringClient      `json:"clients"`
 	PendingThresholdMinutes int                     `json:"pending_threshold_minutes"`
 }
 
@@ -71,7 +72,10 @@ func (h *Handler) GetMonitoringStatistics(c *gin.Context) {
 }
 
 func summarizeMonitoringStatistics(clients []monitoringClient) monitoringStatisticsResponse {
-	result := monitoringStatisticsResponse{Attention: make([]monitoringClient, 0, 5)}
+	result := monitoringStatisticsResponse{
+		Attention: make([]monitoringClient, 0, 5),
+		Clients:   append(make([]monitoringClient, 0, len(clients)), clients...),
+	}
 	result.Summary.Total = int64(len(clients))
 	for _, client := range clients {
 		switch client.Condition {
@@ -118,5 +122,11 @@ func summarizeMonitoringStatistics(clients []monitoringClient) monitoringStatist
 	if len(result.Attention) > 5 {
 		result.Attention = result.Attention[:5]
 	}
+	sort.Slice(result.Clients, func(i, j int) bool {
+		if result.Clients[i].Metrics.Total != result.Clients[j].Metrics.Total {
+			return result.Clients[i].Metrics.Total > result.Clients[j].Metrics.Total
+		}
+		return monitoringClientLess(result.Clients[i], result.Clients[j], "name")
+	})
 	return result
 }
