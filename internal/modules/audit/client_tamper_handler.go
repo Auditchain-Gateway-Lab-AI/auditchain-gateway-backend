@@ -178,7 +178,6 @@ func (h *Handler) DismissClientTamperRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, record)
 }
 
-
 // ListClientRecoveryEvents godoc
 // @Summary Daftar Riwayat Pemulihan Data Klien
 // @Description Mengambil riwayat log eksekusi pemulihan baris data klien ke database operasional.

@@ -288,7 +288,6 @@ func (s *auditService) DismissClientTamperRecord(clientID, id, dismissedBy, note
 	return &record, nil
 }
 
-
 func (s *auditService) ListClientRecoveryEvents(clientID string, query ClientRecoveryEventQuery) (*ClientRecoveryEventListResponse, error) {
 	if s.db == nil {
 		return nil, errors.New("database not available")
