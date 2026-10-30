@@ -243,6 +243,10 @@ karena variabel MinIO masih tersimpan di environment lama.
 
 ### Deployment development melalui GitHub Actions
 
+Mapping hostname Fabric pada Compose utama memakai IP LAN node yang sudah
+ditetapkan. Panduan deployment, verifikasi, rollback, dan batas migrasinya ada
+di [Migrasi koneksi backend Fabric ke LAN](docs/FABRIC_LAN_MIGRATION.md).
+
 Merge ke `main` tidak langsung merestart server development. Setelah merge, buka
 **Actions** dan jalankan workflow **Deploy Backend Development** secara manual
 dari branch `main`. Workflow menjalankan test/build, mengirim satu secret
