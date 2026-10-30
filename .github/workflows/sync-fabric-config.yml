@@ -1,0 +1,160 @@
+name: Sync Fabric LAN Config
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_sync:
+        description: "Sync the Fabric Compose file only; do not restart services"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fabric-config-sync
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require main and explicit confirmation
+        env:
+          CONFIRM_SYNC: ${{ inputs.confirm_sync }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRM_SYNC" = true
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate Fabric stack definition without deploying
+        run: docker stack config --compose-file infra/fabric/docker-compose-swarm.yaml >/dev/null
+
+  sync:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: development
+    env:
+      UPLOAD_DIR: /tmp/auditchain-fabric-config-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate transport settings
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_FINGERPRINT: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          : "${SSH_HOST:?PRODUCTION_SSH_HOST is required}"
+          : "${SSH_USERNAME:?PRODUCTION_SSH_USERNAME is required}"
+          : "${SSH_KEY:?PRODUCTION_SSH_PRIVATE_KEY is required}"
+          : "${SSH_FINGERPRINT:?PRODUCTION_SSH_HOST_FINGERPRINT is required}"
+
+      - name: Join deployment network when configured
+        if: ${{ vars.PRODUCTION_NETWORK == 'tailscale' }}
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:github-actions-deploy
+
+      - name: Upload Compose file to a temporary directory
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          source: infra/fabric/docker-compose-swarm.yaml
+          strip_components: 2
+          target: ${{ env.UPLOAD_DIR }}
+
+      - name: Back up and synchronize the file without deploying the stack
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          UPLOAD_DIR: ${{ env.UPLOAD_DIR }}
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          envs: UPLOAD_DIR
+          command_timeout: 5m
+          script: |
+            set -eu
+            target=/home/besu/audit_blockchain/docker/docker-compose-swarm.yaml
+            source_file="$UPLOAD_DIR/docker-compose-swarm.yaml"
+            test -f "$target"
+            test ! -L "$target"
+            test -w "$target"
+            test -s "$source_file"
+
+            # Verify the running services, not just the downloaded YAML.
+            check_hosts() {
+              actual="$(docker service inspect "$1" --format '{{json .Spec.TaskTemplate.ContainerSpec.Hosts}}')"
+              printf '%s\n' "$actual" |
+                jq -e --argjson expected "$2" 'sort == ($expected | sort)' >/dev/null
+            }
+            check_hosts audit-network_cli '["192.168.11.94 orderer.audit.example.com","192.168.11.94 peer0.org1.audit.example.com","192.168.11.17 peer0.org2.audit.example.com","192.168.11.85 peer0.org3.audit.example.com"]'
+            check_hosts audit-network_peer0-org1 '["192.168.11.94 orderer.audit.example.com","192.168.11.17 peer0.org2.audit.example.com","192.168.11.85 peer0.org3.audit.example.com"]'
+            check_hosts audit-network_peer0-org2 '["192.168.11.94 orderer.audit.example.com","192.168.11.94 peer0.org1.audit.example.com","192.168.11.85 peer0.org3.audit.example.com"]'
+            check_hosts audit-network_peer0-org3 '["192.168.11.94 orderer.audit.example.com","192.168.11.94 peer0.org1.audit.example.com","192.168.11.17 peer0.org2.audit.example.com"]'
+
+            # Refuse unrelated drift: the candidate must equal the current file
+            # with only these three IP substitutions (including node comments).
+            normalized="$(mktemp "$UPLOAD_DIR/normalized.XXXXXX")"
+            trap 'rm -f -- "$normalized"' EXIT
+            sed -e 's/100\.125\.142\.44/192.168.11.94/g' \
+                -e 's/100\.126\.175\.124/192.168.11.17/g' \
+                -e 's/100\.103\.85\.7/192.168.11.85/g' \
+                "$target" > "$normalized"
+            if ! cmp -s "$normalized" "$source_file"; then
+              echo "Sync stopped: server Compose differs beyond the approved LAN substitutions." >&2
+              exit 1
+            fi
+            if cmp -s "$target" "$source_file"; then
+              echo "Fabric source already matches the LAN configuration; no file changed."
+              exit 0
+            fi
+
+            # Stage in the destination directory, preserving permissions.
+            backup="$(mktemp "${target}.before-lan.XXXXXX")"
+            cp -p -- "$target" "$backup"
+            staged="$(mktemp "${target}.new.XXXXXX")"
+            trap 'rm -f -- "$normalized" "$staged"' EXIT
+            cp -p -- "$target" "$staged"
+            cat "$source_file" > "$staged"
+            mv -- "$staged" "$target"
+            echo "Fabric Compose synchronized. Backup: $backup"
+            echo "No stack deployment, service restart, or Swarm membership change was performed."
+
+      - name: Remove temporary uploaded file
+        if: always()
+        uses: appleboy/ssh-action@v1.2.5
+        continue-on-error: true
+        env:
+          UPLOAD_DIR: ${{ env.UPLOAD_DIR }}
+        with:
+          host: ${{ secrets.PRODUCTION_SSH_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PRODUCTION_SSH_PORT || '22' }}
+          fingerprint: ${{ secrets.PRODUCTION_SSH_HOST_FINGERPRINT }}
+          envs: UPLOAD_DIR
+          script: |
+            set -eu
+            rm -f -- "$UPLOAD_DIR/docker-compose-swarm.yaml"
+            rmdir -- "$UPLOAD_DIR" 2>/dev/null || true
