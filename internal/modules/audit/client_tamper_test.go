@@ -15,16 +15,16 @@ import (
 
 type clientTamperServiceStub struct {
 	Service
-	listCalled      bool
-	getCalled       bool
-	recoverCalled   bool
+	listCalled       bool
+	getCalled        bool
+	recoverCalled    bool
 	dismissCalled    bool
 	listEventsCalled bool
 	lastClientID     string
-	lastID          string
-	lastRecoveredBy string
-	lastDismissedBy string
-	lastNotes       string
+	lastID           string
+	lastRecoveredBy  string
+	lastDismissedBy  string
+	lastNotes        string
 }
 
 func (s *clientTamperServiceStub) ListClientTamperRecords(clientID string, query ClientTamperQuery) (*ClientTamperListResponse, error) {
@@ -113,14 +113,14 @@ func (s *clientTamperServiceStub) ListClientRecoveryEvents(clientID string, quer
 	return &ClientRecoveryEventListResponse{
 		Events: []models.ClientRecoveryEvent{
 			{
-				ID:             "rec-event-1",
-				ClientID:       clientID,
-				Resource:       "RUANGAN:1812",
-				TableName:      "RUANGAN",
-				RecordID:       "1812",
-				Operation:      "UPDATE",
-				Status:         models.ClientRecoveryStatusSuccess,
-				RecoveredBy:    "morbis1",
+				ID:          "rec-event-1",
+				ClientID:    clientID,
+				Resource:    "RUANGAN:1812",
+				TableName:   "RUANGAN",
+				RecordID:    "1812",
+				Operation:   "UPDATE",
+				Status:      models.ClientRecoveryStatusSuccess,
+				RecoveredBy: "morbis1",
 			},
 		},
 		Total:      1,
@@ -239,7 +239,6 @@ func TestDismissClientTamperRecord(t *testing.T) {
 		t.Errorf("expected Dismiss with notes, got %s", stub.lastNotes)
 	}
 }
-
 
 func TestListClientRecoveryEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
