@@ -78,11 +78,12 @@ Karena itu pemulihan mapping dilakukan lewat commit dan workflow.
 
 ## Pekerjaan infrastruktur yang masih terpisah
 
-- Perubahan service CLI/peer yang sudah dilakukan pada server perlu disimpan
-  pada sumber deployment Fabric. File yang ditunjukkan operator berada di
-  `/home/besu/audit_blockchain/docker/docker-compose-swarm.yaml`; file itu
-  tidak tersedia dalam repository backend ini. Jangan menyalin definisi stack
-  perkiraan atau menjalankan ulang seluruh stack dari repository backend.
+- Salinan file server yang diunduh operator sekarang tersedia di
+  [`infra/fabric/docker-compose-swarm.yaml`](../infra/fabric/docker-compose-swarm.yaml)
+  dengan mapping LAN. Gunakan workflow manual **Sync Fabric LAN Config** untuk
+  menyelaraskan file server tanpa deployment stack atau restart service.
+  Lihat [panduan sumber Fabric](../infra/fabric/README.md) untuk batas validasi,
+  backup, dan pekerjaan infrastruktur yang tersisa.
 - Swarm/overlay masih menggunakan alamat lama; Node 3 teramati mengiklankan
   `10.0.2.15`. Migrasi advertise/data-path memerlukan prosedur tersendiri.
 - Peer tambahan `peer1.org1.audit.example.com:8051` teramati memakai jalur
